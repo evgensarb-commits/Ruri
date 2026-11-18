@@ -6,24 +6,19 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.os.Build
-import android.os.Handler
 import android.os.IBinder
-import android.os.Looper
 import androidx.core.app.NotificationCompat
 
+/**
+ * User-visible companion presence.
+ *
+ * Long-term cadence is delegated to WorkManager; this service is not used as
+ * an endless timer because Android may stop background processes.
+ */
 class RuriService : Service() {
     companion object {
         const val CHANNEL_ID = "ruri_life"
         const val NOTIFICATION_ID = 1
-    }
-
-    private val handler = Handler(Looper.getMainLooper())
-    private val interval = 30L * 60L * 1000L
-    private val cycle = object : Runnable {
-        override fun run() {
-            Thinker.wake(this@RuriService, "проверка_состояния")
-            handler.postDelayed(this, interval)
-        }
     }
 
     override fun onCreate() {
@@ -38,21 +33,20 @@ class RuriService : Service() {
         )
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("RU-R1 · Рури")
-            .setContentText("Фоновая жизнь активна")
+            .setContentText("Состояние и планы сохраняются; фоновые задачи запланированы")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(openApp)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .build()
+
         startForeground(NOTIFICATION_ID, notification)
-        handler.removeCallbacks(cycle)
+        LifeScheduler.ensurePeriodic(this)
         Thinker.wake(this, "запуск_службы")
-        handler.postDelayed(cycle, interval)
         return START_STICKY
     }
 
     override fun onDestroy() {
-        handler.removeCallbacks(cycle)
         super.onDestroy()
     }
 
@@ -60,7 +54,11 @@ class RuriService : Service() {
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(CHANNEL_ID, "Жизнь Рури", NotificationManager.IMPORTANCE_LOW)
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Жизнь Рури",
+                NotificationManager.IMPORTANCE_LOW
+            )
             getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
         }
     }
