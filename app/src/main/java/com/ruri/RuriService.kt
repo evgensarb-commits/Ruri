@@ -2,6 +2,7 @@ package com.ruri
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.os.Build
@@ -18,7 +19,7 @@ class RuriService : Service() {
     }
 
     private val handler = Handler(Looper.getMainLooper())
-    private val tickInterval = 30 * 60 * 1000L // 30 минут
+    private val tickInterval = 30 * 60 * 1000L
 
     private val tickRunnable = object : Runnable {
         override fun run() {
@@ -33,18 +34,20 @@ class RuriService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val clickIntent = Intent(this, MainActivity::class.java)
+        val clickFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val pi = PendingIntent.getActivity(this, 0, clickIntent, clickFlags)
+
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("РУ-R1 живёт")
             .setContentText("Непрерывное существование")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setOngoing(true)
+            .setContentIntent(pi)
             .build()
 
         startForeground(NOTIFICATION_ID, notification)
-
-        // Первый тик через 5 минут после старта, чтобы не грузить систему сразу
         handler.postDelayed(tickRunnable, 5 * 60 * 1000L)
-
         return START_STICKY
     }
 
@@ -57,11 +60,7 @@ class RuriService : Service() {
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Жизнь Рури",
-                NotificationManager.IMPORTANCE_MIN
-            )
+            val channel = NotificationChannel(CHANNEL_ID, "Жизнь Рури", NotificationManager.IMPORTANCE_MIN)
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
         }
