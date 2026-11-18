@@ -12,7 +12,10 @@ class NotificationMonitor : NotificationListenerService() {
         try {
             val extras = sbn.notification.extras
             val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
-            val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
+            val text = NotificationTextExtractor.extract(
+                extras,
+                excludedKeys = setOf(Notification.EXTRA_TITLE)
+            )
             FileManager.appendEvent(
                 filesDir,
                 JSONObject()

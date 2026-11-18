@@ -129,6 +129,32 @@ class MemoryRetrieverTest {
     }
 
     @Test
+    fun recallsNotificationOlderThanTheLastTwoHundredEntries() {
+        repeat(205) { index ->
+            FileManager.appendEvent(
+                root,
+                JSONObject()
+                    .put("type", "phone_notification")
+                    .put("package", "com.example.archive")
+                    .put(
+                        "title",
+                        if (index == 0) "Старое уведомление о проекте обсерватории" else "Обычное уведомление $index"
+                    )
+                    .put(
+                        "text",
+                        if (index == 0) "Сохранили чертежи старой обсерватории у моря" else "Обычный текст уведомления номер $index"
+                    )
+                    .put("timestamp", System.currentTimeMillis() + index)
+            )
+        }
+
+        val result = MemoryRetriever.recall(root, "Что было в старом уведомлении про обсерваторию?")
+
+        assertTrue(result.contains("чертежи старой обсерватории"))
+        assertTrue(result.contains("уведомление телефона"))
+    }
+
+    @Test
     fun returnsEmptyWhenQueryHasNoUsefulTerms() {
         assertTrue(MemoryRetriever.recall(root, "это как что для меня").isBlank())
     }

@@ -16,7 +16,6 @@ object MemoryConsolidator {
     private const val SUMMARY_PATH = "memory/L3_summary.json"
     private const val FACTS_PATH = "memory/L1_facts.json"
     private const val DAY_MS = 24L * 60L * 60L * 1000L
-    private const val MIN_ENTRIES = 10
     private const val MIN_NEW_ENTRIES = 5
     private const val MAX_ENTRIES_PER_CONSOLIDATION = 40
     private val processLock = Any()
@@ -28,6 +27,21 @@ object MemoryConsolidator {
         val skippedBeforeBatch: Long,
         val totalEntries: Long
     )
+
+    internal fun shouldConsolidateBatch(
+        batch: SequenceBatch,
+        previousCount: Long,
+        lastCompressedAt: Long,
+        now: Long
+    ): Boolean {
+        if ((batch.totalEntries - previousCount).coerceAtLeast(0L) < MIN_NEW_ENTRIES) return false
+        if (batch.entries.isEmpty()) return false
+        // A short batch is acceptable only when older uncompressed history has already
+        // fallen out of L2's rolling window and the skipped range will be recorded in L3.
+        if (batch.entries.size < MIN_NEW_ENTRIES && batch.skippedBeforeBatch == 0L) return false
+        if (lastCompressedAt > 0L && now - lastCompressedAt < DAY_MS) return false
+        return true
+    }
 
     /**
      * Selects the oldest uncompressed diary records. L2 is a rolling window,
@@ -77,8 +91,6 @@ object MemoryConsolidator {
             preserveInvalidShape(root, DIARY_PATH)
             return false
         }
-        if (entries.length() < MIN_ENTRIES) return false
-
         val current = readJsonStrict(root, SUMMARY_PATH) ?: return false
         if (!current.has("summary")) {
             preserveInvalidShape(root, SUMMARY_PATH)
@@ -87,16 +99,10 @@ object MemoryConsolidator {
         // L2 is a rolling window: consume the oldest uncompressed records in bounded pages.
         val previousCount = current.optLong("last_compressed_entry_count", 0L)
         val batch = selectEntriesForConsolidation(diary, previousCount, MAX_ENTRIES_PER_CONSOLIDATION)
-        val totalEntries = batch.totalEntries
         val previousCompressedAt = current.optLong("last_compressed", 0L)
-        if (totalEntries - previousCount < MIN_NEW_ENTRIES) return false
-        if (batch.entries.isEmpty()) return false
-        if (batch.entries.size < MIN_NEW_ENTRIES && batch.skippedBeforeBatch == 0L) return false
-        if (previousCompressedAt > 0L && System.currentTimeMillis() - previousCompressedAt < DAY_MS) return false
-
         val now = System.currentTimeMillis()
+        if (!shouldConsolidateBatch(batch, previousCount, previousCompressedAt, now)) return false
         val sourceEntries = batch.entries
-        if (sourceEntries.isEmpty()) return false
 
         val factsFile = readJsonStrict(root, FACTS_PATH) ?: return false
         val facts = factsFile.optJSONArray("facts") ?: run {

@@ -69,7 +69,7 @@ object MemoryRetriever {
 
         // Older notification bodies remain searchable in local L0, not just the last
         // few notifications copied into a live model prompt.
-        for (event in parsedEvents.filter { it.optString("type") == "phone_notification" }.takeLast(200)) {
+        for (event in parsedEvents.filter { it.optString("type") == "phone_notification" }) {
             val packageName = event.optString("package")
             val title = event.optString("title").trim()
             val body = event.optString("text").trim()

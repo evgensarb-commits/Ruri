@@ -3,6 +3,7 @@ package com.ruri
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -65,6 +66,57 @@ class MemoryConsolidatorTest {
         assertEquals(101L, batch.firstSequence)
         assertEquals(102L, batch.lastSequence)
         assertEquals(10L, batch.skippedBeforeBatch)
+    }
+
+    @Test
+    fun canConsolidateShortRemainingWindowWhenOlderDiaryHistoryWasEvicted() {
+        val diary = JSONObject().put("total_entries", 102L).put(
+            "entries",
+            JSONArray()
+                .put(JSONObject().put("sequence", 101L).put("text", "Доступная запись сто один."))
+                .put(JSONObject().put("sequence", 102L).put("text", "Доступная запись сто два."))
+        )
+        val batch = MemoryConsolidator.selectEntriesForConsolidation(diary, previousCount = 90L)
+        assertEquals(10L, batch.skippedBeforeBatch)
+        assertTrue(
+            MemoryConsolidator.shouldConsolidateBatch(
+                batch, previousCount = 90L, lastCompressedAt = 0L, now = 2L * 24L * 60L * 60L * 1000L
+            )
+        )
+    }
+
+    @Test
+    fun shortDiaryWindowWithoutHistoryGapStillWaitsForMinimumNewEntries() {
+        val diary = JSONObject().put("total_entries", 92L).put(
+            "entries",
+            JSONArray()
+                .put(JSONObject().put("sequence", 91L).put("text", "Доступная запись девяносто один."))
+                .put(JSONObject().put("sequence", 92L).put("text", "Доступная запись девяносто два."))
+        )
+        val batch = MemoryConsolidator.selectEntriesForConsolidation(diary, previousCount = 90L)
+        assertEquals(0L, batch.skippedBeforeBatch)
+        assertFalse(
+            MemoryConsolidator.shouldConsolidateBatch(
+                batch, previousCount = 90L, lastCompressedAt = 0L, now = 2L * 24L * 60L * 60L * 1000L
+            )
+        )
+    }
+
+    @Test
+    fun historyGapDoesNotBypassL3ConsolidationCooldown() {
+        val diary = JSONObject().put("total_entries", 102L).put(
+            "entries",
+            JSONArray()
+                .put(JSONObject().put("sequence", 101L).put("text", "Доступная запись сто один."))
+                .put(JSONObject().put("sequence", 102L).put("text", "Доступная запись сто два."))
+        )
+        val batch = MemoryConsolidator.selectEntriesForConsolidation(diary, previousCount = 90L)
+        val now = 2L * 24L * 60L * 60L * 1000L
+        assertFalse(
+            MemoryConsolidator.shouldConsolidateBatch(
+                batch, previousCount = 90L, lastCompressedAt = now - 23L * 60L * 60L * 1000L, now = now
+            )
+        )
     }
 
     @Test
