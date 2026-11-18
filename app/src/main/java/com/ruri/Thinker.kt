@@ -185,7 +185,7 @@ object Thinker {
             } catch (_: Exception) { }
         }
         val notificationText = notificationCounts.entries.take(12).joinToString("\n") {
-            "- Уведомлений из \${it.key}: \${it.value}; содержимое оставлено локально"
+            "- Уведомлений из ${it.key}: ${it.value}; содержимое оставлено локально"
         }
         val summary = PrivacyFilter.redact(readJson(root, "memory/L3_summary.json").optString("summary"))
         val quiet = hoursSince(state.optLong("last_seen_commander"), System.currentTimeMillis())
