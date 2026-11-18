@@ -136,6 +136,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
+        fun hasUsageAccess(): Boolean = UsageAccessSensor.hasAccess(this@MainActivity)
+
+        @JavascriptInterface
+        fun openUsageAccessSettings(): String {
+            return try {
+                startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "usage access settings unavailable") }
+        }
+
+        @JavascriptInterface
         fun openUrl(url: String): String {
             return try {
                 val uri = Uri.parse(url)

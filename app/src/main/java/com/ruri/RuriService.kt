@@ -24,6 +24,7 @@ class RuriService : Service() {
     override fun onCreate() {
         super.onCreate()
         createChannel()
+        DeviceEventMonitor.register(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -47,6 +48,7 @@ class RuriService : Service() {
     }
 
     override fun onDestroy() {
+        DeviceEventMonitor.unregister(this)
         super.onDestroy()
     }
 

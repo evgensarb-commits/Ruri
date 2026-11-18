@@ -71,11 +71,11 @@ object LifeStateEngine {
         needs.put("updated_at", now)
         state.put("needs", needs)
 
-        val device = JSONObject()
-            .put("battery_percent", battery)
-            .put("available_storage_bytes", freeBytes)
-            .put("sampled_at", now)
-            .put("resource_mode", if (battery <= 15 || (freeBytes in 0 until 100L * 1024L * 1024L)) "conserve" else "normal")
+        val device = DeviceSensors.snapshot(context, now)
+        device.put("battery_percent", battery)
+        device.put("available_storage_bytes", freeBytes)
+        device.put("sampled_at", now)
+        device.put("resource_mode", if (battery <= 15 || (freeBytes in 0 until 100L * 1024L * 1024L)) "conserve" else "normal")
         state.put("device", device)
 
         val typeCounts = JSONObject()
