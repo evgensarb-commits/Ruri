@@ -103,6 +103,9 @@ class MainActivity : AppCompatActivity() {
         fun read(path: String): String = FileManager.read(filesDir, path)
 
         @JavascriptInterface
+        fun readNetworkDiagnostics(): String = NetworkDiagnostics.latest(filesDir)
+
+        @JavascriptInterface
         fun write(path: String, content: String): String {
             return try {
                 if (path == "core/config.json") SecretStore.saveRuntimeConfig(filesDir, content)
