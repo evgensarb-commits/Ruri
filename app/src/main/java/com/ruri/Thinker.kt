@@ -92,6 +92,17 @@ object Thinker {
         while (entries.length() > 500) entries.remove(0)
         diary.put("entries", entries)
         FileManager.write(root, "memory/L2_diary.json", diary.toString(2))
+        if (entries.length() >= 10 && (now - readJson(root, "memory/L3_summary.json").optLong("last_compressed", 0L) >= 24L * 60L * 60L * 1000L)) {
+            val summaryLines = StringBuilder()
+            for (i in maxOf(0, entries.length() - 20) until entries.length()) {
+                val item = entries.optJSONObject(i)
+                if (item != null) summaryLines.append("• ").append(item.optString("text")).append("\\n")
+            }
+            val summary = JSONObject()
+                .put("summary", summaryLines.toString().takeLast(7000))
+                .put("last_compressed", now)
+            FileManager.write(root, "memory/L3_summary.json", summary.toString(2))
+        }
 
         if (initiative) {
             appendChatMessage(root, "ruri", reply.trim(), now)
