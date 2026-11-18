@@ -168,7 +168,7 @@ object FileManager {
         put(root, "memory/fact_extraction_pending.json", """{ "schema_version": 1, "initialized": false, "transcript_messages": [], "commander_messages": [] }""")
         put(root, "memory/L2_diary.json", """{ "entries": [] }""")
         put(root, "memory/L3_summary.json", """{ "summary": "", "last_compressed": 0 }""")
-        put(root, "memory/goals.json", """{ "schema_version": 1, "active": [], "completed": [], "updated_at": 0 }""")
+        put(root, "memory/goals.json", """{ "schema_version": 2, "active": [], "completed": [], "active_tasks": [], "completed_tasks": [], "updated_at": 0 }""")
         put(root, "memory/self_model.json", """
             {
               "schema_version": 1,
@@ -184,6 +184,7 @@ object FileManager {
 
         migrateCharacterIdentity(root)
         migrateModelConfig(root)
+        migrateGoalSchema(root)
         ensureRemoteModelContextPolicy(root)
         SecretStore.migrateLegacyApiKeys(root)
 
@@ -507,6 +508,42 @@ object FileManager {
             if (changed) atomicWrite(file, character.toString(2))
         } catch (_: Exception) {
             // Keep the original file for recovery; do not overwrite malformed user data.
+        }
+    }
+
+    private fun migrateGoalSchema(root: File) {
+        val file = safe(root, "memory/goals.json") ?: return
+        if (!file.exists()) return
+        try {
+            val goals = JSONObject(file.readText(Charsets.UTF_8))
+            var changed = false
+            if (!goals.has("active")) {
+                goals.put("active", JSONArray())
+                changed = true
+            }
+            if (!goals.has("completed")) {
+                goals.put("completed", JSONArray())
+                changed = true
+            }
+            if (!goals.has("active_tasks")) {
+                goals.put("active_tasks", JSONArray())
+                changed = true
+            }
+            if (!goals.has("completed_tasks")) {
+                goals.put("completed_tasks", JSONArray())
+                changed = true
+            }
+            if (goals.optInt("schema_version", 1) < 2) {
+                goals.put("schema_version", 2)
+                changed = true
+            }
+            if (changed) {
+                goals.put("updated_at", maxOf(goals.optLong("updated_at", 0L), System.currentTimeMillis()))
+                atomicWrite(file, goals.toString(2))
+            }
+        } catch (e: Exception) {
+            // Preserve malformed goals rather than replacing an existing task history.
+            Log.w("Ruri", "Goal/task schema migration skipped; original file was preserved", e)
         }
     }
 
