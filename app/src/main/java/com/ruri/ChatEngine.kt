@@ -43,8 +43,8 @@ object ChatEngine {
                 val event = JSONObject(line)
                 if (event.optString("type") != "phone_notification") return@mapNotNull null
                 "- ${event.optString("package")}: " +
-                    event.optString("title").take(250) + " — " +
-                    event.optString("text").take(500)
+                    event.optString("title") + " — " +
+                    event.optString("text")
             } catch (_: Exception) { null }
         }.take(10).asReversed().joinToString("\n")
         val system = "Ты — ${character.optString("name", "Рури")}. " +
