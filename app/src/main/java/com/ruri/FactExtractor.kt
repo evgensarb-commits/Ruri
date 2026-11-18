@@ -94,7 +94,7 @@ object FactExtractor {
         for (index in 0 until candidates.length()) {
             val candidate = candidates.optJSONObject(index) ?: continue
             val text = candidate.optString("text").trim().take(240)
-            if (text.length < 5 || PrivacyFilter.containsSensitive(text)) continue
+            if (text.length < 5 || CredentialGuard.containsCredentials(text)) continue
 
             val confidence = candidate.optDouble("confidence", 0.0)
             val evidence = candidate.optJSONArray("evidence_event_ids") ?: JSONArray()
@@ -181,9 +181,10 @@ object FactExtractor {
             Извлеки из переписки только устойчивые факты, которые помогут в будущих разговорах:
             предпочтения, долгосрочные проекты, явно заявленные цели, повторяющиеся привычки и важные постоянные решения.
             Учитывай как доказательства только реплики со speaker="commander". Ответы assistant разрешены только как контекст.
-            Не выводи предположения из одного случайного сообщения. Не включай пароли, API-ключи, токены,
-            платёжные данные, медицинские сведения, религию, политические взгляды, интимные сведения,
-            точные адреса/координаты или иные чувствительные личные данные. Не сохраняй временные мелочи.
+            Не выводи предположения из одного случайного сообщения. Учитывай значимые личные сведения,
+            включая здоровье, отношения, убеждения, местоположение и другие личные темы, если Командир
+            сообщил их явно или они устойчиво повторяются. Исключай только пароли, API-ключи, токены,
+            одноразовые коды и другие секреты аутентификации. Не сохраняй временные мелочи.
             Для каждого факта укажи точные event_id исходных реплик Командира.
             Верни только корректный JSON без markdown:
             {"facts":[{"text":"...","category":"preference|project|goal|habit|other","confidence":0.0,"explicit":true,"evidence_event_ids":["evt-..."]}]}
@@ -268,7 +269,7 @@ object FactExtractor {
     }
 
     private fun redactForExternalModel(value: String): String =
-        PrivacyFilter.redact(value, "[сообщение скрыто локальным фильтром приватности]")
+        CredentialGuard.redact(value, "[учётные данные скрыты]")
 
     private fun preserveCorruptFacts(root: java.io.File, raw: String) {
         if (raw.isBlank()) return

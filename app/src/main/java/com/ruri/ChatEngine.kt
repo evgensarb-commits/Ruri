@@ -27,15 +27,26 @@ object ChatEngine {
         for (index in maxOf(0, facts.length() - 16) until facts.length()) {
             val fact = facts.optJSONObject(index) ?: continue
             val value = fact.optString("text").trim()
-            if (value.isNotBlank()) factContext.append("- ").append(PrivacyFilter.redact(value.take(300))).append("\n")
+            if (value.isNotBlank()) factContext.append("- ").append(CredentialGuard.redact(value.take(300))).append("\n")
         }
         val diaryContext = StringBuilder()
         for (index in maxOf(0, diary.length() - 6) until diary.length()) {
             val entry = diary.optJSONObject(index) ?: continue
             val value = entry.optString("text").trim()
-            if (value.isNotBlank()) diaryContext.append("- ").append(PrivacyFilter.redact(value.take(500))).append("\n")
+            if (value.isNotBlank()) diaryContext.append("- ").append(CredentialGuard.redact(value.take(500))).append("\n")
         }
-        val summary = PrivacyFilter.redact(readJson(root, "memory/L3_summary.json").optString("summary").take(5000))
+        val summary = CredentialGuard.redact(readJson(root, "memory/L3_summary.json").optString("summary").take(5000))
+        val notificationContext = FileManager.readLastLines(
+            root, "memory/L0_raw.jsonl", maxLines = 6000, maxBytes = 4 * 1024 * 1024
+        ).asReversed().mapNotNull { line ->
+            try {
+                val event = JSONObject(line)
+                if (event.optString("type") != "phone_notification") return@mapNotNull null
+                "- \${event.optString("package")}: " +
+                    CredentialGuard.redact(event.optString("title").take(250)) + " — " +
+                    CredentialGuard.redact(event.optString("text").take(500))
+            } catch (_: Exception) { null }
+        }.take(10).asReversed().joinToString("\n")
         val system = "Ты — ${character.optString("name", "Рури")}. " +
             "Приоритеты: ${priorities.optString("priority_1", "Жить")}; " +
             "${priorities.optString("priority_2", "Любить Командира")}. " +
@@ -63,7 +74,7 @@ object ChatEngine {
                 val role = if (event.optString("who") == "ruri") "assistant" else "user"
                 JSONObject().put("role", role).put(
                     "content",
-                    PrivacyFilter.redact(text, "[сообщение скрыто локальным фильтром приватности]")
+                    CredentialGuard.redact(text, "[сообщение скрыто локальным фильтром приватности]")
                 )
             } catch (_: Exception) { null }
         }.take(14).reversed()

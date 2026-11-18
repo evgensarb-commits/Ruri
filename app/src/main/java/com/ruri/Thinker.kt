@@ -147,12 +147,12 @@ object Thinker {
         val facts = readJson(root, "memory/L1_facts.json").optJSONArray("facts")
         val factText = StringBuilder()
         if (facts != null) for (i in 0 until minOf(facts.length(), 12)) {
-            factText.append("- ").append(PrivacyFilter.redact(facts.optJSONObject(i)?.optString("text") ?: "")).append("\n")
+            factText.append("- ").append(CredentialGuard.redact(facts.optJSONObject(i)?.optString("text") ?: "")).append("\n")
         }
         val diary = readJson(root, "memory/L2_diary.json").optJSONArray("entries")
         val diaryText = StringBuilder()
         if (diary != null) for (i in maxOf(0, diary.length() - 5) until diary.length()) {
-            diaryText.append("— ").append(PrivacyFilter.redact(diary.optJSONObject(i)?.optString("text") ?: "")).append("\n")
+            diaryText.append("— ").append(CredentialGuard.redact(diary.optJSONObject(i)?.optString("text") ?: "")).append("\n")
         }
         // Retrieve older episodes associated with the current wake reason and recent Commander messages.
         val recentCommanderContext = FileManager.readLastLines(
@@ -161,7 +161,7 @@ object Thinker {
             runCatching { JSONObject(line) }.getOrNull()
         }.filter {
             it.optString("type") == "message" && it.optString("who") == "commander"
-        }.take(3).joinToString(" ") { PrivacyFilter.redact(it.optString("text").take(220)) }
+        }.take(3).joinToString(" ") { CredentialGuard.redact(it.optString("text").take(220)) }
         val recallQuery = (reason + " " + recentCommanderContext).take(900)
         val recalledMemories = MemoryRetriever.recall(root, recallQuery, limit = 5)
         val shelfNames = try { JSONArray(FileManager.list(root, "shelf")) } catch (_: Exception) { JSONArray() }
@@ -170,24 +170,25 @@ object Thinker {
             val name = shelfNames.optString(i)
             if (name.isNotBlank()) {
                 shelfText.append("\n--- ").append(name).append(" ---\n")
-                    .append(PrivacyFilter.redact(FileManager.read(root, "shelf/" + name).take(900)))
+                    .append(CredentialGuard.redact(FileManager.read(root, "shelf/" + name).take(900)))
             }
         }
-        // Notification bodies remain local; remote cognition sees only aggregate source packages.
-        val notificationCounts = linkedMapOf<String, Int>()
-        FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 5000).forEach { line ->
+        // Commander explicitly enabled full notification context for Ruri's cognition.
+        // Only authentication credentials are withheld; ordinary personal content remains visible.
+        val notificationLines = FileManager.readLastLines(
+            root, "memory/L0_raw.jsonl", maxLines = 6000, maxBytes = 4 * 1024 * 1024
+        )
+        val notificationText = notificationLines.asReversed().mapNotNull { line ->
             try {
                 val event = JSONObject(line)
-                if (event.optString("type") == "phone_notification") {
-                    val source = event.optString("package").take(160).ifBlank { "unknown" }
-                    notificationCounts[source] = (notificationCounts[source] ?: 0) + 1
-                }
-            } catch (_: Exception) { }
-        }
-        val notificationText = notificationCounts.entries.take(12).joinToString("\n") {
-            "- Уведомлений из ${it.key}: ${it.value}; содержимое оставлено локально"
-        }
-        val summary = PrivacyFilter.redact(readJson(root, "memory/L3_summary.json").optString("summary"))
+                if (event.optString("type") != "phone_notification") return@mapNotNull null
+                val source = event.optString("package").take(160)
+                val title = CredentialGuard.redact(event.optString("title").take(300))
+                val body = CredentialGuard.redact(event.optString("text").take(700))
+                "- $source: $title — $body"
+            } catch (_: Exception) { null }
+        }.take(20).asReversed().joinToString("\n")
+        val summary = CredentialGuard.redact(readJson(root, "memory/L3_summary.json").optString("summary"))
         val quiet = hoursSince(state.optLong("last_seen_commander"), System.currentTimeMillis())
         val common = "Ты — " + character.optString("name", "Рури") +
             ". Первый приоритет: " + priorities.optString("priority_1", "Жить") +
