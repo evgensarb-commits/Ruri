@@ -48,7 +48,7 @@ button.secondary{background:transparent;color:#f4c94f}
 <button class="action" id="saveKey">СОХРАНИТЬ КЛЮЧ</button>
 <div class="field"><label>ИМЯ И ХАРАКТЕР</label><input id="charName" placeholder="Имя"></div>
 <div class="field"><label>МАНЕРА РЕЧИ</label><textarea id="charStyle" rows="3" placeholder="Описание характера и речи"></textarea></div>
-<button class="action secondary" id="saveCharacter">СОХРАНИТЬ ХАРАКТЕР</button>
+<button class="action secondary" id="saveCharacter">СОХРАНИТЬ ХАРАКТЕР</button><div class="card" style="margin-top:14px"><p>Мониторинг уведомлений телефона работает только после твоего разрешения Android. Содержимое уведомлений будет записываться в локальный журнал памяти.</p><button class="action secondary" id="notificationAccess" style="margin-top:10px">НАСТРОИТЬ ДОСТУП К УВЕДОМЛЕНИЯМ</button></div>
 <div class="actions"><button class="action secondary" id="exp">ЭКСПОРТ ПАМЯТИ</button><button class="action secondary" id="imp">ИМПОРТ ПАМЯТИ</button><input id="file" type="file" accept=".json,application/json" hidden></div>
 </div></section>
 <section class="pane" id="pane-shelf"><div class="scroll">
@@ -140,6 +140,7 @@ if(b.dataset.pane==='diary')loadDiary();if(b.dataset.pane==='shelf')loadShelf();
 $('#saveKey').addEventListener('click',function(){try{var c=JSON.parse(read('core/config.json')||'{}'),i=Number($('#model').value),k=$('#key').value.trim();if(!k)throw new Error('Вставь API-ключ');if(!c.models||!c.models[i])throw new Error('Модель не найдена');c.models[i].api_key=k;c.current=i;write('core/config.json',JSON.stringify(c,null,2));$('#key').value='';alert('Ключ сохранён в памяти приложения.');}catch(e){alert(e.message);}});
 function loadCharacter(){try{var c=JSON.parse(read('core/character.json')||'{}');$('#charName').value=c.name||'';$('#charStyle').value=c.speech_style||'';}catch(_){}}
 $('#saveCharacter').addEventListener('click',function(){try{var c=JSON.parse(read('core/character.json')||'{}');c.name=$('#charName').value.trim()||'РУ-R1';c.speech_style=$('#charStyle').value.trim();write('core/character.json',JSON.stringify(c,null,2));alert('Характер сохранён.');}catch(e){alert(e.message);}});
+$('#notificationAccess').addEventListener('click',function(){var r=Ruri.openNotificationAccessSettings();if(String(r).indexOf('ERROR:')===0)alert(r);});
 var paths=['core/priorities.json','core/character.json','core/appearance.json','core/config.json','memory/L0_raw.jsonl','memory/L1_facts.json','memory/L2_diary.json','memory/L3_summary.json','memory/L4_state.json'];
 $('#exp').addEventListener('click',function(){try{var a={};paths.forEach(function(p){a[p]=read(p);});var r=Ruri.exportArchive(JSON.stringify(a,null,2));if(String(r).indexOf('ERROR:')===0)throw new Error(r);}catch(e){alert('Экспорт: '+e.message);}});
 $('#imp').addEventListener('click',function(){$('#file').click();});
