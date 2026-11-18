@@ -19,12 +19,6 @@ object FactExtractor {
     private const val MIN_COMMANDER_MESSAGES = 3
     private const val RETRY_COOLDOWN_MS = 30L * 60L * 1000L
 
-    private val sensitivePattern = Regex(
-        "(?i)(парол|api.?key|ключ\\s+api|токен|cvv|cvc|pin\\s*код|код\\s+подтверждения|" +
-            "банковск|номер\\s+карты|диагноз|болезн|лекарств|медицинск|религи|вероисповед|" +
-            "политическ|сексуальн|точн\\w*\\s+адрес|домашн\\w*\\s+адрес|координат|геолокац)"
-    )
-
     fun extractIfDue(context: Context): Int {
         val root = context.filesDir
         val state = readJson(root, STATE_PATH)
@@ -100,7 +94,7 @@ object FactExtractor {
         for (index in 0 until candidates.length()) {
             val candidate = candidates.optJSONObject(index) ?: continue
             val text = candidate.optString("text").trim().take(240)
-            if (text.length < 5 || sensitivePattern.containsMatchIn(text)) continue
+            if (text.length < 5 || PrivacyFilter.containsSensitive(text)) continue
 
             val confidence = candidate.optDouble("confidence", 0.0)
             val evidence = candidate.optJSONArray("evidence_event_ids") ?: JSONArray()
@@ -203,7 +197,7 @@ object FactExtractor {
         var connection: HttpURLConnection? = null
         return try {
             val baseUrl = model.optString("base_url").trimEnd('/')
-            if (baseUrl.isBlank()) return null
+            require(baseUrl.startsWith("https://", ignoreCase = true)) { "Provider endpoint must use HTTPS" }
             connection = (URL(baseUrl + "/chat/completions").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 15000
@@ -273,13 +267,8 @@ object FactExtractor {
         return result
     }
 
-    private fun redactForExternalModel(value: String): String {
-        if (sensitivePattern.containsMatchIn(value)) return "[сообщение скрыто локальным фильтром приватности]"
-        return value
-            .replace(Regex("(?i)\\b(password|passwd|secret|token|api[_ -]?key)\\b\\s*[:=]\\s*[^\\s,;]+"), "[скрыто]")
-            .replace(Regex("(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}"), "[email скрыт]")
-            .replace(Regex("(?<!\\w)\\+?\\d[\\d\\s().-]{7,}\\d(?!\\w)"), "[номер скрыт]")
-    }
+    private fun redactForExternalModel(value: String): String =
+        PrivacyFilter.redact(value, "[сообщение скрыто локальным фильтром приватности]")
 
     private fun preserveCorruptFacts(root: java.io.File, raw: String) {
         if (raw.isBlank()) return
