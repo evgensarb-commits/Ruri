@@ -107,8 +107,11 @@ object SecretStore {
             cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(TAG_BITS, iv))
             JSONObject(String(cipher.doFinal(encrypted), Charsets.UTF_8))
         } catch (e: Exception) {
-            Log.e(TAG, "Encrypted API-key store could not be opened. Keys were not exposed.", e)
-            JSONObject()
+            Log.e(TAG, "Encrypted API-key store could not be opened. Existing secret data was left untouched.", e)
+            throw IllegalStateException(
+                "Не удалось расшифровать хранилище API-ключей. Исходные данные сохранены без изменений.",
+                e
+            )
         }
     }
 
