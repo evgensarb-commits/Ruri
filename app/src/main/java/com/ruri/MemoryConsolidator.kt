@@ -226,7 +226,7 @@ object MemoryConsolidator {
         return runCatching { JSONObject(raw.substring(start, end + 1)) }.getOrNull()
     }
 
-    private fun extractiveSummary(previousSummary: String, entries: List<JSONObject>): String {
+    internal fun extractiveSummary(previousSummary: String, entries: List<JSONObject>): String {
         val unique = LinkedHashSet<String>()
         entries.asReversed().forEach { entry ->
             val value = entry.optString("text").replace(Regex("\\s+"), " ").trim()
