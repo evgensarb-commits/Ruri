@@ -83,7 +83,6 @@ object LocalBackupManager {
         entries.keys.filter { it != "memory/L0_raw.jsonl" }.sorted().forEach { path ->
             val value = entries.getValue(path).toString(Charsets.UTF_8)
             when (path) {
-                "core/config.json" -> SecretStore.saveRuntimeConfig(root, value)
                 else -> FileManager.write(root, path, value)
             }
         }
