@@ -59,6 +59,7 @@ object ChatEngine {
             "Текущее состояние: ${state.optString("mood", "собранная")}, энергия ${state.optInt("energy", 5)}, " +
             "текущий фокус: ${state.optString("current_focus", selfModel.optString("current_focus"))}.\n" +
             "Активные цели: ${goals.optJSONArray("active") ?: JSONArray()}.\n" +
+            "Незавершённые задачи: ${state.optJSONArray("active_tasks") ?: JSONArray()}.\n" +
             "Долговременная сводка L3:\n${summary}\n" +
             "Проверенные факты L1:\n${factContext}\n" +
             "Последние записи дневника L2:\n${diaryContext}\n" +
