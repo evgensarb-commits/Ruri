@@ -458,7 +458,9 @@ object LifeStateEngine {
         ).asReversed().asSequence()
             .mapNotNull { line -> runCatching { JSONObject(line) }.getOrNull() }
             .firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" }
-        val goals = readJsonOptional(root, "memory/goals.json")?.optJSONArray("active") ?: JSONArray()
+        val goalState = readJsonOptional(root, "memory/goals.json") ?: JSONObject()
+        val goals = goalState.optJSONArray("active") ?: JSONArray()
+        val activeTasks = goalState.optJSONArray("active_tasks") ?: JSONArray()
         val recovered = JSONObject()
             .put("schema_version", 2)
             .put("mood", "восстанавливающаяся")
@@ -471,8 +473,8 @@ object LifeStateEngine {
             .put("last_seen_commander", latestCommander?.optLong("timestamp", latestCommander.optLong("ts", 0L)) ?: 0L)
             .put("last_processed_event_offset", 0L)
             .put("last_thought", 0L)
-            .put("active_goals", goals)
-            .put("active_tasks", JSONArray())
+            .put("active_goals", JSONArray(goals.toString()))
+            .put("active_tasks", JSONArray(activeTasks.toString()))
             .put("current_focus", "Восстановление состояния из исторического журнала L0")
             .put("state_recovered_at", System.currentTimeMillis())
             .put("state_recovery_reason", "L4 повреждён; исходная копия сохранена в backup, L0 будет обработан повторно")
