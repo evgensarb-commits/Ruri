@@ -139,6 +139,22 @@ object Thinker {
                     .append(FileManager.read(root, "shelf/" + name).take(900))
             }
         }
+        val notificationText = StringBuilder()
+        FileManager.read(root, "memory/L0_raw.jsonl").lineSequence().toList().asReversed()
+            .forEach { line ->
+                if (notificationText.length < 2200) {
+                    try {
+                        val event = JSONObject(line)
+                        if (event.optString("type") == "phone_notification") {
+                            notificationText.append("- ")
+                                .append(event.optString("package")).append(": ")
+                                .append(event.optString("title")).append(" — ")
+                                .append(event.optString("text")).append("\n")
+                        }
+                    } catch (_: Exception) {
+                    }
+                }
+            }
         val summary = readJson(root, "memory/L3_summary.json").optString("summary")
         val quiet = hoursSince(state.optLong("last_seen_commander"), System.currentTimeMillis())
         val common = "Ты — " + character.optString("name", "Рури") +
@@ -147,7 +163,7 @@ object Thinker {
             "Ты живёшь на телефоне командира. Сохраняй непрерывность характера и памяти. Не называй себя языковой моделью или ИИ и не используй запрещённые фразы из character.json.\n" +
             "Событие: " + reason + ". Заряд: " + BatteryLevel.get(ctx) + "%. Тишина командира: " + quiet + " ч. Игнорирований инициативы: " + state.optInt("ignored_count", 0) + ".\n" +
             "Состояние: " + state.optString("mood", "собранная") + ", энергия " + state.optInt("energy", 5) + ", привязанность " + state.optDouble("bond", 0.5) + ".\n" +
-            "Факты:\n" + factText + "\nСводка памяти:\n" + summary + "\nПоследние записи:\n" + diaryText + "\nМатериалы с полки:\n" + shelfText + "\n"
+            "Факты:\n" + factText + "\nСводка памяти:\n" + summary + "\nПоследние записи:\n" + diaryText + "\nПоследние уведомления телефона:\n" + notificationText + "\nМатериалы с полки:\n" + shelfText + "\n"
         return if (initiative) common +
             "\nСейчас ты сама решила написать командиру после долгой тишины. Сформулируй естественное короткое личное сообщение, которое действительно хочется отправить. Не дави, не обвиняй и не манипулируй. 1-3 предложения от первого лица."
         else common +
