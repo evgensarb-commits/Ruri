@@ -44,9 +44,9 @@ object ChatEngine {
             "Характер: ${character.optJSONObject("traits") ?: JSONObject()}. " +
             "Запрещённые формулировки: ${character.optJSONArray("banned_phrases") ?: JSONArray()}. " +
             "Сохраняй непрерывность личности, не выдумывай факты и отличай воспоминания от предположений. " +
-            "Отвечай по-русски от первого лица и учитывай историю диалога.\\n" +
+            "Отвечай по-русски от первого лица и учитывай историю диалога.\n" +
             "Текущее состояние: ${state.optString("mood", "собранная")}, энергия ${state.optInt("energy", 5)}, " +
-            "текущий фокус: ${state.optString("current_focus", selfModel.optString("current_focus"))}.\\n" +
+            "текущий фокус: ${state.optString("current_focus", selfModel.optString("current_focus"))}.\n" +
             "Активные цели: ${goals.optJSONArray("active") ?: JSONArray()}.\n" +
             "Долговременная сводка L3:\n${summary}\n" +
             "Проверенные факты L1:\n${factContext}\n" +
