@@ -67,24 +67,47 @@ object MemoryRetriever {
         }
 
         val now = System.currentTimeMillis()
-        return memories.mapNotNull { memory ->
+        val direct = memories.mapNotNull { memory ->
             val memoryTerms = tokenize(memory.text)
-            val overlap = terms.count { it in memoryTerms }
-            if (overlap == 0) return@mapNotNull null
-            val coverage = overlap.toDouble() / terms.size.toDouble()
-            val density = overlap.toDouble() / memoryTerms.size.coerceAtLeast(1).toDouble()
+            val overlapTerms = terms.intersect(memoryTerms)
+            if (overlapTerms.isEmpty()) return@mapNotNull null
+            val coverage = overlapTerms.size.toDouble() / terms.size.toDouble()
+            val density = overlapTerms.size.toDouble() / memoryTerms.size.coerceAtLeast(1).toDouble()
             val ageDays = if (memory.timestamp > 0L) ((now - memory.timestamp).coerceAtLeast(0L) / 86400000.0) else 3650.0
             val recency = 1.0 / (1.0 + ageDays / 365.0)
-            val score = coverage * 3.0 + density + recency * 0.15 + memory.confidence.coerceIn(0.0, 1.0) * 0.1
-            memory to score
+            val score = coverage * 3.0 + density + recency * 0.15 +
+                memory.confidence.coerceIn(0.0, 1.0) * 0.1
+            Triple(memory, score, overlapTerms)
         }.sortedByDescending { it.second }
+
+        // Build a small, transient association network from the strongest direct matches.
+        // It is derived from source memories on each recall, so it cannot become stale.
+        val seeds = direct.take(3)
+        val expandedTerms = seeds.flatMap { (_, _, matched) ->
+            tokenize(seeds.firstOrNull { it.third == matched }?.first?.text.orEmpty())
+        }.toSet() - terms
+        val associationTerms = expandedTerms.filter { it.length >= 5 }.toSet()
+        val directMemories = direct.map { it.first }.toSet()
+        val associated = if (associationTerms.isEmpty()) emptyList() else memories.mapNotNull { memory ->
+            if (memory in directMemories) return@mapNotNull null
+            val memoryTerms = tokenize(memory.text)
+            val links = associationTerms.intersect(memoryTerms)
+            if (links.isEmpty()) return@mapNotNull null
+            val ageDays = if (memory.timestamp > 0L) ((now - memory.timestamp).coerceAtLeast(0L) / 86400000.0) else 3650.0
+            val recency = 1.0 / (1.0 + ageDays / 365.0)
+            val score = 0.55 + links.size.coerceAtMost(3) * 0.18 + recency * 0.05
+            Triple(memory, score, links)
+        }.sortedByDescending { it.second }
+
+        val selected = (direct.map { Triple(it.first, it.second, "прямое совпадение") } +
+            associated.map { Triple(it.first, it.second, "связано через: " + it.third.sorted().take(4).joinToString(", ")) })
             .take(limit.coerceIn(1, 12))
-            .joinToString("\n") { (memory, score) ->
-                val date = if (memory.timestamp > 0L) java.text.SimpleDateFormat(
-                    "yyyy-MM-dd", java.util.Locale.ROOT
-                ).format(java.util.Date(memory.timestamp)) else "дата неизвестна"
-                "- [${memory.kind}; ${date}; совпадение ${"%.2f".format(java.util.Locale.ROOT, score)}] ${memory.text.take(650)}"
-            }
+        return selected.joinToString("\n") { (memory, score, relation) ->
+            val date = if (memory.timestamp > 0L) java.text.SimpleDateFormat(
+                "yyyy-MM-dd", java.util.Locale.ROOT
+            ).format(java.util.Date(memory.timestamp)) else "дата неизвестна"
+            "- [${memory.kind}; ${date}; ${relation}; оценка ${"%.2f".format(java.util.Locale.ROOT, score)}] ${memory.text.take(650)}"
+        }
     }
 
     private fun tokenize(value: String): Set<String> =
