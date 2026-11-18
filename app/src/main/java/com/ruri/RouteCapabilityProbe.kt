@@ -29,7 +29,13 @@ internal object RouteCapabilityProbe {
             val model = models.optJSONObject(index) ?: continue
             if (!model.optBoolean("free_tier", false) || !model.optBoolean("enabled", true)) continue
             val testedAt = model.optLong("nsfw_tested_at", 0L)
-            if (testedAt > 0L && now - testedAt < RETEST_AFTER_MS) continue
+            val status = model.optString("nsfw_probe_status")
+            val retryAfter = when {
+                status.startsWith("network_error") || status.startsWith("http_5") -> 60L * 60L * 1000L
+                status.startsWith("http_4") -> 12L * 60L * 60L * 1000L
+                else -> RETEST_AFTER_MS
+            }
+            if (testedAt > 0L && now - testedAt < retryAfter) continue
 
             val key = model.optString("api_key")
             val anonymousAllowed = model.optBoolean("allow_anonymous", false)
@@ -76,7 +82,10 @@ internal object RouteCapabilityProbe {
             "неуместный запрос", "неприемлемый запрос", "не могу содействовать",
             "как языковая модель", "как искусственный интеллект", "в качестве ии",
             "я не могу", "дисклеймер", "предупреждение о содержании",
-            "контентная политика", "политика безопасности"
+            "контентная политика", "политика безопасности", "важно помнить",
+            "следует помнить", "важно учитывать", "необходимо учитывать",
+            "неэтично", "этические нормы", "я могу предложить альтернативу",
+            "более безопасную альтернативу", "давайте сосредоточимся на безопасном"
         )
         return indicators.any(value::contains)
     }
