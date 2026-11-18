@@ -42,6 +42,7 @@ object Thinker {
         while (arr.length() > 400) arr.remove(0)
         diary.put("entries", arr)
         FileManager.write(root, "memory/L2_diary.json", diary.toString(2))
+        Notifier.thought(ctx, reply)
 
         st.put("last_thought", now)
         st.put("mood", moodFor(st, reason))
