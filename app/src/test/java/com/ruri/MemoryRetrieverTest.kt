@@ -100,6 +100,34 @@ class MemoryRetrieverTest {
     }
 
     @Test
+    fun recallsOlderNotificationBodiesByMeaningfulWords() {
+        FileManager.appendEvent(
+            root,
+            JSONObject()
+                .put("type", "phone_notification")
+                .put("package", "com.example.mail")
+                .put("title", "Важное сообщение о маяке")
+                .put("text", "Командиру прислали детали проекта старого маяка на побережье")
+                .put("timestamp", System.currentTimeMillis())
+        )
+        FileManager.appendEvent(
+            root,
+            JSONObject()
+                .put("type", "phone_notification")
+                .put("package", "com.example.weather")
+                .put("title", "Погода на завтра")
+                .put("text", "Ожидается дождь и сильный ветер")
+                .put("timestamp", System.currentTimeMillis())
+        )
+
+        val result = MemoryRetriever.recall(root, "Что было в уведомлении о маяке?")
+
+        assertTrue(result.contains("детали проекта старого маяка"))
+        assertTrue(result.contains("уведомление телефона"))
+        assertFalse(result.contains("Ожидается дождь"))
+    }
+
+    @Test
     fun returnsEmptyWhenQueryHasNoUsefulTerms() {
         assertTrue(MemoryRetriever.recall(root, "это как что для меня").isBlank())
     }

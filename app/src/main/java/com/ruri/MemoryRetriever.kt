@@ -52,9 +52,10 @@ object MemoryRetriever {
         val events = FileManager.readLastLines(
             root, "memory/L0_raw.jsonl", maxLines = 20000, maxBytes = 4 * 1024 * 1024
         )
-        val messageEvents = events.mapNotNull { line ->
+        val parsedEvents = events.mapNotNull { line ->
             runCatching { JSONObject(line) }.getOrNull()
-        }.filter { it.optString("type") == "message" }
+        }
+        val messageEvents = parsedEvents.filter { it.optString("type") == "message" }
         // Recent conversation is already supplied as chat history; recall older episodes here.
         for (event in messageEvents.dropLast(14)) {
             val text = event.optString("text").trim()
@@ -64,6 +65,24 @@ object MemoryRetriever {
                     text, event.optLong("timestamp", event.optLong("ts", 0L))
                 )
             )
+        }
+
+        // Older notification bodies remain searchable in local L0, not just the last
+        // few notifications copied into a live model prompt.
+        for (event in parsedEvents.filter { it.optString("type") == "phone_notification" }.takeLast(200)) {
+            val packageName = event.optString("package").take(160)
+            val title = CredentialGuard.redact(event.optString("title").trim()).take(250)
+            val body = CredentialGuard.redact(event.optString("text").trim()).take(700)
+            val text = listOf(packageName, title, body).filter { it.isNotBlank() }.joinToString(" — ")
+            if (text.isNotBlank() && terms.intersect(tokenize(text)).isNotEmpty()) {
+                memories.add(
+                    Memory(
+                        "уведомление телефона",
+                        text,
+                        event.optLong("timestamp", event.optLong("ts", 0L))
+                    )
+                )
+            }
         }
 
         val now = System.currentTimeMillis()
