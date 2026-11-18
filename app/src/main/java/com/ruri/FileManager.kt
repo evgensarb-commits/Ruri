@@ -15,8 +15,21 @@ import org.json.JSONObject
  * Ordinary state files are replaced atomically. L0 is append-only and can only
  * be replaced by the explicit, validated archive-restore path.
  */
+data class L0Batch(
+    val events: List<JSONObject>,
+    val eventEndOffsets: Map<String, Long>,
+    val startOffset: Long,
+    val nextOffset: Long,
+    val recordsRead: Int,
+    val malformedLines: Int,
+    val hasMore: Boolean,
+    val incompleteTail: Boolean,
+    val fileLength: Long
+)
+
 object FileManager {
     private val l0Lock = Any()
+    private val pathLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
     private const val L0_PATH = "memory/L0_raw.jsonl"
     private const val CONFIG_PATH = "core/config.json"
 
@@ -186,8 +199,14 @@ object FileManager {
         """.trimIndent())
     }
 
-    fun read(root: File, path: String): String =
-        safe(root, path)?.takeIf { it.exists() && it.isFile }?.readText(Charsets.UTF_8) ?: ""
+    fun read(root: File, path: String): String {
+        val target = safe(root, path) ?: return ""
+        if (!target.exists() || !target.isFile) return ""
+        val lock = if (path.replace('\\', '/').trimStart('/') == L0_PATH) l0Lock else lockFor(target)
+        return synchronized(lock) {
+            try { target.readText(Charsets.UTF_8) } catch (_: Exception) { "" }
+        }
+    }
 
     /**
      * Reads a bounded tail of a log without loading its full history into memory.
@@ -221,6 +240,116 @@ object FileManager {
         }
     }
 
+    /**
+     * Reads complete JSONL records after a durable byte-offset cursor.
+     * An unterminated final record is left unread until a later append completes it.
+     */
+    fun readL0Batch(
+        root: File,
+        requestedOffset: Long,
+        maxRecords: Int = 2000,
+        maxBytes: Int = 4 * 1024 * 1024,
+        maxLineBytes: Int = 1024 * 1024
+    ): L0Batch {
+        require(maxRecords > 0 && maxBytes > 0 && maxLineBytes > 0)
+        val target = safe(root, L0_PATH) ?: throw IllegalStateException("Invalid L0 path")
+        return synchronized(l0Lock) {
+            if (!target.exists() || !target.isFile) {
+                return@synchronized L0Batch(emptyList(), emptyMap(), 0L, 0L, 0, 0, false, false, 0L)
+            }
+            java.io.RandomAccessFile(target, "r").use { input ->
+                val length = input.length()
+                var cursor = if (requestedOffset < 0L || requestedOffset > length) 0L else requestedOffset
+                if (cursor > 0L) {
+                    input.seek(cursor - 1L)
+                    if (input.read() != 10) {
+                        input.seek(cursor)
+                        while (input.filePointer < length && input.read() != 10) { }
+                        cursor = input.filePointer
+                    } else input.seek(cursor)
+                } else input.seek(0L)
+
+                val startOffset = cursor
+                val events = ArrayList<JSONObject>()
+                val eventOffsets = LinkedHashMap<String, Long>()
+                var records = 0
+                var malformed = 0
+                var bytesRead = 0L
+                var incompleteTail = false
+                var stoppedAtLimit = false
+
+                while (input.filePointer < length && records < maxRecords) {
+                    val lineStart = input.filePointer
+                    if (records > 0 && bytesRead >= maxBytes.toLong()) {
+                        stoppedAtLimit = true
+                        input.seek(lineStart)
+                        break
+                    }
+
+                    val line = java.io.ByteArrayOutputStream()
+                    var tooLong = false
+                    var terminated = false
+                    while (input.filePointer < length) {
+                        val byte = input.read()
+                        if (byte < 0) break
+                        if (byte == 10) {
+                            terminated = true
+                            break
+                        }
+                        if (line.size() < maxLineBytes) line.write(byte) else tooLong = true
+                    }
+
+                    if (!terminated) {
+                        input.seek(lineStart)
+                        incompleteTail = true
+                        break
+                    }
+
+                    records++
+                    bytesRead += input.filePointer - lineStart
+                    if (tooLong) {
+                        malformed++
+                    } else {
+                        val decoded = line.toByteArray().toString(Charsets.UTF_8).trimEnd('\r')
+                        if (decoded.isNotBlank()) {
+                            try {
+                                val event = JSONObject(decoded)
+                                events.add(event)
+                                val id = event.optString("id")
+                                if (id.isNotBlank()) eventOffsets[id] = input.filePointer
+                            } catch (_: Exception) {
+                                malformed++
+                            }
+                        }
+                    }
+                    if (bytesRead >= maxBytes.toLong() && input.filePointer < length) {
+                        stoppedAtLimit = true
+                        break
+                    }
+                }
+
+                val nextOffset = input.filePointer
+                val hasMore = !incompleteTail && nextOffset < length &&
+                    (stoppedAtLimit || records >= maxRecords)
+                L0Batch(events, eventOffsets, startOffset, nextOffset, records, malformed, hasMore, incompleteTail, length)
+            }
+        }
+    }
+
+    /** Used only to migrate the previous event-ID cursor into a byte-offset cursor. */
+    fun findL0EventEndOffset(root: File, eventId: String): Long? {
+        if (eventId.isBlank()) return null
+        var offset = 0L
+        repeat(100000) {
+            val batch = readL0Batch(root, offset, maxRecords = 2000, maxBytes = 4 * 1024 * 1024)
+            val found = batch.eventEndOffsets[eventId]
+            if (found != null) return found
+            if (batch.nextOffset <= offset || !batch.hasMore) return null
+            offset = batch.nextOffset
+        }
+        return null
+    }
+
     fun write(root: File, path: String, content: String) {
         val normalized = path.replace('\\', '/').trimStart('/')
         require(normalized != L0_PATH) { "L0 is append-only; use appendEvent or explicit archive restore" }
@@ -236,7 +365,7 @@ object FileManager {
             }
         }
         val target = safe(root, normalized) ?: throw IllegalArgumentException("Invalid data path")
-        atomicWrite(target, content)
+        synchronized(lockFor(target)) { atomicWrite(target, content) }
     }
 
     fun appendEvent(root: File, input: JSONObject): String {
@@ -367,6 +496,8 @@ object FileManager {
             // Migration is best-effort and must never destroy the source file.
         }
     }
+
+    private fun lockFor(file: File): Any = pathLocks.getOrPut(file.absolutePath) { Any() }
 
     private fun safe(root: File, path: String): File? {
         if (path.isBlank()) return null
