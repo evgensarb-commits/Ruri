@@ -100,6 +100,7 @@ object MemoryConsolidator {
         val previousCount = current.optLong("last_compressed_entry_count", 0L)
         val batch = selectEntriesForConsolidation(diary, previousCount, MAX_ENTRIES_PER_CONSOLIDATION)
         val previousCompressedAt = current.optLong("last_compressed", 0L)
+        val totalEntries = batch.totalEntries
         val now = System.currentTimeMillis()
         if (!shouldConsolidateBatch(batch, previousCount, previousCompressedAt, now)) return false
         val sourceEntries = batch.entries
