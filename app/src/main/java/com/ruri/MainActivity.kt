@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
+import android.provider.Settings
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -96,6 +97,14 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun searchWeb(query: String): String = WebSearch.search(query)
+
+        @JavascriptInterface
+        fun openNotificationAccessSettings(): String {
+            return try {
+                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "settings unavailable") }
+        }
 
         @JavascriptInterface
         fun openUrl(url: String): String {
