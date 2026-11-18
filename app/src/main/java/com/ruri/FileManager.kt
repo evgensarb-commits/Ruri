@@ -1,6 +1,8 @@
 package com.ruri
 
 import java.io.File
+import org.json.JSONArray
+import org.json.JSONObject
 
 object FileManager {
 
@@ -16,7 +18,7 @@ object FileManager {
 
         put(root, "core/character.json", """
             {
-              "name": "РУ-R1",
+              "name": "Рури",
               "designation": "RU-R1",
               "commander": "Командир",
               "speech_style": "длинные осмысленные реплики, 3-6 абзацев, без списков и буллитов",
@@ -56,6 +58,8 @@ object FileManager {
         put(root, "memory/L1_facts.json", """{ "facts": [] }""")
         put(root, "memory/L2_diary.json", """{ "entries": [] }""")
         put(root, "memory/L3_summary.json", """{ "summary": "", "last_compressed": 0 }""")
+        migrateCharacterIdentity(root)
+
         put(root, "memory/L4_state.json", """
             {
               "mood": "собранная",
@@ -83,7 +87,9 @@ object FileManager {
     fun list(root: File, path: String): String {
         val d = safe(root, path) ?: return "[]"
         val files = d.listFiles() ?: return "[]"
-        return files.joinToString(",", "[", "]") { "\"" + it.name + "\"" }
+        val result = JSONArray()
+        files.forEach { result.put(it.name) }
+        return result.toString()
     }
 
     fun exists(root: File, path: String): Boolean = safe(root, path)?.exists() == true
@@ -91,6 +97,26 @@ object FileManager {
     private fun put(root: File, path: String, content: String) {
         val f = safe(root, path) ?: return
         if (!f.exists()) f.writeText(content)
+    }
+
+    private fun migrateCharacterIdentity(root: File) {
+        val file = File(root, "core/character.json")
+        if (!file.exists()) return
+        try {
+            val character = JSONObject(file.readText())
+            val currentName = character.optString("name")
+            var changed = false
+            if (currentName.isBlank() || currentName == "РУ-R1" || currentName == "RU-R1") {
+                character.put("name", "Рури")
+                changed = true
+            }
+            if (character.optString("designation").isBlank()) {
+                character.put("designation", "RU-R1")
+                changed = true
+            }
+            if (changed) file.writeText(character.toString(2))
+        } catch (_: Exception) {
+        }
     }
 
     private fun safe(root: File, path: String): File? {
