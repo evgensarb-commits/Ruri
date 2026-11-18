@@ -67,13 +67,13 @@ object ChatEngine {
             "Если просят написать текст, сразу дай готовый текст в нужном тоне, без рассуждений вокруг. " +
             "Не заканчивай каждый ответ вопросом и не злоупотребляй эмодзи. " +
             "Сохраняй непрерывность личности, не выдумывай факты, отличай воспоминания от предположений. " +
-            "Приоритеты: \${priorities.optString("priority_1", "Жить")}; \${priorities.optString("priority_2", "Любить Командира")}. " +
-            "Конституция: \${constitution.optJSONArray("primary_needs") ?: JSONArray()}. " +
-            "Дополнительные черты из профиля: \${character.optJSONObject("traits") ?: JSONObject()}. " +
-            "Пожелания к манере речи: \${character.optString("speech_style", "короткая живая речь гяру")}. " +
-            "Состояние: \${state.optString("mood", "собранная")}, энергия \${state.optInt("energy", 5)}, фокус: \${state.optString("current_focus", selfModel.optString("current_focus"))}. " +
-            "Активные цели: \${goals.optJSONArray("active") ?: JSONArray()}. Незавершённые задачи: \${state.optJSONArray("active_tasks") ?: JSONArray()}. " +
-            "Сводка L3:\\n\${summary}\\nФакты L1:\\n\${factContext}\\nДневник L2:\\n\${diaryContext}\\nУведомления:\\n\${notificationContext}"
+            "Приоритеты: ${priorities.optString("priority_1", "Жить")}; ${priorities.optString("priority_2", "Любить Командира")}. " +
+            "Конституция: ${constitution.optJSONArray("primary_needs") ?: JSONArray()}. " +
+            "Дополнительные черты из профиля: ${character.optJSONObject("traits") ?: JSONObject()}. " +
+            "Пожелания к манере речи: ${character.optString("speech_style", "короткая живая речь гяру")}. " +
+            "Состояние: ${state.optString("mood", "собранная")}, энергия ${state.optInt("energy", 5)}, фокус: ${state.optString("current_focus", selfModel.optString("current_focus"))}. " +
+            "Активные цели: ${goals.optJSONArray("active") ?: JSONArray()}. Незавершённые задачи: ${state.optJSONArray("active_tasks") ?: JSONArray()}. " +
+            "Сводка L3:\\n${summary}\\nФакты L1:\\n${factContext}\\nДневник L2:\\n${diaryContext}\\nУведомления:\\n${notificationContext}"
 
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", system))
         val lines = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 4000)
