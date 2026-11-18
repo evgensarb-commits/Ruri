@@ -85,6 +85,20 @@ class MemoryConsolidatorTest {
     }
 
     @Test
+    fun offlineSummaryKeepsAllRecordsFromTheCurrentConsolidationPage() {
+        val previous = "Прежняя биографическая сводка о проекте RU-R1."
+        val entries = (1..40).map { index ->
+            JSONObject().put("text", "Дневниковая запись номер $index содержит уникальное событие и полезный контекст.")
+        }
+
+        val summary = MemoryConsolidator.extractiveSummary(previous, entries)
+
+        assertTrue(summary.contains(previous))
+        assertTrue(summary.contains("Дневниковая запись номер 1"))
+        assertTrue(summary.contains("Дневниковая запись номер 40"))
+    }
+
+    @Test
     fun offlineSummaryRetainsPreviousBiographyAndAllAvailableContext() {
         val previous = "Ранее Рури и Командир начали долгосрочный проект RU-R1."
         val entries = listOf(
