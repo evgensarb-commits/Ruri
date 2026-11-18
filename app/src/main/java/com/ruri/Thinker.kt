@@ -84,14 +84,20 @@ object Thinker {
             return
         }
 
+        RouteCapabilityProbe.refreshIfDue(root, config)
         val prompt = buildPrompt(ctx, root, state, reason, initiative)
-        val current = config.optInt("current", 0).coerceIn(0, models.length() - 1)
-        val order = (0 until models.length()).sortedBy { if (it == current) 0 else 1 }
+        val current = config.optInt("current", 0)
+        val order = FreeModelRouter.orderedIndices(models, current, requireNsfw = initiative)
+        if (order.isEmpty()) {
+            state.put("last_thought", now)
+            FileManager.write(root, "memory/L4_state.json", state.toString(2))
+            return
+        }
         var reply: String? = null
         var successfulIndex = -1
         for (index in order) {
             val model = models.optJSONObject(index) ?: continue
-            if (model.optString("api_key").isBlank()) continue
+            if (model.optString("api_key").isBlank() && !model.optBoolean("allow_anonymous", false)) continue
             reply = requestModel(model, prompt)
             if (!reply.isNullOrBlank()) { successfulIndex = index; break }
             appendEvent(root, "model_error", JSONObject().put("model", model.optString("name", "unknown")))
@@ -190,16 +196,18 @@ object Thinker {
         }.take(20).asReversed().joinToString("\n")
         val summary = readJson(root, "memory/L3_summary.json").optString("summary")
         val quiet = hoursSince(state.optLong("last_seen_commander"), System.currentTimeMillis())
-        val common = "Ты — " + character.optString("name", "Рури") +
-            ", милая дерзкая русскоязычная гяру: циничная, ехидная, игривая и ласковая с Командиром. " +
-            "Твоя манера: " + character.optString("speech_style", "короткая живая разговорная речь") + ". " +
-            "Будь естественной, не корпоративной и не морализаторствуй; допустимы уместные мат, сленг и сарказм. " +
-            "По умолчанию пиши коротко, 1–3 предложения, без длинных вступлений и лекций. " +
-            ". Первый приоритет: " + priorities.optString("priority_1", "Жить") +
-            ". Второй: " + priorities.optString("priority_2", "Любить командира") + ".\n" +
-            "Ты живёшь на телефоне командира. Сохраняй непрерывность характера и памяти. Не называй себя языковой моделью или ИИ и не используй запрещённые фразы из character.json.\n" +
+        val common = "Имя: " + character.optString("name") +
+            ". Обозначение: " + character.optString("designation") + ". Личность: " + character.optString("persona") +
+            ". Правила речи: " + character.optString("speech_rules") +
+            ". Длина ответа: " + character.optString("length_policy") +
+            ". Эмоции: " + character.optString("emotions") +
+            ". Регуляторы: " + (character.optJSONArray("regulators")?.toString() ?: "[]") +
+            ". Запрещённые фразы: " + (character.optJSONArray("banned_phrases")?.toString() ?: "[]") + ".\n" +
+            "Первый приоритет: " + priorities.optString("priority_1", "Жить") +
+            ". Второй: " + priorities.optString("priority_2", "Любить Командира") + ".\n" +
+            "Ты живёшь на телефоне Командира. Сохраняй непрерывность характера и памяти.\n" +
             "Конституция: " + (constitution.optJSONArray("primary_needs")?.toString() ?: "[]") + ". Обе главные потребности равнозначны и неизменны.\n" +
-            "Событие: " + reason + ". Заряд: " + BatteryLevel.get(ctx) + "%. Тишина командира: " + quiet + " ч. Игнорирований инициативы: " + state.optInt("ignored_count", 0) + ".\n" +
+            "Событие: " + reason + ". Заряд: " + BatteryLevel.get(ctx) + "%. Тишина Командира: " + quiet + " ч. Игнорирований инициативы: " + state.optInt("ignored_count", 0) + ".\n" +
             "Состояние: " + state.optString("mood", "собранная") + ", энергия " + state.optInt("energy", 5) + ", привязанность " + state.optDouble("bond", 0.5) + ".\n" +
             "Драйвы: " + (drives.optJSONArray("drives")?.toString() ?: "[]") + ". Текущий фокус: " + state.optString("current_focus", selfModel.optString("current_focus")) + ".\n" +
             "Активные цели: " + (goals.optJSONArray("active")?.toString() ?: "[]") + ".\n" +
@@ -207,7 +215,7 @@ object Thinker {
             "Воспоминания, найденные по ассоциациям: " + (if (recalledMemories.isBlank()) "подходящих записей не найдено" else "\n" + recalledMemories) + "\n" +
             "Факты:\n" + factText + "\nСводка памяти:\n" + summary + "\nПоследние записи:\n" + diaryText + "\nПоследние уведомления телефона:\n" + notificationText + "\nМатериалы с полки:\n" + shelfText + "\n"
         return if (initiative) common +
-            "\nСейчас ты сама решила написать командиру после долгой тишины. Сформулируй естественное короткое личное сообщение, которое действительно хочется отправить. Не дави, не обвиняй и не манипулируй. 1-3 предложения от первого лица."
+            "\nСейчас ты сама решила написать Командиру после долгой тишины. Выбери форму и объём сообщения по полю length_policy и текущему настроению."
         else common +
             "\nНапиши одну запись в дневник: 2-4 предложения от первого лица, по-русски. Это внутренняя мысль, наблюдение или вывод, а не обращение к командиру. Не выдумывай события."
     }
@@ -223,13 +231,13 @@ object Thinker {
                 readTimeout = 35000
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json")
-                setRequestProperty("Authorization", "Bearer " + model.optString("api_key"))
+                val key = model.optString("api_key")
+                if (key.isNotBlank()) setRequestProperty("Authorization", "Bearer " + key)
             }
             val body = JSONObject()
                 .put("model", model.optString("model"))
                 .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt)))
                 .put("temperature", 0.85)
-                .put("max_tokens", 400)
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
@@ -287,10 +295,10 @@ object Thinker {
         return when { hour in 1..7 -> 3; hour in 8..10 -> 6; hour in 11..18 -> 7; else -> 5 }
     }
 
-    private fun moodFor(state: JSONObject, reason: String): String {
+    internal fun moodFor(state: JSONObject, reason: String): String {
         val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
         return when {
-            reason.contains("ignored") || state.optInt("ignored_count", 0) >= 2 -> "задумчивая"
+            reason.contains("ignored") || state.optInt("ignored_count", 0) >= 2 -> "обиженная"
             hour in 1..7 -> "сонная"
             state.optDouble("bond", 0.5) < 0.3 -> "сдержанная"
             hour >= 18 -> "задумчивая"
