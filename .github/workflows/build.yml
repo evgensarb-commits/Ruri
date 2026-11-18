@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ru-r1-main-build
+  group: ru-r1-build-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
