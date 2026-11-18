@@ -308,8 +308,11 @@ object Thinker {
 
     internal fun moodFor(state: JSONObject, reason: String): String {
         val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        // An offended mood is sticky: a later maintenance wake must not silently erase it.
+        val alreadyOffended = state.optString("mood") == "обиженная"
         return when {
-            reason.contains("ignored") || state.optInt("ignored_count", 0) >= 2 -> "обиженная"
+            alreadyOffended || reason.contains("ignored", ignoreCase = true) ||
+                state.optInt("ignored_count", 0) >= 2 -> "обиженная"
             hour in 1..7 -> "сонная"
             state.optDouble("bond", 0.5) < 0.3 -> "сдержанная"
             hour >= 18 -> "задумчивая"
