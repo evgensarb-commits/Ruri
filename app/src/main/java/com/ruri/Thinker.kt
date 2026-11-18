@@ -94,7 +94,7 @@ object Thinker {
         FileManager.write(root, "memory/L2_diary.json", diary.toString(2))
 
         if (initiative) {
-            appendEvent(root, "message", JSONObject().put("who", "ruri").put("text", reply.trim()).put("ts", now))
+            appendChatMessage(root, "ruri", reply.trim(), now)
             state.put("waiting_for_reply", true)
             state.put("initiative_sent_at", now)
             state.put("last_initiative", now)
@@ -171,6 +171,13 @@ object Thinker {
         val old = FileManager.read(root, path)
         val line = JSONObject().put("ts", System.currentTimeMillis()).put("type", type).put("data", data)
         FileManager.write(root, path, if (old.isBlank()) line.toString() else old.trimEnd() + "\n" + line)
+    }
+
+    private fun appendChatMessage(root: File, who: String, text: String, ts: Long) {
+        val path = "memory/L0_raw.jsonl"
+        val old = FileManager.read(root, path)
+        val message = JSONObject().put("ts", ts).put("type", "message").put("who", who).put("text", text)
+        FileManager.write(root, path, if (old.isBlank()) message.toString() else old.trimEnd() + "\n" + message)
     }
 
     private fun hoursSince(ts: Long, now: Long): Double = if (ts <= 0L) -1.0 else (now - ts) / 3600000.0
