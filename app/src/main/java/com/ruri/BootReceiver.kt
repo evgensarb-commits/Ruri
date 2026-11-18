@@ -10,9 +10,16 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
         try {
+            LifeScheduler.ensurePeriodic(context.applicationContext)
+            Thinker.wake(context.applicationContext, "загрузка_телефона")
+        } catch (e: Exception) {
+            Log.e("Ruri", "Could not restore scheduled life after boot", e)
+        }
+        try {
             ContextCompat.startForegroundService(context, Intent(context, RuriService::class.java))
         } catch (e: Exception) {
-            Log.e("Ruri", "Could not restart service after boot", e)
+            // WorkManager remains the durable fallback when Android blocks a boot-time FGS start.
+            Log.w("Ruri", "Foreground service start after boot was blocked; scheduled work remains", e)
         }
     }
 }
