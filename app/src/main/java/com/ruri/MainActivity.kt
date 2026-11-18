@@ -157,6 +157,12 @@ class MainActivity : AppCompatActivity() {
         fun readAutomaticBackupStatus(): String = LocalBackupManager.status(filesDir).toString()
 
         @JavascriptInterface
+        fun createAutomaticBackupNow(): String {
+            return try { JSONObject().put("created", true).put("file", LocalBackupManager.createSnapshot(filesDir).name).toString() }
+            catch (e: Exception) { "ERROR: " + (e.message ?: "backup failed") }
+        }
+
+        @JavascriptInterface
         fun verifyAutomaticBackup(fileName: String): String {
             val safeName = fileName.takeIf { it.matches(Regex("ruri_auto_[0-9]{8}_[0-9]{6}_[0-9]+\\.zip")) }
                 ?: return JSONObject().put("valid", false).put("error", "Invalid backup name").toString()
