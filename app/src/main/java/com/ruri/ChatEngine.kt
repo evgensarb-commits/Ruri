@@ -64,10 +64,18 @@ object ChatEngine {
                 JSONObject().put("role", role).put("content", text)
             } catch (_: Exception) { null }
         }.take(14).reversed()
-        history.forEach { messages.put(it) }
         if (history.isEmpty() || history.last().optString("role") != "user") {
             throw IllegalStateException("Не найдено последнее сообщение командира")
         }
+        val recalled = MemoryRetriever.recall(root, history.last().optString("content"), limit = 6)
+        if (recalled.isNotBlank()) {
+            messages.put(
+                JSONObject()
+                    .put("role", "system")
+                    .put("content", "Ассоциативно найденные воспоминания. Используй их, если они относятся к вопросу. Не выдавай предположения за точные воспоминания; при необходимости обозначай неопределённость.\\n" + recalled)
+            )
+        }
+        history.forEach { messages.put(it) }
 
         var lastError = "Все настроенные модели недоступны"
         for (index in order) {
