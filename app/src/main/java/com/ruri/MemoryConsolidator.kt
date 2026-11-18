@@ -109,10 +109,7 @@ object MemoryConsolidator {
         val safeDiary = JSONArray()
         sourceEntries.forEach { entry ->
             val rawText = entry.optString("text")
-            val safeText = CredentialGuard.redact(
-                rawText,
-                "[содержимое записи пропущено локальным фильтром приватности]"
-            ).take(1000)
+            val safeText = rawText.take(1000)
             safeDiary.put(
                 JSONObject()
                     .put("sequence", entry.optLong("sequence", 0L))
@@ -127,7 +124,7 @@ object MemoryConsolidator {
         for (index in 0 until minOf(facts.length(), 80)) {
             val fact = facts.optJSONObject(index) ?: continue
             val text = fact.optString("text")
-            if (text.isBlank() || CredentialGuard.containsCredentials(text)) continue
+            if (text.isBlank()) continue
             safeFacts.put(
                 JSONObject()
                     .put("id", fact.optString("id"))
@@ -232,7 +229,6 @@ object MemoryConsolidator {
             изменения характера и отношений, открытые вопросы и незавершённые темы.
             Не выдумывай события, эмоции, договорённости или выводы. Отделяй факт от интерпретации.
             Если сведения противоречат прежней сводке, отмечай неопределённость вместо выдуманного разрешения.
-            Не включай пароли, API-ключи, токены и одноразовые коды аутентификации.
             Разрешённые Командиром личные сведения сохраняй, если они важны для будущего контекста.
             Верни только JSON:
             {"summary":"связный компактный текст","sections":{"commander_context":[],"ongoing_projects":[],"stable_preferences":[],"important_events":[],"relationship_context":"","open_questions":[],"uncertainties":[]}}
@@ -309,7 +305,7 @@ object MemoryConsolidator {
         val unique = LinkedHashSet<String>()
         entries.asReversed().forEach { entry ->
             val value = entry.optString("text").replace(Regex("\\s+"), " ").trim()
-            if (value.length >= 20 && !CredentialGuard.containsCredentials(value)) unique.add(value.take(500))
+            if (value.length >= 20) unique.add(value.take(500))
         }
         val recent = unique.take(14).asReversed().joinToString("\n").take(3500)
         val previous = previousSummary.trim().take(4500)
