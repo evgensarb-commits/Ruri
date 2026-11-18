@@ -37,7 +37,7 @@ class RuriService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("РУ-R1")
+            .setContentTitle("RU-R1 · Рури")
             .setContentText("Фоновая жизнь активна")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(openApp)
