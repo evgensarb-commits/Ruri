@@ -39,7 +39,8 @@ jobs:
           else
             rm -f "$HOME/ruri.keystore.tmp"
             echo "::warning::No valid permanent keystore secret found. Using a temporary test key for this APK."
-            keytool -genkey -v -keystore "$HOME/ruri.keystore" -alias "$RURI_SIGNING_ALIAS" -keyalg RSA -keysize 2048 -validity 10000 -storepass "$RURI_SIGNING_STORE_PASSWORD" -keypass "$RURI_SIGNING_KEY_PASSWORD" -dname "CN=RU-R1, OU=RU-R1, O=RU-R1, L=RU-R1, S=RU"
+            keytool -genkey -v -storetype JKS -keystore "$HOME/ruri.keystore" -alias "$RURI_SIGNING_ALIAS" -keyalg RSA -keysize 2048 -validity 10000 -storepass "$RURI_SIGNING_STORE_PASSWORD" -keypass "$RURI_SIGNING_STORE_PASSWORD" -dname "CN=RU-R1, OU=RU-R1, O=RU-R1, L=RU-R1, S=RU"
+            echo "RURI_SIGNING_KEY_PASSWORD=$RURI_SIGNING_STORE_PASSWORD" >> "$GITHUB_ENV"
           fi
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
