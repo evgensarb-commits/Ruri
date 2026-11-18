@@ -21,8 +21,8 @@ class NotificationMonitor : NotificationListenerService() {
                     .put("notification_key", sbn.key)
                     .put("notification_id", sbn.id)
                     .put("package", sbn.packageName)
-                    .put("title", title.take(180))
-                    .put("text", text.take(500))
+                    .put("title", title)
+                    .put("text", text)
             )
             LifeScheduler.enqueueEvent(applicationContext, "phone_notification")
         } catch (e: Exception) {
