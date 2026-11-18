@@ -45,7 +45,7 @@ object Thinker {
 
     private fun runCycle(ctx: Context, originalReason: String) {
         val root = ctx.filesDir
-        val state = readJson(root, "memory/L4_state.json")
+        val state = readStateStrict(root)
         val now = System.currentTimeMillis()
         val lastSeen = state.optLong("last_seen_commander", 0L)
         val hoursQuiet = if (lastSeen == 0L) -1.0 else (now - lastSeen) / 3600000.0
@@ -235,6 +235,18 @@ object Thinker {
             Log.w("Ruri", "Model request failed", e)
             null
         } finally { connection?.disconnect() }
+    }
+
+    private fun readStateStrict(root: File): JSONObject {
+        val raw = FileManager.read(root, "memory/L4_state.json")
+        return try { JSONObject(raw) } catch (e: Exception) {
+            try {
+                val backup = File(root, "backup/L4_state_corrupt_" + System.currentTimeMillis() + ".json")
+                backup.parentFile?.mkdirs()
+                if (!backup.exists()) backup.writeText(raw, Charsets.UTF_8)
+            } catch (_: Exception) { }
+            throw IllegalStateException("L4 state is damaged; preserved original instead of resetting it", e)
+        }
     }
 
     private fun readJson(root: File, path: String): JSONObject =

@@ -144,8 +144,7 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun markCommanderSeen(): String {
             return try {
-                val state = try { JSONObject(FileManager.read(filesDir, "memory/L4_state.json")) }
-                    catch (_: Exception) { JSONObject() }
+                val state = JSONObject(FileManager.read(filesDir, "memory/L4_state.json"))
                 state.put("last_seen_commander", System.currentTimeMillis())
                 state.put("waiting_for_reply", false)
                 state.put("ignored_count", 0)

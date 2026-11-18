@@ -106,6 +106,11 @@ object FileManager {
                 "camera": false,
                 "location": false
               },
+              "remote_model_context": {
+                "enabled": true,
+                "allowed_scopes": ["notification_contents", "commander_messages", "L1_facts", "L2_diary", "L3_summary", "selected_shelf_files"],
+                "exclude_authentication_credentials": true
+              },
               "actions": {
                 "web_search": true,
                 "read_private_ruri_files": true,
@@ -160,6 +165,7 @@ object FileManager {
         if (!l0.exists()) atomicWrite(l0, "")
 
         put(root, "memory/L1_facts.json", """{ "facts": [] }""")
+        put(root, "memory/fact_extraction_pending.json", """{ "schema_version": 1, "initialized": false, "transcript_messages": [], "commander_messages": [] }""")
         put(root, "memory/L2_diary.json", """{ "entries": [] }""")
         put(root, "memory/L3_summary.json", """{ "summary": "", "last_compressed": 0 }""")
         put(root, "memory/goals.json", """{ "schema_version": 1, "active": [], "completed": [], "updated_at": 0 }""")
@@ -178,6 +184,7 @@ object FileManager {
 
         migrateCharacterIdentity(root)
         migrateModelConfig(root)
+        ensureRemoteModelContextPolicy(root)
         SecretStore.migrateLegacyApiKeys(root)
 
         put(root, "memory/L4_state.json", """
@@ -449,6 +456,36 @@ object FileManager {
             }
         } finally {
             if (temp.exists()) temp.delete()
+        }
+    }
+
+    private fun ensureRemoteModelContextPolicy(root: File) {
+        val file = safe(root, "core/permissions.json") ?: return
+        if (!file.exists()) return
+        try {
+            val policy = JSONObject(file.readText(Charsets.UTF_8))
+            if (!policy.has("remote_model_context")) {
+                policy.put(
+                    "remote_model_context",
+                    JSONObject()
+                        .put("enabled", true)
+                        .put(
+                            "allowed_scopes",
+                            JSONArray()
+                                .put("notification_contents")
+                                .put("commander_messages")
+                                .put("L1_facts")
+                                .put("L2_diary")
+                                .put("L3_summary")
+                                .put("selected_shelf_files")
+                        )
+                        .put("exclude_authentication_credentials", true)
+                        .put("consent_record", "commander_explicit_full_context_2026-11-18")
+                )
+                atomicWrite(file, policy.toString(2))
+            }
+        } catch (_: Exception) {
+            // Preserve malformed permission configuration; never replace user policy.
         }
     }
 

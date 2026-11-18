@@ -25,7 +25,7 @@ object MemoryConsolidator {
         val entries = diary.optJSONArray("entries") ?: JSONArray()
         if (entries.length() < MIN_ENTRIES) return false
 
-        val current = readJson(root, SUMMARY_PATH)
+        val current = readJsonStrict(root, SUMMARY_PATH) ?: return false
         // L2 is a rolling window. Its array length stops growing at 500, so
         // consolidation progress must use the monotonic lifetime counter.
         val totalEntries = maxOf(diary.optLong("total_entries", entries.length().toLong()), entries.length().toLong())
@@ -241,6 +241,21 @@ object MemoryConsolidator {
                 append("Новые записи:\n").append(recent)
             }
         }.take(8000).ifBlank { "Содержательных записей для сводки пока недостаточно." }
+    }
+
+    private fun readJsonStrict(root: java.io.File, path: String): JSONObject? {
+        val raw = FileManager.read(root, path)
+        if (raw.isBlank()) return null
+        return try { JSONObject(raw) } catch (e: Exception) {
+            try {
+                val name = path.replace('/', '_').replace('\\', '_')
+                val backup = java.io.File(root, "backup/" + name + "_corrupt_" + System.currentTimeMillis() + ".json")
+                backup.parentFile?.mkdirs()
+                if (!backup.exists()) backup.writeText(raw, Charsets.UTF_8)
+            } catch (_: Exception) { }
+            Log.w("Ruri", "L3 source file is malformed and was preserved", e)
+            null
+        }
     }
 
     private fun readJson(root: java.io.File, path: String): JSONObject {

@@ -275,7 +275,8 @@ object LifeStateEngine {
             "memory/L3_summary.json",
             "memory/L4_state.json",
             "memory/goals.json",
-            "memory/self_model.json"
+            "memory/self_model.json",
+            "memory/fact_extraction_pending.json"
         )
         for (path in paths) {
             checked.put(path)
@@ -406,18 +407,42 @@ object LifeStateEngine {
 
     private fun readStateStrict(root: File): JSONObject {
         val raw = FileManager.read(root, STATE_PATH)
-        if (raw.isBlank()) {
-            if (!FileManager.exists(root, STATE_PATH)) {
-                FileManager.init(root)
-                return readStateStrict(root)
+        if (raw.isNotBlank()) {
+            try { return JSONObject(raw) } catch (e: Exception) {
+                Log.w("Ruri", "L4 state is malformed; reconstructing a baseline while preserving its backup", e)
             }
-            preserveCorruptFile(root, STATE_PATH, raw)
-            throw IllegalStateException("L4 state is empty; source file was preserved")
+        } else if (!FileManager.exists(root, STATE_PATH)) {
+            Log.w("Ruri", "L4 state is missing; reconstructing a baseline from local records")
+        } else {
+            Log.w("Ruri", "L4 state is empty; reconstructing a baseline")
         }
-        return try { JSONObject(raw) } catch (e: Exception) {
-            preserveCorruptFile(root, STATE_PATH, raw)
-            throw IllegalStateException("L4 state is malformed; source file was preserved", e)
-        }
+
+        preserveCorruptFile(root, STATE_PATH, raw)
+        val latestCommander = FileManager.readLastLines(
+            root, L0_PATH, maxLines = 12000, maxBytes = 8 * 1024 * 1024
+        ).asReversed().asSequence()
+            .mapNotNull { line -> runCatching { JSONObject(line) }.getOrNull() }
+            .firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" }
+        val goals = readJsonOptional(root, "memory/goals.json")?.optJSONArray("active") ?: JSONArray()
+        val recovered = JSONObject()
+            .put("schema_version", 2)
+            .put("mood", "восстанавливающаяся")
+            .put("energy", 5)
+            .put("bond", 0.5)
+            .put("needs", JSONObject().put("live", 0.5).put("love_commander", 0.5))
+            .put("waiting_for_reply", false)
+            .put("ignored_count", 0)
+            .put("offended_until", 0L)
+            .put("last_seen_commander", latestCommander?.optLong("timestamp", latestCommander.optLong("ts", 0L)) ?: 0L)
+            .put("last_processed_event_offset", 0L)
+            .put("last_thought", 0L)
+            .put("active_goals", goals)
+            .put("active_tasks", JSONArray())
+            .put("current_focus", "Восстановление состояния из исторического журнала L0")
+            .put("state_recovered_at", System.currentTimeMillis())
+            .put("state_recovery_reason", "L4 повреждён; исходная копия сохранена в backup, L0 будет обработан повторно")
+        FileManager.write(root, STATE_PATH, recovered.toString(2))
+        return recovered
     }
 
     private fun readJsonOptional(root: File, path: String): JSONObject? {
