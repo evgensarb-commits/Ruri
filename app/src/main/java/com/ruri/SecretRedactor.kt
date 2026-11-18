@@ -15,6 +15,7 @@ object SecretRedactor {
         Regex("(?i)(?<![\\p{L}\\p{N}_])((?:password|passwd|passphrase|pwd|пароль|пароля|паролем))(?![\\p{L}\\p{N}_])\\s*(?:[:=]\\s*|\\s+)([^\\s,;]{4,})"),
         Regex("(?i)(?<![\\p{L}\\p{N}_])((?:код\\s+подтверждения|код\\s+из\\s+(?:sms|смс)|смс[- ]код|verification\\s+code|one[- ]time\\s+code|otp))(?![\\p{L}\\p{N}_])\\s*(?:[:=№#]\\s*|\\s+)([0-9]{4,10})"),
         Regex("(?i)(?<![\\p{L}\\p{N}_])((?:api[_ -]?key|api[- ]?ключ|access[_ -]?token|refresh[_ -]?token|auth[_ -]?token|client[_ -]?secret|private[_ -]?key|token|secret|ключ\\s+(?:api|доступа|авторизации)))(?![\\p{L}\\p{N}_])\\s*(?:[:=]\\s*|\\s+)([A-Za-z0-9._~+/-]{8,})"),
+        Regex("(?i)(?<![\\p{L}\\p{N}_])((?:номер(?:\\s+банковской)?\\s+карты|card\\s+number|cardnumber))(?![\\p{L}\\p{N}_])\\s*(?:[:=]\\s*|\\s+)([0-9][0-9 -]{11,24})"),
         Regex("(?i)(?<![\\p{L}\\p{N}_])(bearer)\\s+([A-Za-z0-9._~+/-]{8,})")
     )
     private val cardCandidate = Regex("(?<!\\d)(?:\\d[ -]?){13,19}(?!\\d)")
