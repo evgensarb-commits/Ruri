@@ -32,7 +32,7 @@
 4. прогнать миграцию старого открытого config и импорт/экспорт на Android;
 5. отдельно проверить восстановление из повреждённого/неполного архива и отказ при ошибке.
 
-Workflow использует Secrets `RURI_SIGNING_KEYSTORE_BASE64`, `RURI_SIGNING_STORE_PASSWORD`, `RURI_SIGNING_KEY_PASSWORD` и `RURI_SIGNING_ALIAS`. При отсутствии корректного постоянного keystore сборка использует временную подпись и не должна использоваться как обновление существующей установки.
+Workflow использует Secrets `RURI_SIGNING_KEYSTORE_BASE64`, `RURI_SIGNING_STORE_PASSWORD`, `RURI_SIGNING_KEY_PASSWORD` и `RURI_SIGNING_ALIAS`. Если постоянные signing secrets отсутствуют или неверны, workflow останавливается и не публикует APK. Это защищает единственную установку `com.ruri`: новый случайный ключ не должен выдаваться за совместимое обновление.
 
 ### Этап 1 — постоянная жизнь и очередь событий: не завершён
 
