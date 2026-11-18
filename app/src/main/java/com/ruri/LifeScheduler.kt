@@ -63,6 +63,7 @@ class RuriLifeWorker(
     override fun doWork(): Result {
         val root = applicationContext.filesDir
         return try {
+            FileManager.init(root)
             val pending = EventQueue.snapshot(root)
             val reason = if (pending.isEmpty()) {
                 "проверка_состояния"
