@@ -19,12 +19,6 @@ object MemoryConsolidator {
     private const val MIN_ENTRIES = 10
     private const val MIN_NEW_ENTRIES = 5
 
-    private val sensitivePattern = Regex(
-        "(?i)(парол|api.?key|ключ\\s+api|токен|cvv|cvc|код\\s+подтверждения|" +
-            "номер\\s+карты|диагноз|болезн|лекарств|медицинск|религи|вероисповед|" +
-            "политическ|сексуальн|домашн\\w*\\s+адрес|координат|геолокац)"
-    )
-
     fun consolidateIfDue(context: Context): Boolean {
         val root = context.filesDir
         val diary = readJson(root, DIARY_PATH)
@@ -53,9 +47,10 @@ object MemoryConsolidator {
         val safeDiary = JSONArray()
         sourceEntries.forEach { entry ->
             val rawText = entry.optString("text")
-            val safeText = if (sensitivePattern.containsMatchIn(rawText)) {
+            val safeText = PrivacyFilter.redact(
+                rawText,
                 "[содержимое записи пропущено локальным фильтром приватности]"
-            } else rawText.take(1000)
+            ).take(1000)
             safeDiary.put(
                 JSONObject()
                     .put("timestamp", entry.optLong("ts", 0L))
@@ -69,7 +64,7 @@ object MemoryConsolidator {
         for (index in 0 until minOf(facts.length(), 80)) {
             val fact = facts.optJSONObject(index) ?: continue
             val text = fact.optString("text")
-            if (text.isBlank() || sensitivePattern.containsMatchIn(text)) continue
+            if (text.isBlank() || PrivacyFilter.containsSensitive(text)) continue
             safeFacts.put(
                 JSONObject()
                     .put("id", fact.optString("id"))
@@ -93,7 +88,7 @@ object MemoryConsolidator {
             method = "semantic_llm"
             modelName = modelResult.second
         } else {
-            summaryText = extractiveSummary(sourceEntries)
+            summaryText = extractiveSummary(current.optString("summary"), sourceEntries)
             sections = JSONObject().put(
                 "note",
                 "Локальная выборочная сводка. Семантическая консолидация будет выполнена после появления доступной модели."
@@ -194,7 +189,7 @@ object MemoryConsolidator {
         var connection: HttpURLConnection? = null
         return try {
             val base = model.optString("base_url").trimEnd('/')
-            if (base.isBlank()) return null
+            require(base.startsWith("https://", ignoreCase = true)) { "Provider endpoint must use HTTPS" }
             connection = (URL(base + "/chat/completions").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 15000
@@ -231,15 +226,21 @@ object MemoryConsolidator {
         return runCatching { JSONObject(raw.substring(start, end + 1)) }.getOrNull()
     }
 
-    private fun extractiveSummary(entries: List<JSONObject>): String {
+    private fun extractiveSummary(previousSummary: String, entries: List<JSONObject>): String {
         val unique = LinkedHashSet<String>()
         entries.asReversed().forEach { entry ->
             val value = entry.optString("text").replace(Regex("\\s+"), " ").trim()
-            if (value.length >= 20 && !sensitivePattern.containsMatchIn(value)) unique.add(value.take(500))
+            if (value.length >= 20 && !PrivacyFilter.containsSensitive(value)) unique.add(value.take(500))
         }
-        return unique.take(14).asReversed().joinToString("\n")
-            .take(6000)
-            .ifBlank { "Содержательных записей для сводки пока недостаточно." }
+        val recent = unique.take(14).asReversed().joinToString("\n").take(3500)
+        val previous = previousSummary.trim().take(4500)
+        return buildString {
+            if (previous.isNotBlank()) append("Ранее сохранённая автобиографическая сводка:\n").append(previous)
+            if (recent.isNotBlank()) {
+                if (isNotEmpty()) append("\n\n")
+                append("Новые записи:\n").append(recent)
+            }
+        }.take(8000).ifBlank { "Содержательных записей для сводки пока недостаточно." }
     }
 
     private fun readJson(root: java.io.File, path: String): JSONObject {
