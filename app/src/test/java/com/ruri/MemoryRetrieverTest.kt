@@ -43,6 +43,24 @@ class MemoryRetrieverTest {
     }
 
     @Test
+    fun matchesRussianInflectionVariants() {
+        FileManager.write(
+            root,
+            "memory/L1_facts.json",
+            JSONObject().put(
+                "facts",
+                org.json.JSONArray().put(
+                    JSONObject().put("text", "Мы однажды обсуждали старый маяк на берегу")
+                        .put("confidence", 0.9)
+                )
+            ).toString()
+        )
+
+        val result = MemoryRetriever.recall(root, "Расскажи про маяка")
+        assertTrue(result.contains("старый маяк"))
+    }
+
+    @Test
     fun returnsEmptyWhenQueryHasNoUsefulTerms() {
         assertTrue(MemoryRetriever.recall(root, "это как что для меня").isBlank())
     }
