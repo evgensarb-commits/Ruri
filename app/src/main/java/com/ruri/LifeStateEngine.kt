@@ -115,7 +115,10 @@ object LifeStateEngine {
 
     private fun updateDrives(root: File, newEventCount: Int, battery: Int, now: Long) {
         val config = readJson(root, DRIVES_PATH)
-        val drives = config.optJSONArray("drives") ?: JSONArray()
+        val drives = config.optJSONArray("drives") ?: run {
+            Log.w("Ruri", "Drive configuration is missing or invalid; preserved file was not overwritten")
+            return
+        }
         val goals = readJson(root, "memory/goals.json").optJSONArray("active") ?: JSONArray()
         for (index in 0 until drives.length()) {
             val drive = drives.optJSONObject(index) ?: continue
