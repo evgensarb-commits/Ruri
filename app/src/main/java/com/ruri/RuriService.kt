@@ -44,23 +44,31 @@ class RuriService : Service() {
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setOngoing(true)
             .setContentIntent(pi)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
             .build()
 
         startForeground(NOTIFICATION_ID, notification)
-        handler.postDelayed(tickRunnable, 5 * 60 * 1000L)
+
+        // Start the first cognition cycle now; network work runs on Thinker's executor.
+        handler.removeCallbacks(tickRunnable)
+        handler.post(tickRunnable)
         return START_STICKY
     }
 
     override fun onDestroy() {
-        super.onDestroy()
         handler.removeCallbacks(tickRunnable)
+        super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(CHANNEL_ID, "Жизнь Рури", NotificationManager.IMPORTANCE_MIN)
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Жизнь Рури",
+                NotificationManager.IMPORTANCE_LOW
+            )
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
         }
