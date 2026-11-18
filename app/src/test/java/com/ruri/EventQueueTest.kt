@@ -27,13 +27,13 @@ class EventQueueTest {
     @Test
     fun repeatedReasonsAreCoalescedWithoutDroppingOccurrenceCount() {
         val firstId = EventQueue.enqueue(root, "commander_message")
-        Thread.sleep(3)
         val secondId = EventQueue.enqueue(root, "commander_message")
 
         assertEquals(firstId, secondId)
         val pending = EventQueue.snapshot(root)
         assertEquals(1, pending.size)
         assertEquals(2, pending.single().optInt("occurrences"))
+        assertEquals(2L, pending.single().optLong("revision"))
     }
 
     @Test
@@ -41,13 +41,13 @@ class EventQueueTest {
         EventQueue.enqueue(root, "phone_notification")
         val snapshot = EventQueue.snapshot(root)
 
-        Thread.sleep(5)
         EventQueue.enqueue(root, "phone_notification")
         EventQueue.acknowledge(root, snapshot)
 
         val remaining = EventQueue.snapshot(root)
         assertEquals(1, remaining.size)
         assertEquals(2, remaining.single().optInt("occurrences"))
+        assertEquals(2L, remaining.single().optLong("revision"))
 
         EventQueue.acknowledge(root, remaining)
         assertTrue(EventQueue.snapshot(root).isEmpty())
