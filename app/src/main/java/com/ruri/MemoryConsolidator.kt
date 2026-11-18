@@ -32,9 +32,12 @@ object MemoryConsolidator {
         if (entries.length() < MIN_ENTRIES) return false
 
         val current = readJson(root, SUMMARY_PATH)
-        val previousCount = current.optInt("last_compressed_entry_count", 0)
+        // L2 is a rolling window. Its array length stops growing at 500, so
+        // consolidation progress must use the monotonic lifetime counter.
+        val totalEntries = maxOf(diary.optLong("total_entries", entries.length().toLong()), entries.length().toLong())
+        val previousCount = current.optLong("last_compressed_entry_count", 0L)
         val previousCompressedAt = current.optLong("last_compressed", 0L)
-        if (entries.length() - previousCount < MIN_NEW_ENTRIES) return false
+        if (totalEntries - previousCount < MIN_NEW_ENTRIES) return false
         if (previousCompressedAt > 0L && System.currentTimeMillis() - previousCompressedAt < DAY_MS) return false
 
         val now = System.currentTimeMillis()
@@ -123,7 +126,8 @@ object MemoryConsolidator {
             .put("summary", summaryText)
             .put("sections", sections)
             .put("last_compressed", now)
-            .put("last_compressed_entry_count", entries.length())
+            .put("last_compressed_entry_count", totalEntries)
+            .put("total_diary_entries", totalEntries)
             .put("source_entry_timestamps", sourceTimestamps)
             .put("source_fact_ids", factIds)
             .put("method", method)
