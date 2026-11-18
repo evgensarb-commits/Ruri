@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.Intent
+import android.net.Uri
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -94,6 +95,16 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun searchWeb(query: String): String = WebSearch.search(query)
+
+        @JavascriptInterface
+        fun openUrl(url: String): String {
+            return try {
+                val uri = Uri.parse(url)
+                if (uri.scheme != "https" && uri.scheme != "http") return "ERROR: unsupported URL"
+                startActivity(Intent(Intent.ACTION_VIEW, uri))
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "cannot open link") }
+        }
 
         @JavascriptInterface
         fun importArchive(json: String): String {
