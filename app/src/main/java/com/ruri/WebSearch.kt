@@ -9,7 +9,7 @@ import java.net.URLEncoder
 
 object WebSearch {
     fun search(query: String): String {
-        val q = query.trim()
+        val q = SecretRedactor.redactText(query.trim())
         if (q.length < 2) return JSONObject().put("error", "Введите поисковый запрос").toString()
         if (q.length > 300) return JSONObject().put("error", "Запрос слишком длинный").toString()
         var connection: HttpURLConnection? = null
