@@ -25,6 +25,11 @@ object EventQueue {
         for (index in 0 until pending.length()) {
             val existing = pending.optJSONObject(index) ?: continue
             if (existing.optString("reason") == normalizedReason) {
+                existing.put("occurrences", existing.optInt("occurrences", 1) + 1)
+                existing.put("updated_at", System.currentTimeMillis())
+                state.put("pending", pending)
+                state.put("updated_at", System.currentTimeMillis())
+                FileManager.write(root, PATH, state.toString(2))
                 return@synchronized existing.optString("id")
             }
         }
@@ -35,6 +40,8 @@ object EventQueue {
                 .put("id", id)
                 .put("reason", normalizedReason)
                 .put("created_at", System.currentTimeMillis())
+                .put("updated_at", System.currentTimeMillis())
+                .put("occurrences", 1)
         )
         state.put("schema_version", 1)
         state.put("pending", pending)
@@ -50,14 +57,21 @@ object EventQueue {
         }
     }
 
-    fun acknowledge(root: File, ids: Set<String>) = synchronized(lock) {
-        if (ids.isEmpty()) return@synchronized
+    fun acknowledge(root: File, processed: List<JSONObject>) = synchronized(lock) {
+        if (processed.isEmpty()) return@synchronized
+        val revisions = processed.associate {
+            it.optString("id") to it.optLong("updated_at", it.optLong("created_at", 0L))
+        }
         val state = readState(root)
         val pending = state.optJSONArray("pending") ?: JSONArray()
         val remaining = JSONArray()
         for (index in 0 until pending.length()) {
             val item = pending.optJSONObject(index) ?: continue
-            if (item.optString("id") !in ids) remaining.put(item)
+            val id = item.optString("id")
+            val processedRevision = revisions[id]
+            val currentRevision = item.optLong("updated_at", item.optLong("created_at", 0L))
+            // Keep the queue item if another same-kind event arrived during cognition.
+            if (processedRevision == null || processedRevision != currentRevision) remaining.put(item)
         }
         state.put("pending", remaining)
         state.put("updated_at", System.currentTimeMillis())
