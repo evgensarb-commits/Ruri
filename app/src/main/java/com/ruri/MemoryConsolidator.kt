@@ -18,7 +18,53 @@ object MemoryConsolidator {
     private const val DAY_MS = 24L * 60L * 60L * 1000L
     private const val MIN_ENTRIES = 10
     private const val MIN_NEW_ENTRIES = 5
+    private const val MAX_ENTRIES_PER_CONSOLIDATION = 40
     private val processLock = Any()
+
+    internal data class SequenceBatch(
+        val entries: List<JSONObject>,
+        val firstSequence: Long,
+        val lastSequence: Long,
+        val skippedBeforeBatch: Long,
+        val totalEntries: Long
+    )
+
+    /**
+     * Selects the oldest uncompressed diary records. L2 is a rolling window,
+     * so the L3 cursor advances only to the last record actually included.
+     */
+    internal fun selectEntriesForConsolidation(
+        diary: JSONObject,
+        previousCount: Long,
+        limit: Int = 40
+    ): SequenceBatch {
+        require(limit > 0)
+        val entries = diary.optJSONArray("entries") ?: JSONArray()
+        var total = maxOf(
+            diary.optLong("total_entries", entries.length().toLong()),
+            entries.length().toLong()
+        )
+        for (index in 0 until entries.length()) {
+            val sequence = entries.optJSONObject(index)?.optLong("sequence", 0L) ?: 0L
+            if (sequence > total) total = sequence
+        }
+        val legacyBase = (total - entries.length()).coerceAtLeast(0L)
+        val sequenced = ArrayList<Pair<Long, JSONObject>>()
+        for (index in 0 until entries.length()) {
+            val original = entries.optJSONObject(index) ?: continue
+            val storedSequence = original.optLong("sequence", 0L)
+            val sequence = if (storedSequence > 0L) storedSequence else legacyBase + index + 1L
+            if (sequence <= previousCount) continue
+            val copy = JSONObject(original.toString()).put("sequence", sequence)
+            sequenced.add(sequence to copy)
+        }
+        sequenced.sortBy { it.first }
+        val selected = sequenced.take(limit)
+        val first = selected.firstOrNull()?.first ?: 0L
+        val last = selected.lastOrNull()?.first ?: previousCount
+        val skipped = if (first > 0L) (first - previousCount - 1L).coerceAtLeast(0L) else 0L
+        return SequenceBatch(selected.map { it.second }, first, last, skipped, total)
+    }
 
     fun consolidateIfDue(context: Context): Boolean = synchronized(processLock) {
         consolidateLocked(context)
@@ -38,18 +84,16 @@ object MemoryConsolidator {
             preserveInvalidShape(root, SUMMARY_PATH)
             return false
         }
-        // L2 is a rolling window. Its array length stops growing at 500, so
-        // consolidation progress must use the monotonic lifetime counter.
-        val totalEntries = maxOf(diary.optLong("total_entries", entries.length().toLong()), entries.length().toLong())
+        // L2 is a rolling window: consume the oldest uncompressed records in bounded pages.
         val previousCount = current.optLong("last_compressed_entry_count", 0L)
+        val batch = selectEntriesForConsolidation(diary, previousCount, MAX_ENTRIES_PER_CONSOLIDATION)
+        val totalEntries = batch.totalEntries
         val previousCompressedAt = current.optLong("last_compressed", 0L)
-        if (totalEntries - previousCount < MIN_NEW_ENTRIES) return false
+        if (totalEntries - previousCount < MIN_NEW_ENTRIES || batch.entries.size < MIN_NEW_ENTRIES) return false
         if (previousCompressedAt > 0L && System.currentTimeMillis() - previousCompressedAt < DAY_MS) return false
 
         val now = System.currentTimeMillis()
-        val sourceEntries = (maxOf(0, entries.length() - 40) until entries.length()).mapNotNull { index ->
-            entries.optJSONObject(index)?.let { JSONObject(it.toString()) }
-        }
+        val sourceEntries = batch.entries
         if (sourceEntries.isEmpty()) return false
 
         val factsFile = readJsonStrict(root, FACTS_PATH) ?: return false
@@ -69,6 +113,7 @@ object MemoryConsolidator {
             ).take(1000)
             safeDiary.put(
                 JSONObject()
+                    .put("sequence", entry.optLong("sequence", 0L))
                     .put("timestamp", entry.optLong("ts", 0L))
                     .put("kind", entry.optString("kind", "thought"))
                     .put("trigger", entry.optString("trigger"))
@@ -137,8 +182,11 @@ object MemoryConsolidator {
             .put("summary", summaryText)
             .put("sections", sections)
             .put("last_compressed", now)
-            .put("last_compressed_entry_count", totalEntries)
+            .put("last_compressed_entry_count", batch.lastSequence)
             .put("total_diary_entries", totalEntries)
+            .put("source_sequence_from", batch.firstSequence)
+            .put("source_sequence_to", batch.lastSequence)
+            .put("unavailable_entries_before_batch", batch.skippedBeforeBatch)
             .put("source_entry_timestamps", sourceTimestamps)
             .put("source_fact_ids", factIds)
             .put("method", method)
@@ -153,6 +201,9 @@ object MemoryConsolidator {
                 .put("method", method)
                 .put("model", modelName)
                 .put("source_entry_count", sourceEntries.size)
+                .put("source_sequence_from", batch.firstSequence)
+                .put("source_sequence_to", batch.lastSequence)
+                .put("unavailable_entries_before_batch", batch.skippedBeforeBatch)
                 .put("fact_count", safeFacts.length())
                 .put("privacy", "local")
         )
