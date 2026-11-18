@@ -2,7 +2,10 @@ name: Build Ruri APK
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
+      - 'fix/**'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -17,9 +20,19 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Generate keystore
+      - name: Restore stable signing key or create a temporary build key
+        env:
+          KEYSTORE_BASE64: \${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: \${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: \${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: \${{ secrets.KEY_ALIAS }}
         run: |
-          keytool -genkey -v -keystore $HOME/ruri.keystore -alias ${{ secrets.KEY_ALIAS }} -keyalg RSA -keysize 2048 -validity 10000 -storepass ${{ secrets.KEYSTORE_PASSWORD }} -keypass ${{ secrets.KEY_PASSWORD }} -dname "CN=Ruri, OU=Ruri, O=Ruri, L=Ruri, S=Ruri, C=RU"
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > "$HOME/ruri.keystore"
+          else
+            echo "::warning::KEYSTORE_BASE64 is not configured; this APK uses a temporary signing key and cannot update-install over another build."
+            keytool -genkey -v -keystore "$HOME/ruri.keystore" -alias "$KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 10000 -storepass "$KEYSTORE_PASSWORD" -keypass "$KEY_PASSWORD" -dname "CN=Ruri, OU=Ruri, O=Ruri, L=Ruri, S=Ruri, C=RU"
+          fi
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -29,15 +42,17 @@ jobs:
       - name: Accept Android licenses
         run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
-      - name: Build debug APK
+      - name: Build APK
         run: gradle assembleDebug
         env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEYSTORE_PASSWORD: \${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: \${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: \${{ secrets.KEY_ALIAS }}
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: ruri-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
