@@ -146,7 +146,7 @@ object Thinker {
         val goals = readJson(root, "memory/goals.json")
         val facts = readJson(root, "memory/L1_facts.json").optJSONArray("facts")
         val factText = StringBuilder()
-        if (facts != null) for (i in 0 until minOf(facts.length(), 12)) {
+        if (facts != null) for (i in maxOf(0, facts.length() - 12) until facts.length()) {
             factText.append("- ").append(CredentialGuard.redact(facts.optJSONObject(i)?.optString("text") ?: "")).append("\n")
         }
         val diary = readJson(root, "memory/L2_diary.json").optJSONArray("entries")

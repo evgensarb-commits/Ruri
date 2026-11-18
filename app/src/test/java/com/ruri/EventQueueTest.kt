@@ -173,6 +173,20 @@ class EventQueueTest {
     }
 
     @Test
+    fun lifeMemoryInitializationCreatesIncrementalFactCheckpointAndFullContextPolicy() {
+        FileManager.init(root)
+        assertTrue(FileManager.exists(root, "memory/fact_extraction_pending.json"))
+        val pending = JSONObject(FileManager.read(root, "memory/fact_extraction_pending.json"))
+        assertFalse(pending.optBoolean("initialized", true))
+
+        val permissions = JSONObject(FileManager.read(root, "core/permissions.json"))
+        val policy = permissions.optJSONObject("remote_model_context")
+        assertTrue(policy?.optBoolean("enabled", false) == true)
+        val scopes = policy?.optJSONArray("allowed_scopes")
+        assertTrue((0 until (scopes?.length() ?: 0)).any { scopes?.optString(it) == "notification_contents" })
+    }
+
+    @Test
     fun pathTraversalIsRejected() {
         assertThrows(IllegalArgumentException::class.java) {
             FileManager.write(root, "../outside.json", "{}")
