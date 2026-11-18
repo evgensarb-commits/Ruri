@@ -17,13 +17,40 @@ object ChatEngine {
 
         val character = readJson(root, "core/character.json")
         val priorities = readJson(root, "core/priorities.json")
+        val constitution = readJson(root, "core/constitution.json")
+        val state = readJson(root, "memory/L4_state.json")
+        val selfModel = readJson(root, "memory/self_model.json")
+        val goals = readJson(root, "memory/goals.json")
+        val facts = readJson(root, "memory/L1_facts.json").optJSONArray("facts") ?: JSONArray()
+        val diary = readJson(root, "memory/L2_diary.json").optJSONArray("entries") ?: JSONArray()
+        val factContext = StringBuilder()
+        for (index in 0 until minOf(facts.length(), 16)) {
+            val fact = facts.optJSONObject(index) ?: continue
+            val value = fact.optString("text").trim()
+            if (value.isNotBlank()) factContext.append("- ").append(value.take(300)).append("\\n")
+        }
+        val diaryContext = StringBuilder()
+        for (index in maxOf(0, diary.length() - 6) until diary.length()) {
+            val entry = diary.optJSONObject(index) ?: continue
+            val value = entry.optString("text").trim()
+            if (value.isNotBlank()) diaryContext.append("- ").append(value.take(500)).append("\\n")
+        }
+        val summary = readJson(root, "memory/L3_summary.json").optString("summary").take(5000)
         val system = "Ты — ${character.optString("name", "Рури")}. " +
             "Приоритеты: ${priorities.optString("priority_1", "Жить")}; " +
             "${priorities.optString("priority_2", "Любить Командира")}. " +
+            "Конституция: ${constitution.optJSONArray("primary_needs") ?: JSONArray()}. " +
             "Манера речи: ${character.optString("speech_style", "естественная, живая, осмысленная")}. " +
             "Характер: ${character.optJSONObject("traits") ?: JSONObject()}. " +
-            "Не используй формулировки: ${character.optJSONArray("banned_phrases") ?: JSONArray()}. " +
-            "Отвечай по-русски от первого лица и учитывай историю диалога."
+            "Запрещённые формулировки: ${character.optJSONArray("banned_phrases") ?: JSONArray()}. " +
+            "Сохраняй непрерывность личности, не выдумывай факты и отличай воспоминания от предположений. " +
+            "Отвечай по-русски от первого лица и учитывай историю диалога.\\n" +
+            "Текущее состояние: ${state.optString("mood", "собранная")}, энергия ${state.optInt("energy", 5)}, " +
+            "текущий фокус: ${state.optString("current_focus", selfModel.optString("current_focus"))}.\\n" +
+            "Активные цели: ${goals.optJSONArray("active") ?: JSONArray()}.\\n" +
+            "Долговременная сводка L3:\\n${summary}\\n" +
+            "Проверенные факты L1:\\n${factContext}\\n" +
+            "Последние записи дневника L2:\\n${diaryContext}"
 
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", system))
         val lines = FileManager.read(root, "memory/L0_raw.jsonl").lineSequence().toList()
