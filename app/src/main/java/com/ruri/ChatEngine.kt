@@ -73,7 +73,7 @@ object ChatEngine {
             "Пожелания к манере речи: ${character.optString("speech_style", "короткая живая речь гяру")}. " +
             "Состояние: ${state.optString("mood", "собранная")}, энергия ${state.optInt("energy", 5)}, фокус: ${state.optString("current_focus", selfModel.optString("current_focus"))}. " +
             "Активные цели: ${goals.optJSONArray("active") ?: JSONArray()}. Незавершённые задачи: ${state.optJSONArray("active_tasks") ?: JSONArray()}. " +
-            "Сводка L3:\\n${summary}\\nФакты L1:\\n${factContext}\\nДневник L2:\\n${diaryContext}\\nУведомления:\\n${notificationContext}"
+            "Сводка L3:\n${summary}\nФакты L1:\n${factContext}\nДневник L2:\n${diaryContext}\nУведомления:\n${notificationContext}"
 
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", system))
         val lines = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 4000)
@@ -98,7 +98,7 @@ object ChatEngine {
             messages.put(
                 JSONObject()
                     .put("role", "system")
-                    .put("content", "Ассоциативно найденные воспоминания. Используй их, если они относятся к вопросу. Не выдавай предположения за точные воспоминания; при необходимости обозначай неопределённость.\\n" + recalled)
+                    .put("content", "Ассоциативно найденные воспоминания. Используй их, если они относятся к вопросу. Не выдавай предположения за точные воспоминания; при необходимости обозначай неопределённость.\n" + recalled)
             )
         }
         history.forEach { messages.put(it) }
