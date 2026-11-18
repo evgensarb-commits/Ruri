@@ -135,7 +135,7 @@ object Thinker {
         for (i in 0 until minOf(shelfNames.length(), 6)) {
             val name = shelfNames.optString(i)
             if (name.isNotBlank()) {
-                shelfText.append("\\n--- ").append(name).append(" ---\\n")
+                shelfText.append("\n--- ").append(name).append(" ---\n")
                     .append(FileManager.read(root, "shelf/" + name).take(900))
             }
         }
