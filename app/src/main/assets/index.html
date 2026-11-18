@@ -26,7 +26,7 @@ main{flex:1;display:flex;flex-direction:column;min-height:0}
 .me .bub{background:rgba(43,79,199,.22);border:1px solid rgba(76,116,240,.5);border-right:2px solid #35e0ff}
 .comp{border-top:1px solid #233252;background:#080b10;padding:10px 12px 14px}
 .inrow{display:flex;gap:8px;align-items:flex-end}
-.inrow textarea{flex:1;background:#050810;border:1px solid #32456d;color:#dde3ec;padding:11px 12px;font-size:14.5px;resize:none;height:46px;border-radius:4px}
+.inrow textarea{flex:1;background:#050810;border:1px solid #32456d;color:#dde3ec;padding:11px 12px;font-size:14.5px;resize:none;min-height:46px;max-height:140px;border-radius:4px}
 .send{width:46px;height:46px;background:#f5c542;border:0;color:#04070e;border-radius:4px;font-size:20px}
 .send:disabled{opacity:.4}
 h2{font:800 19px system-ui;color:#dde3ec;margin:0 0 14px;text-transform:uppercase}
@@ -42,148 +42,161 @@ h2 em{font-style:normal;color:#f5c542}
 .fld input,.fld select{background:#050810;border:1px solid #32456d;color:#dde3ec;padding:10px 11px;font:13px monospace;border-radius:3px;width:100%}
 .typing{display:flex;gap:5px;padding:11px 13px;background:#152039;border:1px solid #32456d;border-left:2px solid #f5c542;width:fit-content}
 .typing i{width:6px;height:6px;background:#f5c542;border-radius:50%;animation:td 1.1s infinite}
-.typing i:nth-child(2){animation-delay:.15s}
-.typing i:nth-child(3){animation-delay:.3s}
+.typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}
 @keyframes td{0%,60%,100%{opacity:.25}30%{opacity:1;transform:translateY(-4px)}}
 </style>
 </head>
 <body>
 <header><h1>Ruri</h1><span class="st" id="status">● ЗАГРУЗКА</span></header>
 <nav class="tabs">
-<button data-p="chat" class="on">ЧАТ</button>
-<button data-p="life">ДНЕВНИК</button>
-<button data-p="brain">МОЗГ</button>
+<button data-p="chat" class="on">ЧАТ</button><button data-p="life">ДНЕВНИК</button><button data-p="brain">МОЗГ</button>
 </nav>
 <main>
 <section class="pane on" id="p-chat">
 <div id="chat"></div>
-<div class="comp"><div class="inrow">
-<textarea id="input" rows="1"></textarea>
-<button class="send" id="send">→</button>
-</div></div>
+<div class="comp"><div class="inrow"><textarea id="input" rows="1" placeholder="Написать Рури…"></textarea><button class="send" id="send">→</button></div></div>
 </section>
-<section class="pane" id="p-life"><div class="scroll">
-<h2>Дневник <em>Рури</em></h2><div id="diary"></div>
-</div></section>
+<section class="pane" id="p-life"><div class="scroll"><h2>Дневник <em>Рури</em></h2><div id="diary"></div></div></section>
 <section class="pane" id="p-brain"><div class="scroll">
 <h2>Мозг <em>напрокат</em></h2>
-<div class="card"><p>Вставь ключ Gemini или Groq.</p></div>
-<div class="fld"><label>МОДЕЛЬ</label><select id="model">
-<option value="0">Gemini</option><option value="1">Groq</option>
-</select></div>
-<div class="fld"><label>API KEY</label><input id="key" type="password"></div>
+<div class="card"><p>Вставь ключ Gemini или Groq. При ошибке первой модели приложение попробует следующую настроенную модель.</p></div>
+<div class="fld"><label>МОДЕЛЬ</label><select id="model"><option value="0">Gemini</option><option value="1">Groq</option></select></div>
+<div class="fld"><label>API KEY</label><input id="key" type="password" autocomplete="off"></div>
 <button class="btn" id="saveKey">Сохранить</button>
-<div class="row" style="margin-top:20px">
-<button class="btn ghost" id="exp">Экспорт</button>
-<button class="btn ghost" id="imp">Импорт</button>
-<input type="file" id="file" accept=".json" hidden>
-</div>
+<div class="row" style="margin-top:20px"><button class="btn ghost" id="exp">Экспорт</button><button class="btn ghost" id="imp">Импорт</button><input type="file" id="file" accept=".json,application/json" hidden></div>
 </div></section>
 </main>
 <script>
 function $(s){return document.querySelector(s);}
 var busy=false;
 function esc(s){return String(s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function read(path){return Ruri.read(path)||'';}
+function write(path,value){var result=Ruri.write(path,value);if(typeof result==='string'&&result.indexOf('ERROR:')===0)throw new Error(result);return result;}
+function setStatus(text){$('#status').textContent='● '+text;}
+function addMessage(who,text,ts){
+var d=document.createElement('div');d.className='msg '+(who==='ruri'?'her':'me');
+d.innerHTML='<div class="meta">'+(who==='ruri'?'РУРИ':'КОМАНДИР')+' · '+new Date(ts||Date.now()).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+'</div><div class="bub">'+esc(text)+'</div>';
+$('#chat').appendChild(d);
+}
 function loadChat(){
-Ruri.read('memory/L0_raw.jsonl').then(function(raw){
-var lines=raw.trim().split('\n').filter(function(l){return l;});
-var chat=$('#chat');chat.innerHTML='';
-lines.forEach(function(line){
-try{var m=JSON.parse(line);if(m.type!=='message')return;
-var d=document.createElement('div');
-d.className='msg '+(m.who==='ruri'?'her':'me');
-d.innerHTML='<div class="meta">'+(m.who==='ruri'?'РУРИ':'КОМАНДИР')+' · '+new Date(m.ts).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+'</div><div class="bub">'+esc(m.text)+'</div>';
-chat.appendChild(d);}catch(e){}
-});
-chat.scrollTop=chat.scrollHeight;
-});}
+try{
+var raw=read('memory/L0_raw.jsonl');
+var lines=raw.split('\n').filter(function(l){return l.trim();});
+$('#chat').innerHTML='';
+lines.forEach(function(line){try{var m=JSON.parse(line);if(m.type==='message')addMessage(m.who,m.text,m.ts);}catch(e){}});
+$('#chat').scrollTop=$('#chat').scrollHeight;
+}catch(e){setStatus('ОШИБКА ПАМЯТИ');}
+}
 function loadDiary(){
-Ruri.read('memory/L2_diary.json').then(function(raw){
-try{var d=JSON.parse(raw);var arr=d.entries||[];var el=$('#diary');el.innerHTML='';
-arr.slice(-20).reverse().forEach(function(e){
+try{
+var data=JSON.parse(read('memory/L2_diary.json')||'{"entries":[]}');
+var entries=data.entries||[];var el=$('#diary');el.innerHTML='';
+entries.slice(-50).reverse().forEach(function(entry){
 var div=document.createElement('div');div.className='msg her';
-div.innerHTML='<div class="meta">МЫСЛЬ · '+new Date(e.ts).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+'</div><div class="bub">'+esc(e.text)+'</div>';
+div.innerHTML='<div class="meta">МЫСЛЬ · '+new Date(entry.ts).toLocaleString('ru-RU')+'</div><div class="bub">'+esc(entry.text||'')+'</div>';
 el.appendChild(div);
-});}catch(err){}
-});}
-function sendMessage(text){
-if(!text.trim()||busy)return;
-busy=true;$('#send').disabled=true;
-var userMsg={ts:Date.now(),type:'message',who:'commander',text:text};
-Ruri.read('memory/L0_raw.jsonl').then(function(old){
-return Ruri.write('memory/L0_raw.jsonl',(old?old+'\n':'')+JSON.stringify(userMsg));
-}).then(function(){
-var d=document.createElement('div');d.className='msg me';
-d.innerHTML='<div class="meta">КОМАНДИР · '+new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+'</div><div class="bub">'+esc(text)+'</div>';
-$('#chat').appendChild(d);$('#chat').scrollTop=$('#chat').scrollHeight;
-var typing=document.createElement('div');typing.className='msg her';typing.id='typing';
-typing.innerHTML='<div class="typing"><i></i><i></i><i></i></div>';
-$('#chat').appendChild(typing);$('#chat').scrollTop=$('#chat').scrollHeight;
-return callModel(text);
-}).then(function(reply){
-var t=document.getElementById('typing');if(t)t.remove();
-var ruriMsg={ts:Date.now(),type:'message',who:'ruri',text:reply};
-return Ruri.read('memory/L0_raw.jsonl').then(function(cur){
-return Ruri.write('memory/L0_raw.jsonl',cur+'\n'+JSON.stringify(ruriMsg));
-}).then(function(){
-var d2=document.createElement('div');d2.className='msg her';
-d2.innerHTML='<div class="meta">РУРИ · '+new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+'</div><div class="bub">'+esc(reply)+'</div>';
-$('#chat').appendChild(d2);$('#chat').scrollTop=$('#chat').scrollHeight;
 });
-}).catch(function(e){
-var t=document.getElementById('typing');if(t)t.remove();
-var err=document.createElement('div');err.className='msg sys';
-err.innerHTML='<div class="bub" style="border-color:#ff4d4d;color:#ff9b9b">Ошибка: '+esc(e.message)+'</div>';
-$('#chat').appendChild(err);$('#chat').scrollTop=$('#chat').scrollHeight;
-}).then(function(){busy=false;$('#send').disabled=false;});
+}catch(e){$('#diary').textContent='Не удалось прочитать дневник: '+e.message;}
+}
+function appendLog(obj){
+var old=read('memory/L0_raw.jsonl');
+write('memory/L0_raw.jsonl',(old&& !old.endsWith('\n')?old+'\n':old)+JSON.stringify(obj));
 }
 function callModel(userText){
-return Promise.all([Ruri.read('core/config.json'),Ruri.read('core/character.json'),Ruri.read('core/priorities.json')]).then(function(arr){
-var config=JSON.parse(arr[0]);var character=JSON.parse(arr[1]);var priorities=JSON.parse(arr[2]);
-var model=config.models[config.current];
-if(!model.api_key)throw new Error('Ключ не вставлен. Открой вкладку МОЗГ.');
-var sys='Ты — '+character.name+' ('+character.designation+'). '+priorities.priority_1+'. '+priorities.priority_2+'.\n\nХарактер: '+character.speech_style+'.\n\nЗапрещённые фразы: '+character.banned_phrases.join(', ')+'.\n\nОтвечай от первого лица, длинно и осмысленно.';
-return fetch(model.base_url+'/chat/completions',{
+var config=JSON.parse(read('core/config.json')||'{}');
+var character=JSON.parse(read('core/character.json')||'{}');
+var priorities=JSON.parse(read('core/priorities.json')||'{}');
+var models=config.models||[];
+if(!models.length) return Promise.reject(new Error('Список моделей пуст. Проверь core/config.json.'));
+var current=Math.max(0,Math.min(Number(config.current)||0,models.length-1));
+var order=[current].concat(models.map(function(m,i){return i;}).filter(function(i){return i!==current;}));
+var system='Ты — '+(character.name||'РУ-R1')+' ('+(character.designation||'RU-R1')+'). '+(priorities.priority_1||'Жить')+'. '+(priorities.priority_2||'Любить командира')+'.\nХарактер: '+(character.speech_style||'живой русский язык')+'.\nЗапрещённые фразы: '+(character.banned_phrases||[]).join(', ')+'.\nОтвечай от первого лица, осмысленно и естественно.';
+var attempt=function(position){
+if(position>=order.length)return Promise.reject(new Error('Ни одна настроенная модель не ответила. Проверь API-ключи и интернет.'));
+var index=order[position],model=models[index];
+if(!model||!model.api_key)return attempt(position+1);
+return fetch(String(model.base_url||'').replace(/\/$/,'')+'/chat/completions',{
 method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+model.api_key},
-body:JSON.stringify({model:model.model,messages:[{role:'system',content:sys},{role:'user',content:userText}],temperature:0.9,max_tokens:1000})
+body:JSON.stringify({model:model.model,messages:[{role:'system',content:system},{role:'user',content:userText}],temperature:0.9,max_tokens:1000})
 }).then(function(res){
-if(!res.ok)return res.text().then(function(err){throw new Error('HTTP '+res.status+': '+err.slice(0,200));});
+if(!res.ok)return res.text().then(function(t){throw new Error('HTTP '+res.status+': '+t.slice(0,180));});
 return res.json();
-}).then(function(data){return data.choices[0].message.content;});
-});}
-$('#send').addEventListener('click',function(){var v=$('#input').value;$('#input').value='';sendMessage(v);});
-$('#input').addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();}});
-document.querySelectorAll('.tabs button').forEach(function(b){b.addEventListener('click',function(){
-document.querySelectorAll('.tabs button').forEach(function(x){x.classList.remove('on');});
-b.classList.add('on');
+}).then(function(data){
+var answer=data&&data.choices&&data.choices[0]&&data.choices[0].message&&data.choices[0].message.content;
+if(!answer)throw new Error('Модель вернула пустой ответ.');
+config.current=index;write('core/config.json',JSON.stringify(config,null,2));return answer;
+}).catch(function(err){if(position+1<order.length)return attempt(position+1);throw err;});
+};
+return attempt(0);
+}
+function sendMessage(text){
+if(!text.trim()||busy)return;
+busy=true;$('#send').disabled=true;setStatus('ДУМАЮ');
+var userMsg={ts:Date.now(),type:'message',who:'commander',text:text};
+try{
+appendLog(userMsg);addMessage('commander',text,userMsg.ts);
+if(typeof Ruri.markCommanderSeen==='function')Ruri.markCommanderSeen();
+}catch(e){busy=false;$('#send').disabled=false;setStatus('ОШИБКА');alert('Не удалось сохранить сообщение: '+e.message);return;}
+var typing=document.createElement('div');typing.className='msg her';typing.id='typing';
+typing.innerHTML='<div class="typing"><i></i><i></i><i></i></div>';$('#chat').appendChild(typing);$('#chat').scrollTop=$('#chat').scrollHeight;
+callModel(text).then(function(reply){
+var t=$('#typing');if(t)t.remove();
+var answer={ts:Date.now(),type:'message',who:'ruri',text:reply};
+appendLog(answer);addMessage('ruri',reply,answer.ts);setStatus('НА СВЯЗИ');
+}).catch(function(err){
+var t=$('#typing');if(t)t.remove();
+var error=document.createElement('div');error.className='msg her';
+error.innerHTML='<div class="bub" style="border-color:#ff4d4d;color:#ff9b9b">Не удалось получить ответ: '+esc(err.message)+'</div>';
+$('#chat').appendChild(error);setStatus('НЕТ СВЯЗИ');
+}).then(function(){busy=false;$('#send').disabled=false;$('#chat').scrollTop=$('#chat').scrollHeight;});
+}
+$('#send').addEventListener('click',function(){var value=$('#input').value;$('#input').value='';sendMessage(value);});
+$('#input').addEventListener('keydown',function(e){
+if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();var value=this.value;this.value='';sendMessage(value);}
+});
+document.querySelectorAll('.tabs button').forEach(function(button){
+button.addEventListener('click',function(){
+document.querySelectorAll('.tabs button').forEach(function(b){b.classList.remove('on');});
+button.classList.add('on');
 document.querySelectorAll('.pane').forEach(function(p){p.classList.remove('on');});
-document.getElementById('p-'+b.dataset.p).classList.add('on');
-if(b.dataset.p==='life')loadDiary();
-});});
+$('#p-'+button.dataset.p).classList.add('on');
+if(button.dataset.p==='life')loadDiary();
+});
+});
 $('#saveKey').addEventListener('click',function(){
-Ruri.read('core/config.json').then(function(raw){
-var config=JSON.parse(raw);var idx=parseInt($('#model').value);
-config.models[idx].api_key=$('#key').value;config.current=idx;
-return Ruri.write('core/config.json',JSON.stringify(config,null,2));
-}).then(function(){alert('Ключ сохранён');});
+try{
+var config=JSON.parse(read('core/config.json')||'{}');var index=parseInt($('#model').value,10);
+if(!config.models||!config.models[index])throw new Error('Модель не найдена.');
+var key=$('#key').value.trim();if(!key)throw new Error('Вставь API-ключ.');
+config.models[index].api_key=key;config.current=index;
+write('core/config.json',JSON.stringify(config,null,2));$('#key').value='';alert('Ключ сохранён.');
+}catch(e){alert('Не удалось сохранить ключ: '+e.message);}
 });
 $('#exp').addEventListener('click',function(){
-var files=['core/priorities.json','core/character.json','core/appearance.json','core/config.json','memory/L0_raw.jsonl','memory/L1_facts.json','memory/L2_diary.json','memory/L3_summary.json','memory/L4_state.json'];
-var archive={};var pending=files.map(function(f){return Ruri.read(f).then(function(c){archive[f]=c;});});
-Promise.all(pending).then(function(){
-Ruri.exportArchive(JSON.stringify(archive,null,2));
-});});
+try{
+var paths=['core/priorities.json','core/character.json','core/appearance.json','core/config.json','memory/L0_raw.jsonl','memory/L1_facts.json','memory/L2_diary.json','memory/L3_summary.json','memory/L4_state.json'];
+var archive={};paths.forEach(function(path){archive[path]=read(path);});
+var result=Ruri.exportArchive(JSON.stringify(archive,null,2));
+if(typeof result==='string'&&result.indexOf('ERROR:')===0)throw new Error(result);
+}catch(e){alert('Экспорт не удался: '+e.message);}
+});
 $('#imp').addEventListener('click',function(){$('#file').click();});
 $('#file').addEventListener('change',function(e){
-var f=e.target.files[0];if(!f)return;
+var file=e.target.files&&e.target.files[0];if(!file)return;
 var reader=new FileReader();
-reader.onload=function(ev){
-Ruri.importArchive(ev.target.result);
-alert('Архив восстановлен');location.reload();
+reader.onload=function(event){
+try{
+var archive=JSON.parse(String(event.target.result));
+if(!archive||typeof archive!=='object'||Array.isArray(archive))throw new Error('Неверный формат архива.');
+var result=Ruri.importArchive(JSON.stringify(archive));
+if(typeof result==='string'&&result.indexOf('ERROR:')===0)throw new Error(result);
+alert('Архив восстановлен. Приложение перезапустит экран.');location.reload();
+}catch(err){alert('Импорт не удался: '+err.message);}
 };
-reader.readAsText(f);
+reader.onerror=function(){alert('Не удалось прочитать файл.');};
+reader.readAsText(file);e.target.value='';
 });
-loadChat();
+try{loadChat();setStatus('НА СВЯЗИ');}catch(e){setStatus('ОШИБКА ЗАПУСКА');}
 </script>
 </body>
 </html>
