@@ -88,7 +88,12 @@ object EventQueue {
         return try {
             JSONObject(raw)
         } catch (_: Exception) {
-            // Preserve the corrupt file for diagnosis; rebuild the in-memory queue only.
+            // Keep a copy of the damaged queue before a later enqueue atomically repairs it.
+            try {
+                val backup = File(root, "backup/pending_events_corrupt_" + System.currentTimeMillis() + ".json")
+                backup.parentFile?.mkdirs()
+                backup.writeText(raw, Charsets.UTF_8)
+            } catch (_: Exception) { }
             JSONObject().put("schema_version", 1).put("pending", JSONArray())
                 .put("recovery_warning", "pending_events.json was unreadable")
         }
