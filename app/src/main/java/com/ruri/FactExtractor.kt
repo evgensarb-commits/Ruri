@@ -21,8 +21,15 @@ object FactExtractor {
     private const val MIN_COMMANDER_MESSAGES = 3
     private const val MAX_WINDOW_MESSAGES = 32
     private const val RETRY_COOLDOWN_MS = 30L * 60L * 1000L
+    private val processLock = Any()
 
-    fun extractIfDue(context: Context): Int {
+    internal data class ApplyResult(val added: Int, val updated: Int)
+
+    fun extractIfDue(context: Context): Int = synchronized(processLock) {
+        extractLocked(context)
+    }
+
+    private fun extractLocked(context: Context): Int {
         val root = context.filesDir
         val state = readStateStrict(root)
         val now = System.currentTimeMillis()
@@ -62,11 +69,18 @@ object FactExtractor {
 
         val factsRaw = FileManager.read(root, FACTS_PATH)
         val factsFile = try {
-            if (factsRaw.isBlank()) JSONObject().put("facts", JSONArray()) else JSONObject(factsRaw)
+            if (factsRaw.isBlank()) throw IllegalStateException("L1 file is empty")
+            JSONObject(factsRaw)
         } catch (e: Exception) {
             preserveCorrupt(root, FACTS_PATH, factsRaw)
             recordAttempt(root, state, now)
             Log.w("Ruri", "Automatic fact extraction stopped: L1 is malformed and was preserved", e)
+            return 0
+        }
+        val facts = factsFile.optJSONArray("facts") ?: run {
+            preserveCorrupt(root, FACTS_PATH, factsRaw)
+            recordAttempt(root, state, now)
+            Log.w("Ruri", "Automatic fact extraction stopped: L1 has no facts array; original was preserved")
             return 0
         }
 
@@ -116,63 +130,10 @@ object FactExtractor {
             return 0
         }
 
-        val facts = factsFile.optJSONArray("facts") ?: JSONArray()
         val candidates = parsed.optJSONArray("facts") ?: JSONArray()
-        var added = 0
-        var updated = 0
-
-        for (index in 0 until candidates.length()) {
-            val candidate = candidates.optJSONObject(index) ?: continue
-            val text = candidate.optString("text").trim().take(300)
-            if (text.length < 5 || CredentialGuard.containsCredentials(text)) continue
-
-            val confidence = candidate.optDouble("confidence", 0.0)
-            val evidence = candidate.optJSONArray("evidence_event_ids") ?: JSONArray()
-            val validEvidence = JSONArray()
-            for (evidenceIndex in 0 until evidence.length()) {
-                val id = evidence.optString(evidenceIndex)
-                if (id in commanderIds) validEvidence.put(id)
-            }
-            val explicit = candidate.optBoolean("explicit", false)
-            if (confidence < 0.82 || validEvidence.length() == 0) continue
-            if (!explicit && validEvidence.length() < 2) continue
-
-            val normalized = normalize(text)
-            var existing: JSONObject? = null
-            for (factIndex in 0 until facts.length()) {
-                val fact = facts.optJSONObject(factIndex) ?: continue
-                if (normalize(fact.optString("text")) == normalized) {
-                    existing = fact
-                    break
-                }
-            }
-
-            if (existing != null) {
-                existing.put("confidence", maxOf(existing.optDouble("confidence", 0.0), confidence))
-                existing.put("updated_at", now)
-                existing.put("last_confirmed_at", now)
-                existing.put("explicit", existing.optBoolean("explicit", false) || explicit)
-                existing.put("source_event_ids", mergeIds(existing.optJSONArray("source_event_ids"), validEvidence))
-                updated++
-            } else if (facts.length() < 500) {
-                facts.put(
-                    JSONObject()
-                        .put("id", "fact-" + UUID.randomUUID().toString())
-                        .put("text", text)
-                        .put("category", candidate.optString("category", "general").take(40))
-                        .put("confidence", confidence)
-                        .put("explicit", explicit)
-                        .put("source_event_ids", validEvidence)
-                        .put("origin", "automatic_extraction")
-                        .put("sensitivity", candidate.optString("sensitivity", "personal_context").take(40))
-                        .put("created_at", now)
-                        .put("updated_at", now)
-                        .put("last_confirmed_at", now)
-                        .put("source_model", usedModel)
-                )
-                added++
-            }
-        }
+        val applied = applyCandidates(facts, candidates, commanderIds, usedModel, now)
+        val added = applied.added
+        val updated = applied.updated
 
         factsFile.put("facts", facts)
         factsFile.put("last_extraction_batch_id", batchId)
@@ -193,6 +154,78 @@ object FactExtractor {
                 .put("privacy", "local")
         )
         return added + updated
+    }
+
+    /**
+     * Applies model proposals only when they cite real Commander event IDs.
+     * This is deterministic and deliberately separate from networking for unit tests.
+     */
+    internal fun applyCandidates(
+        facts: JSONArray,
+        candidates: JSONArray,
+        commanderIds: Set<String>,
+        sourceModel: String,
+        now: Long
+    ): ApplyResult {
+        var added = 0
+        var updated = 0
+        for (index in 0 until candidates.length()) {
+            val candidate = candidates.optJSONObject(index) ?: continue
+            val text = candidate.optString("text").trim().take(300)
+            if (text.length < 5 || CredentialGuard.containsCredentials(text)) continue
+
+            val confidence = candidate.optDouble("confidence", 0.0)
+            if (!confidence.isFinite() || confidence < 0.82 || confidence > 1.0) continue
+
+            val evidence = candidate.optJSONArray("evidence_event_ids") ?: JSONArray()
+            val validEvidence = JSONArray()
+            val seenEvidence = HashSet<String>()
+            for (evidenceIndex in 0 until evidence.length()) {
+                val id = evidence.optString(evidenceIndex)
+                if (id in commanderIds && seenEvidence.add(id)) validEvidence.put(id)
+            }
+            val explicit = candidate.optBoolean("explicit", false)
+            if (validEvidence.length() == 0) continue
+            if (!explicit && validEvidence.length() < 2) continue
+
+            val normalized = normalize(text)
+            var existing: JSONObject? = null
+            for (factIndex in 0 until facts.length()) {
+                val fact = facts.optJSONObject(factIndex) ?: continue
+                if (normalize(fact.optString("text")) == normalized) {
+                    existing = fact
+                    break
+                }
+            }
+
+            if (existing != null) {
+                existing.put("confidence", maxOf(existing.optDouble("confidence", 0.0), confidence))
+                existing.put("updated_at", now)
+                existing.put("last_confirmed_at", now)
+                existing.put("explicit", existing.optBoolean("explicit", false) || explicit)
+                existing.put("source_event_ids", mergeIds(existing.optJSONArray("source_event_ids"), validEvidence))
+                if (existing.optString("source_model").isBlank()) existing.put("source_model", sourceModel)
+                updated++
+            } else if (facts.length() < 500) {
+                facts.put(
+                    JSONObject()
+                        .put("id", "fact-" + UUID.randomUUID().toString())
+                        .put("text", text)
+                        .put("category", candidate.optString("category", "general").take(40))
+                        .put("confidence", confidence)
+                        .put("explicit", explicit)
+                        .put("source_event_ids", validEvidence)
+                        .put("origin", "automatic_extraction")
+                        .put("sensitivity", candidate.optString("sensitivity", "personal_context").take(40))
+                        .put("created_at", now)
+                        .put("updated_at", now)
+                        .put("last_confirmed_at", now)
+                        .put("source_model", sourceModel)
+                )
+                added++
+            }
+        }
+        return ApplyResult(added, updated)
     }
 
     private fun finishSuccessfulBatch(
@@ -232,18 +265,33 @@ object FactExtractor {
 
     private fun readOrInitializePending(root: File, state: JSONObject): JSONObject {
         val raw = FileManager.read(root, PENDING_PATH)
-        val pending = if (raw.isBlank()) JSONObject() else try {
+        var pending = if (raw.isBlank()) JSONObject() else try {
             JSONObject(raw)
         } catch (e: Exception) {
             preserveCorrupt(root, PENDING_PATH, raw)
             JSONObject()
         }
+
+        val initialized = pending.optBoolean("initialized", false)
+        val structureValid = !initialized ||
+            (pending.optJSONArray("transcript_messages") != null &&
+                pending.optJSONArray("commander_messages") != null &&
+                pending.optLong("scan_offset", -1L) >= 0L &&
+                pending.optLong("start_offset", -1L) >= 0L)
+        val l0Length = File(root, "memory/L0_raw.jsonl").length()
+        val cursorValid = !initialized || pending.optLong("scan_offset", 0L) <= l0Length
+        if (!structureValid || !cursorValid) {
+            if (raw.isNotBlank()) preserveCorrupt(root, PENDING_PATH, raw)
+            pending = JSONObject()
+        }
+
         if (!pending.optBoolean("initialized", false)) {
-            val oldId = state.optString("last_fact_extraction_event_id")
             val savedOffset = state.optLong("last_fact_extraction_offset", -1L)
-            val offset = if (savedOffset >= 0L) savedOffset
-            else if (oldId.isNotBlank()) FileManager.findL0EventEndOffset(root, oldId) ?: 0L
-            else 0L
+            val oldId = state.optString("last_fact_extraction_event_id")
+            val migratedOffset = if (savedOffset >= 0L && savedOffset <= l0Length) savedOffset
+                else if (oldId.isNotBlank()) FileManager.findL0EventEndOffset(root, oldId) ?: 0L
+                else 0L
+            val offset = migratedOffset.coerceIn(0L, l0Length)
             pending.put("schema_version", 1)
             pending.put("initialized", true)
             pending.put("start_offset", offset)
