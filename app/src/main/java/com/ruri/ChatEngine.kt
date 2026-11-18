@@ -18,6 +18,10 @@ object ChatEngine {
         if (models.length() == 0) throw IllegalStateException("Список моделей пуст")
         val current = config.optInt("current", 0).coerceIn(0, models.length() - 1)
         val order = (0 until models.length()).sortedBy { if (it == current) 0 else 1 }
+        // Three attempts per provider; only transient failures are retried.
+        val attemptsByModel = mutableMapOf<Int, Int>()
+        val retryableModels = mutableSetOf<Int>()
+        val requestOrder = order.flatMap { index -> List(3) { index } }
 
         val character = readJson(root, "core/character.json")
         val priorities = readJson(root, "core/priorities.json")
@@ -98,13 +102,18 @@ object ChatEngine {
         history.forEach { messages.put(it) }
 
         var lastError = "Все настроенные модели недоступны"
-        for (index in order) {
+        for (index in requestOrder) {
+            val attempt = (attemptsByModel[index] ?: 0) + 1
+            attemptsByModel[index] = attempt
+            if (attempt > 1 && index !in retryableModels) continue
+            if (attempt > 1) Thread.sleep(if (attempt == 2) 2000L else 5000L)
             val model = models.optJSONObject(index) ?: continue
             val key = model.optString("api_key")
             if (key.isBlank()) continue
             var connection: HttpURLConnection? = null
             val diagnostic = JSONObject()
                 .put("timestamp", System.currentTimeMillis())
+                .put("attempt", attempt)
                 .put("provider", model.optString("name", model.optString("id")))
                 .put("model", model.optString("model"))
                 .put("base_url", model.optString("base_url").trimEnd('/'))
@@ -173,6 +182,11 @@ object ChatEngine {
                     diagnostic.put("result", "http_error")
                     NetworkDiagnostics.record(root, diagnostic)
                     lastError = "Модель ${model.optString("name", model.optString("id"))}: HTTP $code"
+                    if (code == 429 || code == 500 || code == 502 || code == 503 || code == 504) {
+                        retryableModels.add(index)
+                    } else {
+                        retryableModels.remove(index)
+                    }
                     continue
                 }
                 stage = "PARSE_RESPONSE"
@@ -213,6 +227,8 @@ object ChatEngine {
                     e is SocketTimeoutException -> "Тайм-аут на этапе $stage"
                     else -> e.message ?: "Ошибка запроса к модели"
                 }
+                if (e is SocketTimeoutException) retryableModels.add(index)
+                else retryableModels.remove(index)
                 android.util.Log.w("Ruri", "Chat model failed at $stage: ${e.javaClass.simpleName}")
             } finally {
                 connection?.disconnect()
