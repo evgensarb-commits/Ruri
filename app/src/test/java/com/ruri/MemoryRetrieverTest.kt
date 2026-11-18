@@ -83,7 +83,7 @@ class MemoryRetrieverTest {
                 org.json.JSONArray()
                     .put(JSONObject().put(
                         "text",
-                        "Вспомнила наш разговор о северном побережье и старой обсерватории"
+                        "Вспомнила наш разговор о севере, побережье и старой обсерватории"
                     ).put("ts", System.currentTimeMillis()))
                     .put(JSONObject().put(
                         "text",
