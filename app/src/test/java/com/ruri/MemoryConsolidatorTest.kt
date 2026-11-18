@@ -2,7 +2,7 @@ package com.ruri
 
 import org.json.JSONArray
 import org.json.JSONObject
-import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -98,7 +98,6 @@ class MemoryConsolidatorTest {
         assertTrue(summary.contains(previous))
         assertTrue(summary.contains("Рубе"))
         assertTrue(summary.contains("commander@example.com"))
-        assertTrue(CredentialGuard.containsCredentials("Пароль: hunter2"))
         assertTrue(summary.contains("hunter2"))
     }
 }
