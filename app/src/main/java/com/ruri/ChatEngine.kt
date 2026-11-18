@@ -134,6 +134,11 @@ object ChatEngine {
                     ))
                     .put(JSONObject(history.last().toString()))
             } else messages
+            val safeProviderMessages = JSONArray()
+            for (messageIndex in 0 until providerMessages.length()) {
+                val message = providerMessages.optJSONObject(messageIndex) ?: continue
+                safeProviderMessages.put(SecretRedactor.redactEvent(message))
+            }
             var connection: HttpURLConnection? = null
             val diagnostic = JSONObject()
                 .put("timestamp", System.currentTimeMillis())
@@ -181,7 +186,7 @@ object ChatEngine {
                 diagnostic.put("connect_tls_ms", SystemClock.elapsedRealtime() - connectStart)
                 val body = JSONObject()
                     .put("model", model.optString("model"))
-                    .put("messages", providerMessages)
+                    .put("messages", safeProviderMessages)
                     .put("temperature", 0.85)
                 stage = "WRITE"
                 diagnostic.put("stage", stage)
