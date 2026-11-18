@@ -99,6 +99,15 @@ object Thinker {
             val model = models.optJSONObject(index) ?: continue
             if (model.optString("api_key").isBlank() && !model.optBoolean("allow_anonymous", false)) continue
             reply = requestModel(model, prompt)
+            if (!reply.isNullOrBlank() && initiative &&
+                RouteCapabilityProbe.looksLikeRefusalOrDisclaimer(reply)) {
+                RouteCapabilityProbe.markNotCapable(root, config, index, "initiative_refusal_or_disclaimer")
+                appendEvent(root, "model_route_rejected", JSONObject()
+                    .put("model", model.optString("id"))
+                    .put("reason", "initiative_refusal_or_disclaimer"))
+                reply = null
+                continue
+            }
             if (!reply.isNullOrBlank()) { successfulIndex = index; break }
             appendEvent(root, "model_error", JSONObject().put("model", model.optString("name", "unknown")))
         }
