@@ -33,11 +33,13 @@ class LocalBackupManagerTest {
         val archive = LocalBackupManager.createSnapshot(root, 1_800_000_000_000L)
 
         FileManager.write(root, "memory/L1_facts.json", """{"facts":["after"]}""")
+        FileManager.write(root, "memory/created_after_backup.json", """{"temporary":true}""")
         val result = LocalBackupManager.restore(root, archive.name, 1_800_000_100_000L)
 
         assertTrue(result.optBoolean("restored"))
         assertTrue(result.optBoolean("pre_restore_backup_created"))
         assertEquals("""{"facts":["before"]}""", FileManager.read(root, "memory/L1_facts.json"))
+        assertFalse(FileManager.exists(root, "memory/created_after_backup.json"))
         assertEquals(2, LocalBackupManager.status(root).optInt("count"))
     }
 
