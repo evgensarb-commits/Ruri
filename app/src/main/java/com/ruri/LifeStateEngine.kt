@@ -9,9 +9,8 @@ import java.io.File
 import kotlin.math.min
 
 /**
- * Local part of RU-R1's life cycle.
- * It works without an LLM: consumes L0 events, updates motivational signals,
- * samples device resources and performs a non-destructive memory audit.
+ * Local RU-R1 life cycle. L0 is consumed incrementally using a durable byte cursor.
+ * Cross-file effects are delivered through a small outbox stored in L4; retries are idempotent.
  */
 object LifeStateEngine {
     private const val STATE_PATH = "memory/L4_state.json"
@@ -19,24 +18,35 @@ object LifeStateEngine {
     private const val L0_PATH = "memory/L0_raw.jsonl"
     private const val DIARY_PATH = "memory/L2_diary.json"
     private const val DAY_MS = 24L * 60L * 60L * 1000L
+    private const val MAX_EVENTS_PER_CYCLE = 2000
+    private const val MAX_BYTES_PER_CYCLE = 4 * 1024 * 1024
+    private val processLock = Any()
 
-    fun process(context: Context, reason: String): JSONObject {
+    fun process(context: Context, reason: String): JSONObject = synchronized(processLock) {
         val root = context.filesDir
         FileManager.init(root)
+        processLocked(context, root, reason)
+    }
 
-        val state = readJson(root, STATE_PATH)
-        val now = System.currentTimeMillis()
-        val previousCursor = state.optString("last_processed_event_id")
-        val previousTs = state.optLong("last_processed_event_ts", 0L)
-        val events = readEvents(root)
-        val cursorIndex = if (previousCursor.isBlank()) -1 else
-            events.indexOfFirst { it.optString("id") == previousCursor }
+    private fun processLocked(context: Context, root: File, reason: String): JSONObject {
+        var state = readStateStrict(root)
 
-        val newEvents = if (cursorIndex >= 0) {
-            events.drop(cursorIndex + 1)
-        } else {
-            events.filter { it.optLong("timestamp", it.optLong("ts", 0L)) > previousTs }
+        // Finish effects left by a previous interrupted process before consuming more L0.
+        val previousOutbox = state.optJSONObject("pending_life_batch")
+        if (previousOutbox != null) {
+            completePendingBatch(root, state, previousOutbox)
+            state = readStateStrict(root)
         }
+
+        val now = System.currentTimeMillis()
+        val requestedOffset = resolveCursor(root, state)
+        val batch = FileManager.readL0Batch(
+            root,
+            requestedOffset,
+            maxRecords = MAX_EVENTS_PER_CYCLE,
+            maxBytes = MAX_BYTES_PER_CYCLE
+        )
+        val newEvents = batch.events
 
         val commanderMessages = newEvents.filter {
             it.optString("type") == "message" && it.optString("who") == "commander"
@@ -58,24 +68,32 @@ object LifeStateEngine {
         val quietHours = if (lastSeen <= 0L) 0.0 else
             ((now - lastSeen).coerceAtLeast(0L) / 3_600_000.0)
 
-        // Primary need levels are motivational signals, not declarations of felt emotion.
+        // The two constitutional needs are equal. Their dynamic values only express urgency.
         val liveNeed = when {
             battery <= 12 || (freeBytes in 0 until 100L * 1024L * 1024L) -> 0.95
             battery <= 25 || (freeBytes in 0 until 500L * 1024L * 1024L) -> 0.72
             else -> 0.38
         }
-        val connectionNeed = min(0.85, 0.35 + (quietHours / 18.0) * 0.5)
+        val connectionNeed = min(0.95, 0.35 + (quietHours / 18.0) * 0.5)
         val needs = state.optJSONObject("needs") ?: JSONObject()
         needs.put("live", liveNeed)
         needs.put("love_commander", connectionNeed)
         needs.put("updated_at", now)
         state.put("needs", needs)
 
-        val device = DeviceSensors.snapshot(context, now)
+        val device = try {
+            DeviceSensors.snapshot(context, now)
+        } catch (e: Exception) {
+            Log.w("Ruri", "Device snapshot unavailable; retaining a minimal local snapshot", e)
+            JSONObject().put("time_unix_ms", now).put("privacy", "local")
+        }
         device.put("battery_percent", battery)
         device.put("available_storage_bytes", freeBytes)
         device.put("sampled_at", now)
-        device.put("resource_mode", if (battery <= 15 || (freeBytes in 0 until 100L * 1024L * 1024L)) "conserve" else "normal")
+        device.put(
+            "resource_mode",
+            if (battery <= 15 || (freeBytes in 0 until 100L * 1024L * 1024L)) "conserve" else "normal"
+        )
         state.put("device", device)
 
         val typeCounts = JSONObject()
@@ -84,42 +102,141 @@ object LifeStateEngine {
             typeCounts.put(type, typeCounts.optInt(type, 0) + 1)
         }
         val lastNewEvent = newEvents.lastOrNull()
-        val recent = JSONObject()
-            .put("processed_event_count", newEvents.size)
-            .put("event_types", typeCounts)
-            .put("last_event_at", lastNewEvent?.optLong("timestamp", lastNewEvent.optLong("ts", 0L)) ?: previousTs)
-            .put("updated_at", now)
-        state.put("recent_activity", recent)
-
-        val lastEvent = events.lastOrNull()
-        if (lastEvent != null) {
-            state.put("last_processed_event_id", lastEvent.optString("id"))
-            state.put("last_processed_event_ts", lastEvent.optLong("timestamp", lastEvent.optLong("ts", previousTs)))
-        }
+        state.put(
+            "recent_activity",
+            JSONObject()
+                .put("processed_event_count", newEvents.size)
+                .put("processed_record_count", batch.recordsRead)
+                .put("malformed_l0_lines", batch.malformedLines)
+                .put("event_types", typeCounts)
+                .put(
+                    "last_event_at",
+                    lastNewEvent?.optLong("timestamp", lastNewEvent.optLong("ts", 0L))
+                        ?: state.optLong("last_processed_event_ts", 0L)
+                )
+                .put("cursor_start_offset", batch.startOffset)
+                .put("cursor_end_offset", batch.nextOffset)
+                .put("updated_at", now)
+        )
+        state.put("l0_backlog", batch.hasMore)
         state.put("last_local_cycle", now)
         state.put("last_local_reason", reason.take(180))
         state.put("last_quiet_hours", quietHours)
-        updateDrives(root, newEvents.size, battery, now)
-        if (newEvents.isNotEmpty()) appendActivityDiary(root, newEvents.size, typeCounts, battery, now)
+        if (batch.startOffset != requestedOffset) {
+            state.put("cursor_recovered_at", now)
+            state.put("cursor_recovery_reason", "offset_out_of_range_or_mid_record")
+        }
+
+        if (batch.recordsRead > 0) {
+            val lastEvent = newEvents.lastOrNull()
+            val batchId = "${batch.startOffset}:${batch.nextOffset}:${lastEvent?.optString("id").orEmpty()}"
+            val outbox = JSONObject()
+                .put("batch_id", batchId)
+                .put("start_offset", batch.startOffset)
+                .put("end_offset", batch.nextOffset)
+                .put("record_count", batch.recordsRead)
+                .put("event_count", newEvents.size)
+                .put("malformed_count", batch.malformedLines)
+                .put("event_types", typeCounts)
+                .put("battery_percent", battery)
+                .put("processed_at", now)
+                .put("last_event_id", lastEvent?.optString("id").orEmpty())
+                .put("last_event_ts", lastEvent?.optLong("timestamp", lastEvent.optLong("ts", 0L)) ?: 0L)
+            state.put("pending_life_batch", outbox)
+            FileManager.write(root, STATE_PATH, state.toString(2))
+            completePendingBatch(root, state, outbox)
+            state = readStateStrict(root)
+        } else {
+            // Resource-related drives still change on a quiet cycle, but no activity is invented.
+            updateDrives(root, 0, battery, now, "cycle:${now}")
+            state.put("last_processed_event_offset", batch.nextOffset)
+            FileManager.write(root, STATE_PATH, state.toString(2))
+        }
 
         if (now - state.optLong("last_memory_audit", 0L) >= DAY_MS) {
             val report = auditMemory(root, now)
             state.put("memory_health", report)
             state.put("last_memory_audit", now)
             appendMaintenanceDiary(root, report, now)
+            FileManager.write(root, STATE_PATH, state.toString(2))
         }
-
-        FileManager.write(root, STATE_PATH, state.toString(2))
-        return state
+        state
     }
 
-    private fun updateDrives(root: File, newEventCount: Int, battery: Int, now: Long) {
-        val config = readJson(root, DRIVES_PATH)
-        val drives = config.optJSONArray("drives") ?: run {
-            Log.w("Ruri", "Drive configuration is missing or invalid; preserved file was not overwritten")
+    private fun resolveCursor(root: File, state: JSONObject): Long {
+        if (state.has("last_processed_event_offset")) {
+            return state.optLong("last_processed_event_offset", 0L).coerceAtLeast(0L)
+        }
+
+        // Migrate the previous ID-based cursor without replaying already processed events.
+        val oldId = state.optString("last_processed_event_id")
+        if (oldId.isNotBlank()) {
+            val oldOffset = FileManager.findL0EventEndOffset(root, oldId)
+            if (oldOffset != null) {
+                state.put("last_processed_event_offset", oldOffset)
+                FileManager.write(root, STATE_PATH, state.toString(2))
+                return oldOffset
+            }
+        }
+
+        // Replaying L0 is safer than dropping equal-timestamp events when the old ID is absent.
+        state.put("last_processed_event_offset", 0L)
+        if (state.optLong("last_processed_event_ts", 0L) > 0L) {
+            state.put("cursor_recovery_reason", "legacy_cursor_not_found_replay_from_start")
+            state.put("cursor_recovered_at", System.currentTimeMillis())
+        }
+        FileManager.write(root, STATE_PATH, state.toString(2))
+        return 0L
+    }
+
+    private fun completePendingBatch(root: File, state: JSONObject, outbox: JSONObject) {
+        val batchId = outbox.optString("batch_id")
+        val battery = outbox.optInt("battery_percent", 50)
+        val processedAt = outbox.optLong("processed_at", System.currentTimeMillis())
+        val eventCount = outbox.optInt("event_count", 0)
+        val recordCount = outbox.optInt("record_count", eventCount)
+        val types = outbox.optJSONObject("event_types") ?: JSONObject()
+        val endOffset = outbox.optLong("end_offset", 0L)
+
+        updateDrives(root, eventCount, battery, processedAt, batchId)
+        if (eventCount > 0) {
+            appendActivityDiary(
+                root,
+                batchId,
+                eventCount,
+                recordCount,
+                outbox.optInt("malformed_count", 0),
+                types,
+                battery,
+                processedAt
+            )
+        }
+
+        state.put("last_processed_event_offset", endOffset)
+        val lastId = outbox.optString("last_event_id")
+        if (lastId.isNotBlank()) state.put("last_processed_event_id", lastId)
+        state.put(
+            "last_processed_event_ts",
+            outbox.optLong("last_event_ts", state.optLong("last_processed_event_ts", 0L))
+        )
+        state.remove("pending_life_batch")
+        FileManager.write(root, STATE_PATH, state.toString(2))
+    }
+
+    private fun updateDrives(root: File, newEventCount: Int, battery: Int, now: Long, batchId: String) {
+        val raw = FileManager.read(root, DRIVES_PATH)
+        if (raw.isBlank()) return
+        val config = try { JSONObject(raw) } catch (e: Exception) {
+            preserveCorruptFile(root, DRIVES_PATH, raw)
+            Log.w("Ruri", "Drive configuration is malformed; original file was preserved", e)
             return
         }
-        val goals = readJson(root, "memory/goals.json").optJSONArray("active") ?: JSONArray()
+        if (config.optString("last_life_batch_id") == batchId) return
+        val drives = config.optJSONArray("drives") ?: run {
+            Log.w("Ruri", "Drive configuration has no drives array; original file was preserved")
+            return
+        }
+        val goals = readJsonOptional(root, "memory/goals.json")?.optJSONArray("active") ?: JSONArray()
         for (index in 0 until drives.length()) {
             val drive = drives.optJSONObject(index) ?: continue
             val current = drive.optDouble("level", 0.25)
@@ -139,6 +256,7 @@ object LifeStateEngine {
             drive.put("updated_at", now)
         }
         config.put("drives", drives)
+        config.put("last_life_batch_id", batchId)
         config.put("evaluated_at", now)
         FileManager.write(root, DRIVES_PATH, config.toString(2))
     }
@@ -151,6 +269,7 @@ object LifeStateEngine {
             "core/character.json",
             "core/drives.json",
             "core/permissions.json",
+            "core/config.json",
             "memory/L1_facts.json",
             "memory/L2_diary.json",
             "memory/L3_summary.json",
@@ -190,104 +309,124 @@ object LifeStateEngine {
 
     private fun appendActivityDiary(
         root: File,
+        batchId: String,
         eventCount: Int,
+        recordCount: Int,
+        malformedCount: Int,
         eventTypes: JSONObject,
         battery: Int,
         now: Long
     ) {
-        try {
-            val diary = readJson(root, DIARY_PATH)
-            val entries = diary.optJSONArray("entries") ?: JSONArray()
-            val keys = eventTypes.keys()
-            val parts = ArrayList<String>()
-            while (keys.hasNext()) {
-                val key = keys.next()
-                parts.add(key + ": " + eventTypes.optInt(key))
-            }
-            val details = parts.joinToString(", ").take(500)
-            val text = "Обработала " + eventCount + " новых системных событий (" + details +
-                "). Уровень заряда устройства при обработке: " + battery + "%. Содержимое личных сообщений и уведомлений в эту сводную запись не копировала."
-
-            val previous = if (entries.length() > 0) entries.optJSONObject(entries.length() - 1) else null
-            if (previous != null &&
-                previous.optString("kind") == "activity_summary" &&
-                now - previous.optLong("ts", 0L) < 10L * 60L * 1000L
-            ) {
-                previous.put("ts", now)
-                previous.put("text", text)
-                previous.put("event_count", previous.optInt("event_count") + eventCount)
-                previous.put("event_types", eventTypes)
-                previous.put("battery_percent", battery)
-            } else {
-                val sequence = maxOf(diary.optLong("total_entries", entries.length().toLong()), entries.length().toLong()) + 1L
-                entries.put(
-                    JSONObject()
-                        .put("sequence", sequence)
-                        .put("ts", now)
-                        .put("kind", "activity_summary")
-                        .put("text", text)
-                        .put("event_count", eventCount)
-                        .put("event_types", eventTypes)
-                        .put("battery_percent", battery)
-                )
-                diary.put("total_entries", sequence)
-            }
-            while (entries.length() > 500) entries.remove(0)
-            diary.put("entries", entries)
-            diary.put("updated_at", now)
-            FileManager.write(root, DIARY_PATH, diary.toString(2))
-        } catch (e: Exception) {
-            Log.w("Ruri", "Could not write local activity diary entry", e)
+        val raw = FileManager.read(root, DIARY_PATH)
+        if (raw.isBlank()) {
+            Log.w("Ruri", "Diary is empty; activity summary was not written")
+            return
         }
-    }
-
-    private fun appendMaintenanceDiary(root: File, report: JSONObject, now: Long) {
-        try {
-            val diary = readJson(root, DIARY_PATH)
-            val entries = diary.optJSONArray("entries") ?: JSONArray()
-            val checkedCount = report.optJSONArray("checked_json_files")?.length() ?: 0
-            val text = if (report.optBoolean("healthy")) {
-                "Провела плановую локальную проверку памяти: проверены " + checkedCount +
-                    " JSON-файлов и " + report.optInt("l0_event_count") +
-                    " событий L0; ошибок структуры не обнаружено."
-            } else {
-                "Провела плановую проверку памяти и обнаружила повреждения. Сохранила диагностические сведения, исходные файлы не удаляла."
-            }
+        val diary = try { JSONObject(raw) } catch (e: Exception) {
+            preserveCorruptFile(root, DIARY_PATH, raw)
+            Log.w("Ruri", "Diary is malformed; original file was preserved", e)
+            return
+        }
+        if (diary.optString("last_activity_batch_id") == batchId) return
+        val entries = diary.optJSONArray("entries") ?: JSONArray()
+        val keys = eventTypes.keys()
+        val parts = ArrayList<String>()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            parts.add(key + ": " + eventTypes.optInt(key))
+        }
+        val details = parts.joinToString(", ").take(500)
+        val text = "Обработала $eventCount событий из $recordCount записей L0 ($details). " +
+            "Некорректных строк: $malformedCount. Заряд устройства: $battery%. " +
+            "Исходные события остались в журнале L0."
+        val previous = if (entries.length() > 0) entries.optJSONObject(entries.length() - 1) else null
+        if (previous != null &&
+            previous.optString("kind") == "activity_summary" &&
+            now - previous.optLong("ts", 0L) < 10L * 60L * 1000L
+        ) {
+            previous.put("ts", now)
+            previous.put("text", text)
+            previous.put("event_count", previous.optInt("event_count") + eventCount)
+            previous.put("record_count", previous.optInt("record_count") + recordCount)
+            previous.put("event_types", eventTypes)
+            previous.put("battery_percent", battery)
+            previous.put("batch_id", batchId)
+        } else {
             val sequence = maxOf(diary.optLong("total_entries", entries.length().toLong()), entries.length().toLong()) + 1L
             entries.put(
                 JSONObject()
                     .put("sequence", sequence)
                     .put("ts", now)
-                    .put("kind", "maintenance")
+                    .put("kind", "activity_summary")
                     .put("text", text)
-                    .put("health", report)
+                    .put("event_count", eventCount)
+                    .put("record_count", recordCount)
+                    .put("event_types", eventTypes)
+                    .put("battery_percent", battery)
+                    .put("batch_id", batchId)
             )
-            while (entries.length() > 500) entries.remove(0)
-            diary.put("entries", entries)
             diary.put("total_entries", sequence)
-            diary.put("updated_at", now)
-            FileManager.write(root, DIARY_PATH, diary.toString(2))
-        } catch (e: Exception) {
-            Log.w("Ruri", "Could not append memory maintenance diary entry", e)
+        }
+        while (entries.length() > 500) entries.remove(0)
+        diary.put("entries", entries)
+        diary.put("last_activity_batch_id", batchId)
+        diary.put("updated_at", now)
+        FileManager.write(root, DIARY_PATH, diary.toString(2))
+    }
+
+    private fun appendMaintenanceDiary(root: File, report: JSONObject, now: Long) {
+        val raw = FileManager.read(root, DIARY_PATH)
+        if (raw.isBlank()) return
+        val diary = try { JSONObject(raw) } catch (e: Exception) {
+            preserveCorruptFile(root, DIARY_PATH, raw)
+            return
+        }
+        val auditId = "audit:$now"
+        if (diary.optString("last_maintenance_audit_id") == auditId) return
+        val entries = diary.optJSONArray("entries") ?: JSONArray()
+        val checkedCount = report.optJSONArray("checked_json_files")?.length() ?: 0
+        val text = if (report.optBoolean("healthy")) {
+            "Провела плановую локальную проверку памяти: проверены $checkedCount JSON-файлов и " +
+                report.optInt("l0_event_count") + " записей L0; ошибок структуры не обнаружено."
+        } else {
+            "Провела плановую проверку памяти и обнаружила повреждения. Диагностические копии сохранены, исходные файлы не удаляла."
+        }
+        val sequence = maxOf(diary.optLong("total_entries", entries.length().toLong()), entries.length().toLong()) + 1L
+        entries.put(
+            JSONObject().put("sequence", sequence).put("ts", now).put("kind", "maintenance")
+                .put("text", text).put("health", report).put("batch_id", auditId)
+        )
+        while (entries.length() > 500) entries.remove(0)
+        diary.put("entries", entries)
+        diary.put("total_entries", sequence)
+        diary.put("last_maintenance_audit_id", auditId)
+        diary.put("updated_at", now)
+        FileManager.write(root, DIARY_PATH, diary.toString(2))
+    }
+
+    private fun readStateStrict(root: File): JSONObject {
+        val raw = FileManager.read(root, STATE_PATH)
+        if (raw.isBlank()) {
+            if (!FileManager.exists(root, STATE_PATH)) {
+                FileManager.init(root)
+                return readStateStrict(root)
+            }
+            preserveCorruptFile(root, STATE_PATH, raw)
+            throw IllegalStateException("L4 state is empty; source file was preserved")
+        }
+        return try { JSONObject(raw) } catch (e: Exception) {
+            preserveCorruptFile(root, STATE_PATH, raw)
+            throw IllegalStateException("L4 state is malformed; source file was preserved", e)
         }
     }
 
-    private fun readEvents(root: File): List<JSONObject> {
-        val raw = FileManager.read(root, L0_PATH)
-        if (raw.isBlank()) return emptyList()
-        return raw.lineSequence().filter { it.isNotBlank() }.mapNotNull { line ->
-            runCatching { JSONObject(line) }.getOrNull()
-        }.toList()
-    }
-
-    private fun readJson(root: File, path: String): JSONObject {
+    private fun readJsonOptional(root: File, path: String): JSONObject? {
         val raw = FileManager.read(root, path)
-        if (raw.isBlank()) return JSONObject()
-        return try {
-            JSONObject(raw)
-        } catch (_: Exception) {
+        if (raw.isBlank()) return null
+        return try { JSONObject(raw) } catch (e: Exception) {
             preserveCorruptFile(root, path, raw)
-            JSONObject()
+            Log.w("Ruri", "Cannot read $path; original file was preserved", e)
+            null
         }
     }
 
@@ -299,7 +438,7 @@ object LifeStateEngine {
             backup.parentFile?.mkdirs()
             if (!backup.exists()) backup.writeText(raw, Charsets.UTF_8)
         } catch (e: Exception) {
-            Log.w("Ruri", "Could not preserve damaged data file: " + path, e)
+            Log.w("Ruri", "Could not preserve damaged data file: $path", e)
         }
     }
 }

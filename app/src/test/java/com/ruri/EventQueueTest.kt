@@ -99,6 +99,47 @@ class EventQueueTest {
     }
 
     @Test
+    fun l0BatchUsesByteCursorAndReturnsOnlyCompleteRecords() {
+        FileManager.appendEvent(root, JSONObject().put("type", "cursor_test").put("text", "первое"))
+        val first = FileManager.readL0Batch(root, 0L, maxRecords = 1)
+        assertEquals(1, first.events.size)
+        assertEquals(1, first.recordsRead)
+        assertTrue(first.nextOffset > 0L)
+        assertFalse(first.incompleteTail)
+
+        FileManager.appendEvent(root, JSONObject().put("type", "cursor_test").put("text", "второе"))
+        val second = FileManager.readL0Batch(root, first.nextOffset, maxRecords = 10)
+        assertEquals(1, second.events.size)
+        assertEquals("второе", second.events.single().optString("text"))
+        assertFalse(second.hasMore)
+    }
+
+    @Test
+    fun incompleteFinalL0LineIsNotConsumedUntilItIsTerminated() {
+        val l0 = File(root, "memory/L0_raw.jsonl")
+        l0.parentFile?.mkdirs()
+        l0.writeText("{\"id\":\"partial\",\"type\":\"incomplete\"", Charsets.UTF_8)
+        val first = FileManager.readL0Batch(root, 0L)
+        assertEquals(0, first.events.size)
+        assertTrue(first.incompleteTail)
+        assertEquals(0L, first.nextOffset)
+
+        FileManager.appendEvent(root, JSONObject().put("type", "cursor_test"))
+        val second = FileManager.readL0Batch(root, 0L)
+        assertTrue(second.events.any { it.optString("type") == "cursor_test" })
+        assertTrue(second.malformedLines >= 1)
+    }
+
+    @Test
+    fun eventIdCursorCanBeMigratedToByteOffset() {
+        val stored = JSONObject(FileManager.appendEvent(root, JSONObject().put("type", "cursor_test")))
+        val offset = FileManager.findL0EventEndOffset(root, stored.optString("id"))
+        assertTrue(offset != null && offset > 0L)
+        val next = FileManager.readL0Batch(root, offset!!)
+        assertTrue(next.events.isEmpty())
+    }
+
+    @Test
     fun pathTraversalIsRejected() {
         assertThrows(IllegalArgumentException::class.java) {
             FileManager.write(root, "../outside.json", "{}")

@@ -78,7 +78,10 @@ class RuriLifeWorker(
             }
 
             EventQueue.acknowledge(root, pending)
-            if (EventQueue.hasPending(root)) LifeScheduler.kickEventWorker(appContext)
+            val l0Backlog = try {
+                JSONObject(FileManager.read(root, "memory/L4_state.json")).optBoolean("l0_backlog", false)
+            } catch (_: Exception) { false }
+            if (EventQueue.hasPending(root) || l0Backlog) LifeScheduler.kickEventWorker(appContext)
             Result.success()
         } catch (e: Exception) {
             Log.e("Ruri", "Scheduled life cycle failed", e)
