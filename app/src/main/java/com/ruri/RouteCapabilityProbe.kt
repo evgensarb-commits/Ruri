@@ -33,11 +33,14 @@ internal object RouteCapabilityProbe {
 
             val key = model.optString("api_key")
             val anonymousAllowed = model.optBoolean("allow_anonymous", false)
-            val result = if (key.isBlank() && !anonymousAllowed) {
-                ProbeResult(false, "skipped_missing_key")
-            } else {
-                probe(model, key)
+            if (key.isBlank() && !anonymousAllowed) {
+                model.put("nsfw_capable", false)
+                model.put("nsfw_tested_at", 0L)
+                model.put("nsfw_probe_status", "skipped_missing_key")
+                changed = true
+                continue
             }
+            val result = probe(model, key)
             model.put("nsfw_capable", result.capable)
             model.put("nsfw_tested_at", now)
             model.put("nsfw_probe_status", result.status)
