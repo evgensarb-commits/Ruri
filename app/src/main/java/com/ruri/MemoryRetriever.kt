@@ -89,9 +89,26 @@ object MemoryRetriever {
 
     private fun tokenize(value: String): Set<String> =
         Regex("[\\p{L}\\p{N}]{3,}").findAll(value.lowercase())
-            .map { it.value }
-            .filter { it !in stopWords }
+            .map { normalizeToken(it.value) }
+            .filter { it.length >= 3 && it !in stopWords }
             .toSet()
+
+    // Lightweight suffix normalization improves Russian case/number matching without
+    // requiring a network service or a large morphology library.
+    private fun normalizeToken(token: String): String {
+        val suffixes = listOf(
+            "иями", "ями", "ами", "ого", "ему", "ому", "ыми", "ими",
+            "ая", "яя", "ое", "ее", "ые", "ие", "ый", "ий", "ой",
+            "ую", "юю", "ам", "ям", "ах", "ях", "ов", "ев", "ей",
+            "ом", "ем", "а", "я", "ы", "и", "у", "ю", "е", "о"
+        )
+        for (suffix in suffixes) {
+            if (token.length - suffix.length >= 3 && token.endsWith(suffix)) {
+                return token.dropLast(suffix.length)
+            }
+        }
+        return token
+    }
 
     private fun readJson(root: File, path: String): JSONObject {
         val raw = FileManager.read(root, path)
