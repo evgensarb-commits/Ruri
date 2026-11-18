@@ -42,5 +42,15 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun exists(path: String): Boolean = FileManager.exists(filesDir, path)
+        
+        @JavascriptInterface
+        fun importArchive(json: String) {
+        val archive = org.json.JSONObject(json)
+        val keys = archive.keys()
+        while (keys.hasNext()) {
+        val key = keys.next()
+        FileManager.write(filesDir, key, archive.getString(key))
+    }
+}
     }
 }
