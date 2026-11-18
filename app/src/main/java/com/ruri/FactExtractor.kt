@@ -82,7 +82,16 @@ object FactExtractor {
             return 0
         }
 
-        val factsFile = readJson(root, FACTS_PATH)
+        val factsRaw = FileManager.read(root, FACTS_PATH)
+        val factsFile = try {
+            if (factsRaw.isBlank()) JSONObject() else JSONObject(factsRaw)
+        } catch (e: Exception) {
+            preserveCorruptFacts(root, factsRaw)
+            state.put("last_fact_extraction_attempt_at", now)
+            FileManager.write(root, STATE_PATH, state.toString(2))
+            Log.w("Ruri", "Automatic fact extraction stopped: L1 is malformed and was preserved", e)
+            return 0
+        }
         val facts = factsFile.optJSONArray("facts") ?: JSONArray()
         val candidates = parsed.optJSONArray("facts") ?: JSONArray()
         var added = 0
@@ -171,7 +180,7 @@ object FactExtractor {
                 JSONObject()
                     .put("event_id", event.optString("id"))
                     .put("speaker", event.optString("who"))
-                    .put("text", event.optString("text").take(1200))
+                    .put("text", redactForExternalModel(event.optString("text")).take(1200))
             )
         }
         return """
@@ -262,6 +271,25 @@ object FactExtractor {
             if (value.isNotBlank() && seen.add(value)) result.put(value)
         }
         return result
+    }
+
+    private fun redactForExternalModel(value: String): String {
+        if (sensitivePattern.containsMatchIn(value)) return "[сообщение скрыто локальным фильтром приватности]"
+        return value
+            .replace(Regex("(?i)\\b(password|passwd|secret|token|api[_ -]?key)\\b\\s*[:=]\\s*[^\\s,;]+"), "[скрыто]")
+            .replace(Regex("(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}"), "[email скрыт]")
+            .replace(Regex("(?<!\\w)\\+?\\d[\\d\\s().-]{7,}\\d(?!\\w)"), "[номер скрыт]")
+    }
+
+    private fun preserveCorruptFacts(root: java.io.File, raw: String) {
+        if (raw.isBlank()) return
+        try {
+            val backup = java.io.File(root, "backup/L1_facts_corrupt_" + System.currentTimeMillis() + ".json")
+            backup.parentFile?.mkdirs()
+            if (!backup.exists()) backup.writeText(raw, Charsets.UTF_8)
+        } catch (e: Exception) {
+            Log.w("Ruri", "Could not preserve damaged L1 facts file", e)
+        }
     }
 
     private fun normalize(value: String): String = value.lowercase()
