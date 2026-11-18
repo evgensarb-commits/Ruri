@@ -99,7 +99,8 @@ object MemoryRetriever {
             Triple(memory, score, links)
         }.sortedByDescending { it.second }
 
-        val selected = (direct.map { Triple(it.first, it.second, "прямое совпадение") } +
+        // Reserve room for associative hops; otherwise many direct hits can hide every link.
+        val selected = (direct.take(3).map { Triple(it.first, it.second, "прямое совпадение") } +
             associated.map { Triple(it.first, it.second, "связано через: " + it.third.sorted().take(4).joinToString(", ")) })
             .take(limit.coerceIn(1, 12))
         return selected.joinToString("\n") { (memory, score, relation) ->
