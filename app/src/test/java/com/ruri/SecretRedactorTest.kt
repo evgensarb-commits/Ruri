@@ -31,6 +31,13 @@ class SecretRedactorTest {
     }
 
     @Test
+    fun redactsCardNumberWhenExplicitlyLabelledEvenIfChecksumIsInvalid() {
+        val safe = SecretRedactor.redactText("Номер карты: 1234 5678 9012 3456")
+        assertFalse(safe.contains("1234 5678 9012 3456"))
+        assertTrue(safe.contains(SecretRedactor.PLACEHOLDER))
+    }
+
+    @Test
     fun doesNotRedactUnlabelledOrdinaryNumbersOrProjectContext() {
         val input = "Проект RU-R1, живу в Лилле, встреча в 19:30, версия 1.5."
         assertTrue(SecretRedactor.redactText(input).contains(input))
