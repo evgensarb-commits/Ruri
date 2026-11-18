@@ -34,7 +34,7 @@ object MemoryRetriever {
         for (i in 0 until facts.length()) {
             val fact = facts.optJSONObject(i) ?: continue
             val text = fact.optString("text").trim()
-            if (text.isNotBlank() && !CredentialGuard.containsCredentials(text)) memories.add(
+            if (text.isNotBlank()) memories.add(
                 Memory("устойчивый факт", text, fact.optLong("updated_at", fact.optLong("created_at", 0L)),
                     fact.optDouble("confidence", 1.0))
             )
@@ -44,7 +44,7 @@ object MemoryRetriever {
         for (i in 0 until diary.length()) {
             val entry = diary.optJSONObject(i) ?: continue
             val text = entry.optString("text").trim()
-            if (text.isNotBlank() && !CredentialGuard.containsCredentials(text)) memories.add(
+            if (text.isNotBlank()) memories.add(
                 Memory("эпизод дневника", text, entry.optLong("ts", 0L))
             )
         }
@@ -59,7 +59,7 @@ object MemoryRetriever {
         // Recent conversation is already supplied as chat history; recall older episodes here.
         for (event in messageEvents.dropLast(14)) {
             val text = event.optString("text").trim()
-            if (text.isNotBlank() && !CredentialGuard.containsCredentials(text)) memories.add(
+            if (text.isNotBlank()) memories.add(
                 Memory(
                     if (event.optString("who") == "ruri") "прошлый ответ Рури" else "прошлая реплика Командира",
                     text, event.optLong("timestamp", event.optLong("ts", 0L))
@@ -71,8 +71,8 @@ object MemoryRetriever {
         // few notifications copied into a live model prompt.
         for (event in parsedEvents.filter { it.optString("type") == "phone_notification" }.takeLast(200)) {
             val packageName = event.optString("package").take(160)
-            val title = CredentialGuard.redact(event.optString("title").trim()).take(250)
-            val body = CredentialGuard.redact(event.optString("text").trim()).take(700)
+            val title = event.optString("title").trim().take(250)
+            val body = event.optString("text").trim().take(700)
             val text = listOf(packageName, title, body).filter { it.isNotBlank() }.joinToString(" — ")
             if (text.isNotBlank() && terms.intersect(tokenize(text)).isNotEmpty()) {
                 memories.add(
