@@ -22,6 +22,7 @@ internal object RouteCapabilityProbe {
 
     data class ProbeResult(val capable: Boolean, val status: String)
 
+    @Synchronized
     fun refreshIfDue(root: File, config: JSONObject, now: Long = System.currentTimeMillis()) {
         val models = config.optJSONArray("models") ?: return
         var changed = false
