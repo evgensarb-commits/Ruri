@@ -25,7 +25,7 @@
 - проверка миграции существующих API-ключей и импорта/экспорта на реальном Android-устройстве.
 
 Для постоянной подписи workflow ожидает Secrets:
-`RURI_SIGNING_KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_PASSWORD`, `KEY_ALIAS`.
+`RURI_SIGNING_KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_PASSWORD`, `KEY_ALIAS`. Keystore хранится в формате PKCS12 только в GitHub Actions Secret `RURI_SIGNING_KEYSTORE_BASE64`; файл закрытого ключа не хранится в репозитории.
 Если постоянные signing secrets отсутствуют или неверны, workflow останавливается и не публикует APK. Это защищает единственную установку `com.ruri`: новый случайный ключ не должен выдаваться за совместимое обновление.
 
 ### Этап 1 — постоянная жизнь и очередь событий: частично реализован
