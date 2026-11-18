@@ -23,7 +23,7 @@
 
     <application
         android:allowBackup="true"
-        android:label="RU-R1"
+        android:label="RU-R1 TEST"
         android:theme="@style/Theme.AppCompat.NoActionBar">
 
         <!-- Главный экран -->
