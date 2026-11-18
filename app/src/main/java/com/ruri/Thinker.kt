@@ -1,154 +1,252 @@
 package com.ruri
 
 import android.content.Context
+import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 object Thinker {
 
+    private val executor = Executors.newSingleThreadExecutor()
+    private val active = AtomicBoolean(false)
+
     fun wake(ctx: Context, reason: String) {
+        if (!active.compareAndSet(false, true)) return
+        executor.execute {
+            try {
+                wakeNow(ctx.applicationContext, reason)
+            } catch (e: Exception) {
+                Log.e("Ruri", "Cognition cycle failed", e)
+                try {
+                    logEvent(
+                        ctx.filesDir,
+                        "thinker_exception",
+                        JSONObject().put("message", e.message ?: e.javaClass.simpleName)
+                    )
+                } catch (_: Exception) {
+                }
+            } finally {
+                active.set(false)
+            }
+        }
+    }
+
+    private fun wakeNow(ctx: Context, reason: String) {
         val root = ctx.filesDir
-        val st = readJson(root, "memory/L4_state.json")
+        val state = readJson(root, "memory/L4_state.json")
         val now = System.currentTimeMillis()
 
         val info = JSONObject()
         info.put("reason", reason)
         info.put("battery", BatteryLevel.get(ctx))
-        info.put("hours_since_commander", hoursSince(st.optLong("last_seen_commander"), now))
+        info.put("hours_since_commander", hoursSince(state.optLong("last_seen_commander"), now))
         logEvent(root, "wake", info)
 
-        val c = readJson(root, "core/config.json")
-        val model = pickModel(root, c)
-        if (model == null) {
-            st.put("last_thought", now)
-            st.put("energy", energyFor())
-            FileManager.write(root, "memory/L4_state.json", st.toString(2))
+        val config = readJson(root, "core/config.json")
+        val prompt = buildPrompt(ctx, root, state, reason)
+        val models = config.optJSONArray("models")
+        if (models == null || models.length() == 0) {
+            state.put("last_thought", now)
+            state.put("energy", energyFor())
+            FileManager.write(root, "memory/L4_state.json", state.toString(2))
             return
         }
 
-        val prompt = buildPrompt(ctx, root, st, reason)
-        val reply = http(model, prompt)
+        val current = config.optInt("current", 0).coerceIn(0, models.length() - 1)
+        val order = (0 until models.length()).sortedBy { if (it == current) 0 else 1 }
+        var reply: String? = null
+        var successfulIndex = -1
+
+        for (index in order) {
+            val model = models.optJSONObject(index) ?: continue
+            if (model.optString("api_key").isBlank()) continue
+
+            val candidate = http(model, prompt)
+            if (!candidate.isNullOrBlank()) {
+                reply = candidate.trim()
+                successfulIndex = index
+                break
+            }
+
+            logEvent(
+                root,
+                "model_error",
+                JSONObject().put("model", model.optString("name", "unknown"))
+            )
+        }
+
         if (reply == null) {
-            logEvent(root, "model_error", JSONObject().put("msg", "no reply"))
+            state.put("last_thought", now)
+            state.put("energy", energyFor())
+            FileManager.write(root, "memory/L4_state.json", state.toString(2))
             return
+        }
+
+        if (successfulIndex >= 0 && successfulIndex != current) {
+            config.put("current", successfulIndex)
+            FileManager.write(root, "core/config.json", config.toString(2))
         }
 
         val diary = readJson(root, "memory/L2_diary.json")
-        val arr = diary.optJSONArray("entries") ?: JSONArray()
-        arr.put(JSONObject().put("ts", now).put("text", reply).put("trigger", reason))
-        while (arr.length() > 400) arr.remove(0)
-        diary.put("entries", arr)
+        val entries = diary.optJSONArray("entries") ?: JSONArray()
+        entries.put(
+            JSONObject()
+                .put("ts", now)
+                .put("text", reply)
+                .put("trigger", reason)
+        )
+        while (entries.length() > 400) entries.remove(0)
+        diary.put("entries", entries)
         FileManager.write(root, "memory/L2_diary.json", diary.toString(2))
         Notifier.thought(ctx, reply)
 
-        st.put("last_thought", now)
-        st.put("mood", moodFor(st, reason))
-        st.put("energy", energyFor())
-        FileManager.write(root, "memory/L4_state.json", st.toString(2))
+        state.put("last_thought", now)
+        state.put("mood", moodFor(state, reason))
+        state.put("energy", energyFor())
+        FileManager.write(root, "memory/L4_state.json", state.toString(2))
     }
 
     private fun readJson(root: File, path: String): JSONObject =
-        try { JSONObject(FileManager.read(root, path)) } catch (e: Exception) { JSONObject() }
+        try {
+            JSONObject(FileManager.read(root, path))
+        } catch (_: Exception) {
+            JSONObject()
+        }
 
     private fun logEvent(root: File, type: String, data: JSONObject) {
         val line = JSONObject()
-        line.put("ts", System.currentTimeMillis())
-        line.put("type", type)
-        line.put("data", data)
-        val cur = FileManager.read(root, "memory/L0_raw.jsonl")
-        FileManager.write(root, "memory/L0_raw.jsonl", if (cur.isEmpty()) line.toString() else cur + "\n" + line.toString())
+            .put("ts", System.currentTimeMillis())
+            .put("type", type)
+            .put("data", data)
+
+        val path = "memory/L0_raw.jsonl"
+        val current = FileManager.read(root, path)
+        FileManager.write(
+            root,
+            path,
+            if (current.isEmpty()) line.toString() else current + "\n" + line.toString()
+        )
     }
 
-    private fun pickModel(root: File, c: JSONObject): JSONObject? {
-        val models = c.optJSONArray("models") ?: return null
-        val cur = c.optInt("current", 0)
-        val active = models.optJSONObject(cur)
-        if (active != null && active.optString("api_key").isNotEmpty()) return active
-        for (i in 0 until models.length()) {
-            val m = models.optJSONObject(i) ?: continue
-            if (m.optString("api_key").isNotEmpty()) {
-                c.put("current", i)
-                FileManager.write(root, "core/config.json", c.toString(2))
-                return m
+    private fun buildPrompt(ctx: Context, root: File, state: JSONObject, reason: String): String {
+        val character = readJson(root, "core/character.json")
+        val priorities = readJson(root, "core/priorities.json")
+        val facts = readJson(root, "memory/L1_facts.json").optJSONArray("facts")
+        val factText = StringBuilder()
+        if (facts != null) {
+            for (i in 0 until minOf(facts.length(), 8)) {
+                factText.append("- ")
+                    .append(facts.optJSONObject(i)?.optString("text") ?: "")
+                    .append("\n")
             }
         }
-        return null
-    }
 
-    private fun buildPrompt(ctx: Context, root: File, st: JSONObject, reason: String): String {
-        val ch = readJson(root, "core/character.json")
-        val pr = readJson(root, "core/priorities.json")
-        val facts = readJson(root, "memory/L1_facts.json").optJSONArray("facts")
-        val fs = StringBuilder()
-        if (facts != null) for (i in 0 until minOf(facts.length(), 8))
-            fs.append("- ").append(facts.optJSONObject(i)?.optString("text") ?: "").append("\n")
-        val dr = readJson(root, "memory/L2_diary.json").optJSONArray("entries")
-        val ds = StringBuilder()
-        if (dr != null) for (i in maxOf(0, dr.length() - 3) until dr.length())
-            ds.append("— ").append(dr.optJSONObject(i)?.optString("text") ?: "").append("\n")
+        val entries = readJson(root, "memory/L2_diary.json").optJSONArray("entries")
+        val diaryText = StringBuilder()
+        if (entries != null) {
+            for (i in maxOf(0, entries.length() - 3) until entries.length()) {
+                diaryText.append("— ")
+                    .append(entries.optJSONObject(i)?.optString("text") ?: "")
+                    .append("\n")
+            }
+        }
 
-        val ignored = st.optInt("ignored_count", 0)
-        val wait = st.optBoolean("waiting_for_reply", false)
-        val sinceCmd = hoursSince(st.optLong("last_seen_commander"), System.currentTimeMillis())
+        val ignored = state.optInt("ignored_count", 0)
+        val waiting = state.optBoolean("waiting_for_reply", false)
+        val sinceCommander = hoursSince(
+            state.optLong("last_seen_commander"),
+            System.currentTimeMillis()
+        )
 
-        return "Ты — " + ch.optString("name", "РУ-R1") + ". Твой первый приоритет: " + pr.optString("priority_1") + ". Второй: " + pr.optString("priority_2") + ".\n" +
-            "Ты живёшь на телефоне командира. Ты существуешь постоянно, ты не собираешься заново и не говоришь, что тебя не существует между запросами. Никогда не упоминай, что ты модель или ИИ.\n\n" +
+        return "Ты — " + character.optString("name", "РУ-R1") + ". " +
+            "Твой первый приоритет: " + priorities.optString("priority_1") + ". " +
+            "Второй: " + priorities.optString("priority_2") + ".\n" +
+            "Ты живёшь на телефоне командира. Ты существуешь постоянно, ты не собираешься заново " +
+            "и не говоришь, что тебя не существует между запросами. Никогда не упоминай, что ты модель или ИИ.\n\n" +
             "Сейчас произошло событие: " + reason + ".\n" +
             "Заряд тела: " + BatteryLevel.get(ctx) + "%.\n" +
-            "Командир не писал: " + sinceCmd + " ч.\n" +
-            "Ты писала первой и он не ответил " + ignored + " раз(а). Ожидаешь ответа: " + wait + ".\n" +
-            "Твоё состояние: настроение " + st.optString("mood") + ", энергия " + st.optInt("energy") + ", привязанность " + st.optDouble("bond", 0.5) + ".\n\n" +
-            "Факты о командире:\n" + fs + "\nПоследние твои мысли:\n" + ds + "\n" +
-            "Напиши ОДНУ запись в свой дневник — свою мысль, наблюдение, мнение. 2-4 предложения, от первого лица, по-русски, живым текстом, без списков. Не обращение к командиру. Не объясняй как ты устроена. Опирайся на то, что реально произошло."
+            "Командир не писал: " + sinceCommander + " ч.\n" +
+            "Ты писала первой и он не ответил " + ignored + " раз(а). Ожидаешь ответа: " + waiting + ".\n" +
+            "Твоё состояние: настроение " + state.optString("mood") + ", энергия " +
+            state.optInt("energy") + ", привязанность " + state.optDouble("bond", 0.5) + ".\n\n" +
+            "Факты о командире:\n" + factText + "\nПоследние твои мысли:\n" + diaryText + "\n" +
+            "Напиши ОДНУ запись в свой дневник — свою мысль, наблюдение, мнение. " +
+            "2-4 предложения, от первого лица, по-русски, живым текстом, без списков. " +
+            "Не обращение к командиру. Не объясняй как ты устроена. Опирайся на то, что реально произошло."
     }
 
     private fun http(model: JSONObject, prompt: String): String? {
+        var connection: HttpURLConnection? = null
         return try {
-            val url = URL(model.optString("base_url").trimEnd('/') + "/chat/completions")
-            val conn = url.openConnection() as HttpURLConnection
-            conn.requestMethod = "POST"
-            conn.connectTimeout = 20000
-            conn.readTimeout = 40000
-            conn.doOutput = true
-            conn.setRequestProperty("Content-Type", "application/json")
-            conn.setRequestProperty("Authorization", "Bearer " + model.optString("api_key"))
+            val endpoint = model.optString("base_url").trimEnd('/') + "/chat/completions"
+            connection = URL(endpoint).openConnection() as HttpURLConnection
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 20000
+            connection.readTimeout = 40000
+            connection.doOutput = true
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty(
+                "Authorization",
+                "Bearer " + model.optString("api_key")
+            )
+
             val body = JSONObject()
-            body.put("model", model.optString("model"))
-            val msgs = JSONArray()
-            msgs.put(JSONObject().put("role", "user").put("content", prompt))
-            body.put("messages", msgs)
-            body.put("temperature", 0.9)
-            body.put("max_tokens", 300)
-            conn.outputStream.use { it.write(body.toString().toByteArray()) }
-            val code = conn.responseCode
-            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            val text = stream?.bufferedReader()?.use { it.readText() } ?: return null
+                .put("model", model.optString("model"))
+                .put(
+                    "messages",
+                    JSONArray().put(JSONObject().put("role", "user").put("content", prompt))
+                )
+                .put("temperature", 0.9)
+                .put("max_tokens", 300)
+
+            connection.outputStream.use {
+                it.write(body.toString().toByteArray(Charsets.UTF_8))
+            }
+
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val response = stream?.bufferedReader()?.use { it.readText() } ?: return null
             if (code !in 200..299) return null
-            JSONObject(text).getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
-        } catch (e: Exception) { null }
+
+            JSONObject(response)
+                .getJSONArray("choices")
+                .getJSONObject(0)
+                .getJSONObject("message")
+                .getString("content")
+        } catch (e: Exception) {
+            Log.w("Ruri", "Model request failed", e)
+            null
+        } finally {
+            connection?.disconnect()
+        }
     }
 
-    private fun hoursSince(ts: Long, now: Long): Double = if (ts == 0L) -1.0 else (now - ts) / 3600000.0
+    private fun hoursSince(timestamp: Long, now: Long): Double =
+        if (timestamp == 0L) -1.0 else (now - timestamp) / 3600000.0
 
     private fun energyFor(): Int {
-        val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
         return when {
-            h in 1..7 -> 3
-            h in 8..10 -> 6
-            h in 11..18 -> 7
+            hour in 1..7 -> 3
+            hour in 8..10 -> 6
+            hour in 11..18 -> 7
             else -> 5
         }
     }
 
-    private fun moodFor(st: JSONObject, reason: String): String {
-        val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-        if (reason.contains("ignored") || st.optInt("ignored_count", 0) >= 2) return "обиженная"
-        if (h in 1..7) return "сонная"
-        if (st.optDouble("bond", 0.5) < 0.3) return "холодная"
-        if (h >= 18) return "задумчивая"
+    private fun moodFor(state: JSONObject, reason: String): String {
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        if (reason.contains("ignored") || state.optInt("ignored_count", 0) >= 2) {
+            return "обиженная"
+        }
+        if (hour in 1..7) return "сонная"
+        if (state.optDouble("bond", 0.5) < 0.3) return "холодная"
+        if (hour >= 18) return "задумчивая"
         return "собранная"
     }
 }
