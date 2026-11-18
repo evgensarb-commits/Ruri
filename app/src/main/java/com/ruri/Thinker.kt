@@ -164,7 +164,7 @@ object Thinker {
             }
         }
         val notificationText = StringBuilder()
-        FileManager.read(root, "memory/L0_raw.jsonl").lineSequence().toList().asReversed()
+        FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 5000).asReversed()
             .forEach { line ->
                 if (notificationText.length < 2200) {
                     try {
