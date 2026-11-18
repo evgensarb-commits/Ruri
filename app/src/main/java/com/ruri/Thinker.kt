@@ -183,8 +183,8 @@ object Thinker {
                 val event = JSONObject(line)
                 if (event.optString("type") != "phone_notification") return@mapNotNull null
                 val source = event.optString("package").take(160)
-                val title = event.optString("title").take(300)
-                val body = event.optString("text").take(700)
+                val title = event.optString("title")
+                val body = event.optString("text")
                 "- $source: $title — $body"
             } catch (_: Exception) { null }
         }.take(20).asReversed().joinToString("\n")
