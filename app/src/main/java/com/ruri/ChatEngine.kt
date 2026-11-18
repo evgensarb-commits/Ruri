@@ -139,7 +139,7 @@ object ChatEngine {
                             "Манера речи: ${character.optString("speech_style", "короткая живая речь гяру")}. " +
                             "Не утверждай, что помнишь то, чего нет в текущем сообщении."
                     ))
-                    .put(JSONObject(history.last().toString())
+                    .put(JSONObject(history.last().toString()))
             } else messages
             var connection: HttpURLConnection? = null
             val diagnostic = JSONObject()
