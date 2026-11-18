@@ -96,7 +96,7 @@ object Thinker {
             val summaryLines = StringBuilder()
             for (i in maxOf(0, entries.length() - 20) until entries.length()) {
                 val item = entries.optJSONObject(i)
-                if (item != null) summaryLines.append("• ").append(item.optString("text")).append("\\n")
+                if (item != null) summaryLines.append("• ").append(item.optString("text")).append("\n")
             }
             val summary = JSONObject()
                 .put("summary", summaryLines.toString().takeLast(7000))
