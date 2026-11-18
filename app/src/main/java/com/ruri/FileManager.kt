@@ -189,6 +189,38 @@ object FileManager {
     fun read(root: File, path: String): String =
         safe(root, path)?.takeIf { it.exists() && it.isFile }?.readText(Charsets.UTF_8) ?: ""
 
+    /**
+     * Reads a bounded tail of a log without loading its full history into memory.
+     * A partial first line is discarded when the byte limit cuts through an event.
+     */
+    fun readLastLines(root: File, path: String, maxLines: Int, maxBytes: Int = 2 * 1024 * 1024): List<String> {
+        require(maxLines > 0 && maxBytes > 0)
+        val target = safe(root, path) ?: return emptyList()
+        if (!target.exists() || !target.isFile) return emptyList()
+        return try {
+            java.io.RandomAccessFile(target, "r").use { input ->
+                val length = input.length()
+                val start = (length - maxBytes.toLong()).coerceAtLeast(0L)
+                input.seek(start)
+                if (start > 0L) input.readLine()
+                val output = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(8192)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    output.write(buffer, 0, count)
+                }
+                output.toByteArray().toString(Charsets.UTF_8)
+                    .lineSequence()
+                    .filter { it.isNotBlank() }
+                    .toList()
+                    .takeLast(maxLines)
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
     fun write(root: File, path: String, content: String) {
         val normalized = path.replace('\\', '/').trimStart('/')
         require(normalized != L0_PATH) { "L0 is append-only; use appendEvent or explicit archive restore" }
