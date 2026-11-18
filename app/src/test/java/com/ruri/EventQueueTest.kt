@@ -185,8 +185,8 @@ class EventQueueTest {
         val scopes = policy?.optJSONArray("allowed_scopes")
         assertTrue((0 until (scopes?.length() ?: 0)).any { scopes?.optString(it) == "notification_contents" })
         assertTrue(policy?.optBoolean("include_sensitive_context", false) == true)
-        assertTrue(policy?.optBoolean("include_authentication_credentials", false) == true)
-        assertFalse(policy?.optBoolean("exclude_authentication_credentials", true) == true)
+        assertFalse(policy?.optBoolean("include_authentication_credentials", true) == true)
+        assertTrue(policy?.optBoolean("exclude_authentication_credentials", false) == true)
         assertEquals("commander_requested_full_context_2026-11-18", policy?.optString("consent_record"))
     }
 
