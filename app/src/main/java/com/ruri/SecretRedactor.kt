@@ -8,8 +8,8 @@ object SecretRedactor {
     const val PLACEHOLDER = "[REDACTED_SECRET]"
 
     private val sensitiveKey = Regex(
-        "(?i).*(?:password|passwd|passphrase|pwd|парол|otp|verification.?code|confirmation.?code|" +
-            "access.?token|refresh.?token|auth.?token|api.?key|client.?secret|private.?key|secret|card.?number).*"
+        "(?i).*(?:password|passwd|passphrase|pwd|парол|otp|verification.?code|confirmation.?code|authorization|credential|" +
+            "token|api.?key|api[- ]?ключ|client.?secret|private.?key|secret|card.?number|card.?details|номер.?карты).*"
     )
     private val labelledSecrets = listOf(
         Regex("(?i)(?<![\\p{L}\\p{N}_])((?:password|passwd|passphrase|pwd|пароль|пароля|паролем))(?![\\p{L}\\p{N}_])\\s*(?:[:=]\\s*|\\s+)([^\\s,;]{4,})"),
