@@ -214,10 +214,11 @@ object Thinker {
             "Незавершённые задачи, которые нужно продолжить: " + (state.optJSONArray("active_tasks")?.toString() ?: "[]") + ".\n" +
             "Воспоминания, найденные по ассоциациям: " + (if (recalledMemories.isBlank()) "подходящих записей не найдено" else "\n" + recalledMemories) + "\n" +
             "Факты:\n" + factText + "\nСводка памяти:\n" + summary + "\nПоследние записи:\n" + diaryText + "\nПоследние уведомления телефона:\n" + notificationText + "\nМатериалы с полки:\n" + shelfText + "\n"
-        return if (initiative) common +
+        val prompt = if (initiative) common +
             "\nСейчас ты сама решила написать Командиру после долгой тишины. Выбери форму и объём сообщения по полю length_policy и текущему настроению."
         else common +
-            "\nНапиши одну запись в дневник: 2-4 предложения от первого лица, по-русски. Это внутренняя мысль, наблюдение или вывод, а не обращение к командиру. Не выдумывай события."
+            "\nНапиши запись в дневник от первого лица, по-русски. Это внутренняя мысль, наблюдение или вывод, а не обращение к Командиру. Объём выбери по length_policy. Не выдумывай события."
+        return SecretRedactor.redactText(prompt)
     }
 
     private fun requestModel(model: JSONObject, prompt: String): String? {
