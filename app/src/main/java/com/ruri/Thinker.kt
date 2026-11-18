@@ -130,7 +130,15 @@ object Thinker {
         if (diary != null) for (i in maxOf(0, diary.length() - 5) until diary.length()) {
             diaryText.append("— ").append(diary.optJSONObject(i)?.optString("text") ?: "").append("\n")
         }
-        val shelf = try { FileManager.list(root, "shelf") } catch (_: Exception) { "[]" }
+        val shelfNames = try { JSONArray(FileManager.list(root, "shelf")) } catch (_: Exception) { JSONArray() }
+        val shelfText = StringBuilder()
+        for (i in 0 until minOf(shelfNames.length(), 6)) {
+            val name = shelfNames.optString(i)
+            if (name.isNotBlank()) {
+                shelfText.append("\\n--- ").append(name).append(" ---\\n")
+                    .append(FileManager.read(root, "shelf/" + name).take(900))
+            }
+        }
         val summary = readJson(root, "memory/L3_summary.json").optString("summary")
         val quiet = hoursSince(state.optLong("last_seen_commander"), System.currentTimeMillis())
         val common = "Ты — " + character.optString("name", "РУ-R1") +
