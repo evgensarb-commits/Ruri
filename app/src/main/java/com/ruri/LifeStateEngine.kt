@@ -216,8 +216,10 @@ object LifeStateEngine {
                 previous.put("event_types", eventTypes)
                 previous.put("battery_percent", battery)
             } else {
+                val sequence = maxOf(diary.optLong("total_entries", entries.length().toLong()), entries.length().toLong()) + 1L
                 entries.put(
                     JSONObject()
+                        .put("sequence", sequence)
                         .put("ts", now)
                         .put("kind", "activity_summary")
                         .put("text", text)
@@ -225,9 +227,11 @@ object LifeStateEngine {
                         .put("event_types", eventTypes)
                         .put("battery_percent", battery)
                 )
+                diary.put("total_entries", sequence)
             }
             while (entries.length() > 500) entries.remove(0)
             diary.put("entries", entries)
+            diary.put("updated_at", now)
             FileManager.write(root, DIARY_PATH, diary.toString(2))
         } catch (e: Exception) {
             Log.w("Ruri", "Could not write local activity diary entry", e)
@@ -246,8 +250,10 @@ object LifeStateEngine {
             } else {
                 "Провела плановую проверку памяти и обнаружила повреждения. Сохранила диагностические сведения, исходные файлы не удаляла."
             }
+            val sequence = maxOf(diary.optLong("total_entries", entries.length().toLong()), entries.length().toLong()) + 1L
             entries.put(
                 JSONObject()
+                    .put("sequence", sequence)
                     .put("ts", now)
                     .put("kind", "maintenance")
                     .put("text", text)
@@ -255,6 +261,8 @@ object LifeStateEngine {
             )
             while (entries.length() > 500) entries.remove(0)
             diary.put("entries", entries)
+            diary.put("total_entries", sequence)
+            diary.put("updated_at", now)
             FileManager.write(root, DIARY_PATH, diary.toString(2))
         } catch (e: Exception) {
             Log.w("Ruri", "Could not append memory maintenance diary entry", e)
