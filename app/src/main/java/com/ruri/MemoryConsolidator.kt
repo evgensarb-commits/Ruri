@@ -18,14 +18,26 @@ object MemoryConsolidator {
     private const val DAY_MS = 24L * 60L * 60L * 1000L
     private const val MIN_ENTRIES = 10
     private const val MIN_NEW_ENTRIES = 5
+    private val processLock = Any()
 
-    fun consolidateIfDue(context: Context): Boolean {
+    fun consolidateIfDue(context: Context): Boolean = synchronized(processLock) {
+        consolidateLocked(context)
+    }
+
+    private fun consolidateLocked(context: Context): Boolean {
         val root = context.filesDir
-        val diary = readJson(root, DIARY_PATH)
-        val entries = diary.optJSONArray("entries") ?: JSONArray()
+        val diary = readJsonStrict(root, DIARY_PATH) ?: return false
+        val entries = diary.optJSONArray("entries") ?: run {
+            preserveInvalidShape(root, DIARY_PATH)
+            return false
+        }
         if (entries.length() < MIN_ENTRIES) return false
 
         val current = readJsonStrict(root, SUMMARY_PATH) ?: return false
+        if (!current.has("summary")) {
+            preserveInvalidShape(root, SUMMARY_PATH)
+            return false
+        }
         // L2 is a rolling window. Its array length stops growing at 500, so
         // consolidation progress must use the monotonic lifetime counter.
         val totalEntries = maxOf(diary.optLong("total_entries", entries.length().toLong()), entries.length().toLong())
@@ -40,7 +52,11 @@ object MemoryConsolidator {
         }
         if (sourceEntries.isEmpty()) return false
 
-        val facts = readJson(root, FACTS_PATH).optJSONArray("facts") ?: JSONArray()
+        val factsFile = readJsonStrict(root, FACTS_PATH) ?: return false
+        val facts = factsFile.optJSONArray("facts") ?: run {
+            preserveInvalidShape(root, FACTS_PATH)
+            return false
+        }
         val sourceTimestamps = JSONArray()
         sourceEntries.forEach { sourceTimestamps.put(it.optLong("ts", 0L)) }
 
@@ -255,6 +271,22 @@ object MemoryConsolidator {
             } catch (_: Exception) { }
             Log.w("Ruri", "L3 source file is malformed and was preserved", e)
             null
+        }
+    }
+
+    private fun preserveInvalidShape(root: java.io.File, path: String) {
+        try {
+            val source = java.io.File(root, path)
+            if (!source.isFile) return
+            val name = path.replace('/', '_').replace('\\', '_')
+            val backup = java.io.File(
+                root,
+                "backup/" + name + "_invalid_shape_" + source.lastModified() + ".json"
+            )
+            backup.parentFile?.mkdirs()
+            if (!backup.exists()) backup.writeText(source.readText(Charsets.UTF_8), Charsets.UTF_8)
+        } catch (e: Exception) {
+            Log.w("Ruri", "Could not preserve invalid JSON structure for " + path, e)
         }
     }
 
