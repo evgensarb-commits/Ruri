@@ -70,9 +70,9 @@ object MemoryRetriever {
         // Older notification bodies remain searchable in local L0, not just the last
         // few notifications copied into a live model prompt.
         for (event in parsedEvents.filter { it.optString("type") == "phone_notification" }.takeLast(200)) {
-            val packageName = event.optString("package").take(160)
-            val title = event.optString("title").trim().take(250)
-            val body = event.optString("text").trim().take(700)
+            val packageName = event.optString("package")
+            val title = event.optString("title").trim()
+            val body = event.optString("text").trim()
             val text = listOf(packageName, title, body).filter { it.isNotBlank() }.joinToString(" — ")
             if (text.isNotBlank() && terms.intersect(tokenize(text)).isNotEmpty()) {
                 memories.add(
@@ -133,7 +133,7 @@ object MemoryRetriever {
             val date = if (memory.timestamp > 0L) java.text.SimpleDateFormat(
                 "yyyy-MM-dd", java.util.Locale.ROOT
             ).format(java.util.Date(memory.timestamp)) else "дата неизвестна"
-            "- [${memory.kind}; ${date}; ${relation}; оценка ${"%.2f".format(java.util.Locale.ROOT, score)}] ${memory.text.take(650)}"
+            "- [${memory.kind}; ${date}; ${relation}; оценка ${"%.2f".format(java.util.Locale.ROOT, score)}] ${memory.text}"
         }
     }
 
