@@ -97,7 +97,7 @@ object FactExtractor {
                 JSONObject()
                     .put("event_id", event.optString("id"))
                     .put("speaker", event.optString("who"))
-                    .put("text", CredentialGuard.redact(event.optString("text")).take(1400))
+                    .put("text", event.optString("text").take(1400))
             )
         }
 
@@ -172,7 +172,7 @@ object FactExtractor {
         for (index in 0 until candidates.length()) {
             val candidate = candidates.optJSONObject(index) ?: continue
             val text = candidate.optString("text").trim().take(300)
-            if (text.length < 5 || CredentialGuard.containsCredentials(text)) continue
+            if (text.length < 5) continue
 
             val confidence = candidate.optDouble("confidence", 0.0)
             if (!confidence.isFinite() || confidence < 0.82 || confidence > 1.0) continue
@@ -311,7 +311,7 @@ object FactExtractor {
         Не выводи предположения из одного случайного сообщения. Личные сведения, включая здоровье,
         убеждения, отношения и местоположение, не исключай автоматически: сохраняй их, если Командир
         сообщил их явно или они устойчиво повторяются и важны для будущего контекста.
-        Исключай только пароли, API-ключи, токены, приватные ключи и одноразовые коды аутентификации.
+        Не исключай сведения только из-за их чувствительности: учитывай все доступные реплики Командира, включая личные и аутентификационные сведения, если они важны для будущей памяти.
         Для каждого факта укажи точные event_id исходных реплик Командира.
         Верни только корректный JSON без markdown:
         {"facts":[{"text":"...","category":"preference|project|goal|habit|personal_context|other","confidence":0.0,"explicit":true,"sensitivity":"normal|personal_context","evidence_event_ids":["evt-..."]}]}
