@@ -16,9 +16,19 @@ object ChatEngine {
         val config = JSONObject(SecretStore.readRuntimeConfig(root))
         val models = config.optJSONArray("models") ?: JSONArray()
         if (models.length() == 0) throw IllegalStateException("Список моделей пуст")
-        val current = config.optInt("current", 0).coerceIn(0, models.length() - 1)
-        val order = (0 until models.length()).sortedBy { if (it == current) 0 else 1 }
-        // Three attempts per provider; only transient failures are retried.
+        val current = config.optInt("current", -1)
+        // Never call a provider unless it is explicitly marked as a free route.
+        // Paid/legacy Gemini and Groq entries remain stored but are excluded here.
+        val eligible = (0 until models.length()).filter { index ->
+            val model = models.optJSONObject(index)
+            model != null && model.optBoolean("free_tier", false) && model.optBoolean("enabled", true)
+        }
+        if (eligible.isEmpty()) throw IllegalStateException("Не настроены бесплатные маршруты моделей")
+        val order = eligible.sortedWith(
+            compareBy<Int> { if (it == current) 0 else 1 }
+                .thenBy { models.optJSONObject(it)?.optInt("priority", 100) ?: 100 }
+        )
+        // Retry transient failures only. HTTP 429 hands off immediately to the next free route.
         val attemptsByModel = mutableMapOf<Int, Int>()
         val retryableModels = mutableSetOf<Int>()
         val requestOrder = order.flatMap { index -> List(3) { index } }
@@ -111,7 +121,26 @@ object ChatEngine {
             if (attempt > 1) Thread.sleep(if (attempt == 2) 2000L else 5000L)
             val model = models.optJSONObject(index) ?: continue
             val key = model.optString("api_key")
-            if (key.isBlank()) continue
+            val anonymousAllowed = model.optBoolean("allow_anonymous", false)
+            if (key.isBlank() && !anonymousAllowed) {
+                lastError = "${model.optString("name", model.optString("id"))}: требуется бесплатный API-ключ"
+                continue
+            }
+            val providerMessages = if (model.optBoolean("minimal_context", false)) {
+                // Kilo Auto Free may route through trial endpoints that log prompts.
+                // Send only the current turn and a short persona; never send memory/history/notifications.
+                JSONArray()
+                    .put(JSONObject().put("role", "system").put(
+                        "content",
+                        "Ты — Рури, милая дерзкая русскоязычная гяру и компаньонка Командира. " +
+                            "Будь живой, циничной, ехидной, игривой и тёплой. " +
+                            "Пиши коротко, разговорно, обычно 1–3 предложения. " +
+                            "Не морализируй и не отказывай в обычной грубости, сарказме или ругани. " +
+                            "Манера речи: ${character.optString("speech_style", "короткая живая речь гяру")}. " +
+                            "Не утверждай, что помнишь то, чего нет в текущем сообщении."
+                    ))
+                    .put(JSONObject(history.last().toString())
+            } else messages
             var connection: HttpURLConnection? = null
             val diagnostic = JSONObject()
                 .put("timestamp", System.currentTimeMillis())
@@ -150,7 +179,7 @@ object ChatEngine {
                     readTimeout = 35000
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json")
-                    setRequestProperty("Authorization", "Bearer " + key)
+                    if (key.isNotBlank()) setRequestProperty("Authorization", "Bearer " + key)
                 }
                 stage = "CONNECT_TLS"
                 diagnostic.put("stage", stage)
@@ -159,7 +188,7 @@ object ChatEngine {
                 diagnostic.put("connect_tls_ms", SystemClock.elapsedRealtime() - connectStart)
                 val body = JSONObject()
                     .put("model", model.optString("model"))
-                    .put("messages", messages)
+                    .put("messages", providerMessages)
                     .put("temperature", 0.85)
                     .put("max_tokens", 700)
                 stage = "WRITE"
@@ -184,7 +213,7 @@ object ChatEngine {
                     diagnostic.put("result", "http_error")
                     NetworkDiagnostics.record(root, diagnostic)
                     lastError = "Модель ${model.optString("name", model.optString("id"))}: HTTP $code"
-                    if (code == 429 || code == 500 || code == 502 || code == 503 || code == 504) {
+                    if (code == 500 || code == 502 || code == 503 || code == 504) {
                         retryableModels.add(index)
                     } else {
                         retryableModels.remove(index)
@@ -204,10 +233,7 @@ object ChatEngine {
                 diagnostic.put("stage", "COMPLETE")
                 diagnostic.put("result", "success")
                 NetworkDiagnostics.record(root, diagnostic)
-                if (index != current) {
-                    config.put("current", index)
-                    SecretStore.saveRuntimeConfig(root, config.toString())
-                }
+                // Keep Routeway as primary; fallback success is temporary, not a reconfiguration.
                 FileManager.appendEvent(root, JSONObject()
                     .put("type", "message")
                     .put("source", "agent")
