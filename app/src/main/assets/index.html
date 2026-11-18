@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>РУ-R1 · Рури</title>
+<title>RU-R1 · Рури</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#090d14;color:#dce4f2;font:15px/1.55 system-ui,sans-serif;height:100dvh;display:flex;flex-direction:column}
 header{padding:10px 14px;background:#070a10;border-bottom:1px solid #273653;display:flex;align-items:center}
@@ -30,14 +30,14 @@ button.secondary{background:transparent;color:#f4c94f}
 </style>
 </head>
 <body>
-<header><strong>РУ-R1 · РУРИ</strong><span id="status">● ЗАГРУЗКА</span></header>
+<header><strong>RU-R1 · Рури</strong><span id="status">● ЗАГРУЗКА</span></header>
 <nav>
 <button class="on" data-pane="chat">ЧАТ</button><button data-pane="diary">ДНЕВНИК</button><button data-pane="brain">МОЗГ</button><button data-pane="shelf">ПОЛКА</button><button data-pane="search">ПОИСК</button>
 </nav>
 <main>
 <section class="pane on" id="pane-chat">
 <div id="chat"></div>
-<div class="composer"><div class="inrow"><textarea id="input" rows="1" placeholder="Написать Рури…"></textarea><button class="action" id="send">➤</button></div><div class="small">Enter — отправить · Shift+Enter — новая строка</div></div>
+<div class="composer"><div class="inrow"><textarea id="input" rows="1" placeholder="Написать Рури…"></textarea><button class="action" id="send">➤</button></div><div class="small" id="inputHelp">Enter — отправить · Shift+Enter — новая строка</div></div>
 </section>
 <section class="pane" id="pane-diary"><div class="scroll"><h2 class="section">ДНЕВНИК <span>Рури</span></h2><div id="diary"></div></div></section>
 <section class="pane" id="pane-brain"><div class="scroll">
@@ -104,7 +104,7 @@ var pr=JSON.parse(read('core/priorities.json')||'{}');
 var models=config.models||[];if(!models.length)return Promise.reject(new Error('Список моделей пуст.'));
 var index=Math.max(0,Math.min(Number(config.current)||0,models.length-1));
 var order=[index].concat(models.map(function(_,i){return i;}).filter(function(i){return i!==index;}));
-var system='Ты — '+(ch.name||'РУ-R1')+'. Приоритеты: '+(pr.priority_1||'Жить')+'; '+(pr.priority_2||'Любить командира')+'. Манера речи: '+(ch.speech_style||'естественная, живая, осмысленная')+'. Характер: '+JSON.stringify(ch.traits||{})+'. Запрещённые формулировки: '+(ch.banned_phrases||[]).join('; ')+'. Сохраняй контекст переписки и отвечай по-русски от первого лица.';
+var system='Ты — '+(ch.name||'Рури')+'. Приоритеты: '+(pr.priority_1||'Жить')+'; '+(pr.priority_2||'Любить командира')+'. Манера речи: '+(ch.speech_style||'естественная, живая, осмысленная')+'. Характер: '+JSON.stringify(ch.traits||{})+'. Запрещённые формулировки: '+(ch.banned_phrases||[]).join('; ')+'. Сохраняй контекст переписки и отвечай по-русски от первого лица.';
 var history=historyForModel();
 function attempt(pos){
 if(pos>=order.length)return Promise.reject(new Error('Все модели недоступны. Проверь ключи и подключение к интернету.'));
@@ -130,8 +130,17 @@ var answer={ts:Date.now(),type:'message',who:'ruri',text:reply};appendLog(answer
 }).catch(function(e){var t=$('#typing');if(t)t.remove();var d=document.createElement('div');d.className='msg her';d.innerHTML='<div class="bub error">Ответ не получен: '+esc(e.message)+'. Сообщение сохранено в памяти.</div>';$('#chat').appendChild(d);status('НЕТ СВЯЗИ');})
 .then(function(){busy=false;$('#send').disabled=false;$('#chat').scrollTop=$('#chat').scrollHeight;});
 }
-$('#send').addEventListener('click',function(){var v=$('#input').value;$('#input').value='';sendMessage(v);});
-$('#input').addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();var v=this.value;this.value='';sendMessage(v);}});
+function isTouchDevice(){
+return (window.matchMedia&&window.matchMedia('(pointer: coarse)').matches)||/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+$('#inputHelp').textContent=isTouchDevice()?'На телефоне Enter — новая строка · кнопка ➤ — отправить':'Enter — отправить · Shift+Enter — новая строка';
+$('#send').addEventListener('click',function(){var v=$('#input').value;$('#input').value='';$('#input').style.height='46px';sendMessage(v);});
+$('#input').addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,140)+'px';});
+$('#input').addEventListener('keydown',function(e){
+if(e.key==='Enter'&&!e.shiftKey&&!isTouchDevice()){
+e.preventDefault();var v=this.value;this.value='';this.style.height='46px';sendMessage(v);
+}
+});
 document.querySelectorAll('nav button').forEach(function(b){b.addEventListener('click',function(){
 document.querySelectorAll('nav button').forEach(function(x){x.classList.remove('on');});b.classList.add('on');
 document.querySelectorAll('.pane').forEach(function(p){p.classList.remove('on');});$('#pane-'+b.dataset.pane).classList.add('on');
