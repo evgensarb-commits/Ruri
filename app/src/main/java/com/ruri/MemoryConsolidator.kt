@@ -307,15 +307,17 @@ object MemoryConsolidator {
             val value = entry.optString("text").replace(Regex("\\s+"), " ").trim()
             if (value.length >= 20) unique.add(value.take(500))
         }
-        val recent = unique.take(14).asReversed().joinToString("\n").take(3500)
-        val previous = previousSummary.trim().take(4500)
+        // Preserve every record in the current 40-entry page when the LLM is unavailable.
+        // The compact offline summary favours the latest pages while L1/L0 keep their own source history.
+        val recent = unique.toList().asReversed().joinToString("\n").take(16000)
+        val previous = previousSummary.trim().takeLast(6000)
         return buildString {
             if (previous.isNotBlank()) append("Ранее сохранённая автобиографическая сводка:\n").append(previous)
             if (recent.isNotBlank()) {
                 if (isNotEmpty()) append("\n\n")
                 append("Новые записи:\n").append(recent)
             }
-        }.take(8000).ifBlank { "Содержательных записей для сводки пока недостаточно." }
+        }.takeLast(22000).ifBlank { "Содержательных записей для сводки пока недостаточно." }
     }
 
     private fun readJsonStrict(root: java.io.File, path: String): JSONObject? {
