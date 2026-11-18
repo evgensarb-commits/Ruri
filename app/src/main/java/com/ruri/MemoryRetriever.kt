@@ -83,8 +83,8 @@ object MemoryRetriever {
         // Build a small, transient association network from the strongest direct matches.
         // It is derived from source memories on each recall, so it cannot become stale.
         val seeds = direct.take(3)
-        val expandedTerms = seeds.flatMap { (_, _, matched) ->
-            tokenize(seeds.firstOrNull { it.third == matched }?.first?.text.orEmpty())
+        val expandedTerms = seeds.flatMap { seed ->
+            tokenize(seed.first.text)
         }.toSet() - terms
         val associationTerms = expandedTerms.filter { it.length >= 5 }.toSet()
         val directMemories = direct.map { it.first }.toSet()
