@@ -5,6 +5,10 @@ import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.InetAddress
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
+import android.os.SystemClock
 
 /** Native model gateway: WebView never sends provider requests directly. */
 object ChatEngine {
@@ -99,10 +103,37 @@ object ChatEngine {
             val key = model.optString("api_key")
             if (key.isBlank()) continue
             var connection: HttpURLConnection? = null
+            val diagnostic = JSONObject()
+                .put("timestamp", System.currentTimeMillis())
+                .put("provider", model.optString("name", model.optString("id")))
+                .put("model", model.optString("model"))
+                .put("base_url", model.optString("base_url").trimEnd('/'))
+                .put("host", "")
+                .put("dns_status", "not_started")
+                .put("dns_ms", JSONObject.NULL)
+                .put("dns_addresses", 0)
+                .put("connect_tls_ms", JSONObject.NULL)
+                .put("write_ms", JSONObject.NULL)
+                .put("response_wait_ms", JSONObject.NULL)
+                .put("http_status", JSONObject.NULL)
+                .put("stage", "CONFIG")
+                .put("result", "failed")
+            var stage = "CONFIG"
+            var stageStartedAt = 0L
             try {
                 val base = model.optString("base_url").trimEnd('/')
                 require(base.startsWith("https://")) { "Для модели требуется HTTPS" }
-                connection = (URL(base + "/chat/completions").openConnection() as HttpURLConnection).apply {
+                val endpoint = URL(base + "/chat/completions")
+                val host = endpoint.host
+                diagnostic.put("host", host)
+                stage = "DNS"
+                diagnostic.put("stage", stage)
+                stageStartedAt = SystemClock.elapsedRealtime()
+                val addresses = InetAddress.getAllByName(host)
+                diagnostic.put("dns_ms", SystemClock.elapsedRealtime() - stageStartedAt)
+                diagnostic.put("dns_addresses", addresses.size)
+                diagnostic.put("dns_status", if (addresses.isNotEmpty()) "resolved" else "empty")
+                connection = (endpoint.openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     connectTimeout = 18000
                     readTimeout = 35000
@@ -110,25 +141,53 @@ object ChatEngine {
                     setRequestProperty("Content-Type", "application/json")
                     setRequestProperty("Authorization", "Bearer " + key)
                 }
+                stage = "CONNECT_TLS"
+                diagnostic.put("stage", stage)
+                val connectStart = SystemClock.elapsedRealtime()
+                connection.connect()
+                diagnostic.put("connect_tls_ms", SystemClock.elapsedRealtime() - connectStart)
                 val body = JSONObject()
                     .put("model", model.optString("model"))
                     .put("messages", messages)
                     .put("temperature", 0.85)
                     .put("max_tokens", 1200)
+                stage = "WRITE"
+                diagnostic.put("stage", stage)
+                val writeStart = SystemClock.elapsedRealtime()
                 connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+                diagnostic.put("write_ms", SystemClock.elapsedRealtime() - writeStart)
+                stage = "HTTP_RESPONSE"
+                diagnostic.put("stage", stage)
+                val responseStart = SystemClock.elapsedRealtime()
                 val code = connection.responseCode
+                diagnostic.put("response_wait_ms", SystemClock.elapsedRealtime() - responseStart)
+                diagnostic.put("http_status", code)
                 val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                stage = "READ_RESPONSE"
+                diagnostic.put("stage", stage)
+                val bodyReadStart = SystemClock.elapsedRealtime()
                 val responseText = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                diagnostic.put("response_body_ms", SystemClock.elapsedRealtime() - bodyReadStart)
                 if (code !in 200..299) {
+                    diagnostic.put("stage", "HTTP")
+                    diagnostic.put("result", "http_error")
+                    NetworkDiagnostics.record(root, diagnostic)
                     lastError = "Модель ${model.optString("name", model.optString("id"))}: HTTP $code"
                     continue
                 }
+                stage = "PARSE_RESPONSE"
+                diagnostic.put("stage", stage)
                 val reply = JSONObject(responseText).getJSONArray("choices")
                     .getJSONObject(0).getJSONObject("message").getString("content").trim()
                 if (reply.isBlank()) {
+                    diagnostic.put("result", "empty_reply")
+                    NetworkDiagnostics.record(root, diagnostic)
                     lastError = "Модель вернула пустой ответ"
                     continue
                 }
+                diagnostic.put("stage", "COMPLETE")
+                diagnostic.put("result", "success")
+                NetworkDiagnostics.record(root, diagnostic)
                 if (index != current) {
                     config.put("current", index)
                     SecretStore.saveRuntimeConfig(root, config.toString())
@@ -140,8 +199,21 @@ object ChatEngine {
                     .put("text", reply))
                 return reply
             } catch (e: Exception) {
-                lastError = e.message ?: "Ошибка запроса к модели"
-                android.util.Log.w("Ruri", "Chat model failed: ${model.optString("name")}", e)
+                diagnostic.put("stage", stage)
+                if (stage == "DNS" && diagnostic.isNull("dns_ms")) {
+                    diagnostic.put("dns_ms", SystemClock.elapsedRealtime() - stageStartedAt)
+                }
+                diagnostic.put("result", if (e is SocketTimeoutException) "timeout" else "failed")
+                diagnostic.put("error_type", e.javaClass.simpleName)
+                if (e is UnknownHostException) diagnostic.put("dns_status", "failed")
+                if (e is SocketTimeoutException) diagnostic.put("timeout_stage", stage)
+                NetworkDiagnostics.record(root, diagnostic)
+                lastError = when {
+                    e is UnknownHostException -> "DNS: не удалось разрешить адрес сервера"
+                    e is SocketTimeoutException -> "Тайм-аут на этапе $stage"
+                    else -> e.message ?: "Ошибка запроса к модели"
+                }
+                android.util.Log.w("Ruri", "Chat model failed at $stage: ${e.javaClass.simpleName}")
             } finally {
                 connection?.disconnect()
             }
