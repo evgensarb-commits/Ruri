@@ -160,7 +160,7 @@ object LifeStateEngine {
             appendMaintenanceDiary(root, report, now)
             FileManager.write(root, STATE_PATH, state.toString(2))
         }
-        state
+        return state
     }
 
     private fun resolveCursor(root: File, state: JSONObject): Long {
