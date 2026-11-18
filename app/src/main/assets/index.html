@@ -59,7 +59,7 @@ h2 em{font-style:normal;color:#f5c542}
 <div id="chat"></div>
 <div class="comp"><div class="inrow">
 <textarea id="input" rows="1"></textarea>
-<button class="send" id="send" disabled>→</button>
+<button class="send" id="send">→</button>
 </div></div>
 </section>
 <section class="pane" id="p-life"><div class="scroll">
@@ -97,6 +97,15 @@ chat.appendChild(d);}catch(e){}
 });
 chat.scrollTop=chat.scrollHeight;
 });}
+function loadDiary(){
+Ruri.read('memory/L2_diary.json').then(function(raw){
+try{var d=JSON.parse(raw);var arr=d.entries||[];var el=$('#diary');el.innerHTML='';
+arr.slice(-20).reverse().forEach(function(e){
+var div=document.createElement('div');div.className='msg her';
+div.innerHTML='<div class="meta">МЫСЛЬ · '+new Date(e.ts).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+'</div><div class="bub">'+esc(e.text)+'</div>';
+el.appendChild(div);
+});}catch(err){}
+});}
 function sendMessage(text){
 if(!text.trim()||busy)return;
 busy=true;$('#send').disabled=true;
@@ -123,7 +132,9 @@ $('#chat').appendChild(d2);$('#chat').scrollTop=$('#chat').scrollHeight;
 });
 }).catch(function(e){
 var t=document.getElementById('typing');if(t)t.remove();
-alert('Ошибка: '+e.message);
+var err=document.createElement('div');err.className='msg sys';
+err.innerHTML='<div class="bub" style="border-color:#ff4d4d;color:#ff9b9b">Ошибка: '+esc(e.message)+'</div>';
+$('#chat').appendChild(err);$('#chat').scrollTop=$('#chat').scrollHeight;
 }).then(function(){busy=false;$('#send').disabled=false;});
 }
 function callModel(userText){
@@ -141,12 +152,13 @@ return res.json();
 }).then(function(data){return data.choices[0].message.content;});
 });}
 $('#send').addEventListener('click',function(){var v=$('#input').value;$('#input').value='';sendMessage(v);});
-$('#input').addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();var v=this.value;this.value='';sendMessage(v);}});
+$('#input').addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();}});
 document.querySelectorAll('.tabs button').forEach(function(b){b.addEventListener('click',function(){
 document.querySelectorAll('.tabs button').forEach(function(x){x.classList.remove('on');});
 b.classList.add('on');
 document.querySelectorAll('.pane').forEach(function(p){p.classList.remove('on');});
 document.getElementById('p-'+b.dataset.p).classList.add('on');
+if(b.dataset.p==='life')loadDiary();
 });});
 $('#saveKey').addEventListener('click',function(){
 Ruri.read('core/config.json').then(function(raw){
@@ -159,21 +171,19 @@ $('#exp').addEventListener('click',function(){
 var files=['core/priorities.json','core/character.json','core/appearance.json','core/config.json','memory/L0_raw.jsonl','memory/L1_facts.json','memory/L2_diary.json','memory/L3_summary.json','memory/L4_state.json'];
 var archive={};var pending=files.map(function(f){return Ruri.read(f).then(function(c){archive[f]=c;});});
 Promise.all(pending).then(function(){
-var blob=new Blob([JSON.stringify(archive,null,2)],{type:'application/json'});
-var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='ruri-archive.json';a.click();
+Ruri.exportArchive(JSON.stringify(archive,null,2));
 });});
 $('#imp').addEventListener('click',function(){$('#file').click();});
 $('#file').addEventListener('change',function(e){
 var f=e.target.files[0];if(!f)return;
 var reader=new FileReader();
 reader.onload=function(ev){
-var archive=JSON.parse(ev.target.result);
-var keys=Object.keys(archive);var pending=keys.map(function(k){return Ruri.write(k,archive[k]);});
-Promise.all(pending).then(function(){alert('Архив восстановлен');location.reload();});
+Ruri.importArchive(ev.target.result);
+alert('Архив восстановлен');location.reload();
 };
 reader.readAsText(f);
 });
-loadChat();$('#send').disabled=false;
+loadChat();
 </script>
 </body>
-  </html>
+</html>
