@@ -26,6 +26,70 @@ class LifeStateRecoveryTest {
     }
 
     @Test
+    fun sameTimestampCommanderMessageStillEndsWaitingForReply() {
+        val state = JSONObject()
+            .put("last_seen_commander", 123456L)
+            .put("waiting_for_reply", true)
+            .put("ignored_count", 3)
+            .put("offended_until", 999999L)
+        val message = JSONObject()
+            .put("id", "commander-same-ms")
+            .put("type", "message")
+            .put("who", "commander")
+            .put("timestamp", 123456L)
+
+        assertTrue(LifeStateEngine.applyCommanderActivity(state, listOf(message)))
+        assertEquals(123456L, state.optLong("last_seen_commander"))
+        assertEquals("commander-same-ms", state.optString("last_commander_message_event_id"))
+        assertFalse(state.optBoolean("waiting_for_reply"))
+        assertEquals(0, state.optInt("ignored_count"))
+        assertEquals(0L, state.optLong("offended_until"))
+    }
+
+    @Test
+    fun unrelatedEventsDoNotResetCommanderWaitingState() {
+        val state = JSONObject()
+            .put("last_seen_commander", 123456L)
+            .put("waiting_for_reply", true)
+            .put("ignored_count", 2)
+        val event = JSONObject().put("type", "phone_notification").put("timestamp", 999999L)
+
+        assertFalse(LifeStateEngine.applyCommanderActivity(state, listOf(event)))
+        assertTrue(state.optBoolean("waiting_for_reply"))
+        assertEquals(2, state.optInt("ignored_count"))
+    }
+
+    @Test
+    fun selfModelStoresLatestStateWithoutLosingIdentityOrCapabilities() {
+        val existing = JSONObject()
+            .put("identity", "Рури")
+            .put("project", "RU-R1")
+            .put("known_capabilities", JSONArray().put("chat").put("local_memory"))
+        FileManager.write(root, "memory/self_model.json", existing.toString())
+        val state = JSONObject()
+            .put("mood", "собранная")
+            .put("energy", 6)
+            .put("current_focus", "Восстановление памяти")
+            .put("last_seen_commander", 456789L)
+            .put("last_processed_event_offset", 128L)
+            .put("waiting_for_reply", false)
+            .put("needs", JSONObject().put("live", 0.4).put("love_commander", 0.7))
+            .put("active_goals", JSONArray().put(JSONObject().put("id", "ru-r1")))
+            .put("active_tasks", JSONArray().put(JSONObject().put("id", "memory-check")))
+
+        LifeStateEngine.updateSelfModel(root, state, "unit_test", 987654L)
+
+        val saved = JSONObject(FileManager.read(root, "memory/self_model.json"))
+        assertEquals("Рури", saved.optString("identity"))
+        assertEquals("chat", saved.getJSONArray("known_capabilities").getString(0))
+        assertEquals("Восстановление памяти", saved.optString("current_focus"))
+        assertEquals(987654L, saved.optLong("updated_at"))
+        assertEquals("собранная", saved.getJSONObject("current_state").optString("mood"))
+        assertEquals(128L, saved.getJSONObject("current_state").optLong("last_processed_event_offset"))
+        assertEquals(1, saved.getJSONObject("current_state").getJSONArray("active_goals").length())
+    }
+
+    @Test
     fun damagedL4IsBackedUpAndRebuiltFromL0WithoutSkippingHistory() {
         val firstTs = 1_790_000_000_000L
         FileManager.appendEvent(
