@@ -12,7 +12,9 @@ class SecretRedactorTest {
             .put("type", "message")
             .put("who", "commander")
             .put("text", "Живу в Лилле. Пароль: hunter2; код подтверждения: 483920; API key: sk_test_1234567890.")
-            .put("password", "direct_secret_value")
+            .put("password", "demo")
+            .put("authorization", "demo")
+            .put("token", "demo")
         val safe = SecretRedactor.redactEvent(event).toString()
 
         assertTrue(safe.contains("Живу в Лилле"))
@@ -21,6 +23,21 @@ class SecretRedactorTest {
         assertFalse(safe.contains("483920"))
         assertFalse(safe.contains("sk_test_1234567890"))
         assertFalse(safe.contains("direct_secret_value"))
+        assertFalse(safe.contains("\"authorization\":\"demo\""))
+        assertFalse(safe.contains("\"token\":\"demo\""))
+    }
+
+    @Test
+    fun appendEventStoresRedactedTextAtTheL0Boundary() {
+        val root = java.nio.file.Files.createTempDirectory("ruri-secret-redaction").toFile()
+        val stored = FileManager.appendEvent(
+            root,
+            JSONObject().put("type", "message").put("who", "commander")
+                .put("text", "Пароль: demo")
+        )
+        assertFalse(stored.contains("Пароль: demo"))
+        assertTrue(stored.contains(SecretRedactor.PLACEHOLDER))
+        root.deleteRecursively()
     }
 
     @Test
