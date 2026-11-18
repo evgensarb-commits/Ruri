@@ -24,6 +24,7 @@ class NotificationMonitor : NotificationListenerService() {
                     .put("title", title.take(180))
                     .put("text", text.take(500))
             )
+            LifeScheduler.enqueueEvent(applicationContext, "phone_notification")
         } catch (e: Exception) {
             Log.w("Ruri", "Could not record phone notification", e)
         }
@@ -41,6 +42,7 @@ class NotificationMonitor : NotificationListenerService() {
                     .put("notification_id", sbn.id)
                     .put("package", sbn.packageName)
             )
+            LifeScheduler.enqueueEvent(applicationContext, "phone_notification_removed")
         } catch (e: Exception) {
             Log.w("Ruri", "Could not record notification removal", e)
         }
