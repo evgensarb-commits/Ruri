@@ -17,17 +17,9 @@ object ChatEngine {
         val models = config.optJSONArray("models") ?: JSONArray()
         if (models.length() == 0) throw IllegalStateException("Список моделей пуст")
         val current = config.optInt("current", -1)
-        // Never call a provider unless it is explicitly marked as a free route.
-        // Paid/legacy Gemini and Groq entries remain stored but are excluded here.
-        val eligible = (0 until models.length()).filter { index ->
-            val model = models.optJSONObject(index)
-            model != null && model.optBoolean("free_tier", false) && model.optBoolean("enabled", true)
-        }
-        if (eligible.isEmpty()) throw IllegalStateException("Не настроены бесплатные маршруты моделей")
-        val order = eligible.sortedWith(
-            compareBy<Int> { if (it == current) 0 else 1 }
-                .thenBy { models.optJSONObject(it)?.optInt("priority", 100) ?: 100 }
-        )
+        // Paid/legacy Gemini and Groq entries remain stored but are excluded by this selector.
+        val order = FreeModelRouter.orderedIndices(models, current)
+        if (order.isEmpty()) throw IllegalStateException("Не настроены бесплатные маршруты моделей")
         // Retry transient failures only. HTTP 429 hands off immediately to the next free route.
         val attemptsByModel = mutableMapOf<Int, Int>()
         val retryableModels = mutableSetOf<Int>()
