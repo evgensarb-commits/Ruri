@@ -12,6 +12,8 @@ class CredentialGuardTest {
         assertTrue(CredentialGuard.containsCredentials("Пароль: hunter2"))
         assertTrue(CredentialGuard.containsCredentials("API key: abc123"))
         assertTrue(CredentialGuard.containsCredentials("Ваш код подтверждения: 123456"))
+        assertTrue(CredentialGuard.containsCredentials("Пароль: hunter2"))
+        assertTrue(CredentialGuard.containsCredentials("ПАРОЛЬ: hunter2"))
         assertTrue(CredentialGuard.containsCredentials("Bearer eyJhbGciOi..."))
         assertEquals("[учётные данные скрыты]", CredentialGuard.redact("API key: abc123"))
     }
