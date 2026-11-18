@@ -9,6 +9,8 @@ import android.provider.Settings
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -18,9 +20,12 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
     private lateinit var web: WebView
+    private val chatExecutor = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     @SuppressLint("SetJavaScriptEnabled", "AddJavascriptInterface")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -69,6 +74,31 @@ class MainActivity : AppCompatActivity() {
     }
 
     inner class Bridge {
+        @JavascriptInterface
+        fun completeChat(callbackId: String): String {
+            if (!callbackId.matches(Regex("[A-Za-z0-9_-]{1,80}"))) return "ERROR: invalid callback"
+            chatExecutor.execute {
+                try {
+                    val reply = ChatEngine.respond(filesDir)
+                    mainHandler.post {
+                        if (::web.isInitialized) web.evaluateJavascript(
+                            "window.onNativeChatResult(" + JSONObject.quote(callbackId) + "," +
+                                JSONObject.quote(reply) + ",null)", null
+                        )
+                    }
+                } catch (e: Exception) {
+                    val error = e.message ?: "Ошибка ответа модели"
+                    mainHandler.post {
+                        if (::web.isInitialized) web.evaluateJavascript(
+                            "window.onNativeChatResult(" + JSONObject.quote(callbackId) + ",null," +
+                                JSONObject.quote(error) + ")", null
+                        )
+                    }
+                }
+            }
+            return "OK"
+        }
+
         @JavascriptInterface
         fun read(path: String): String = FileManager.read(filesDir, path)
 
