@@ -138,7 +138,10 @@ object MemoryConsolidator {
             )
         }
 
-        val prompt = buildPrompt(current.optString("summary"), safeFacts, safeDiary)
+        val prompt = buildPrompt(current.optString("summary"), safeFacts, safeDiary) +
+            if (batch.skippedBeforeBatch > 0L) {
+                "\\n\\nВажно для точности автобиографии: до первой доступной записи этой пачки в rolling-окне дневника отсутствует ${batch.skippedBeforeBatch} более ранних записей. Не выдумывай их содержание; явно сохрани факт этого пробела."
+            } else ""
         val modelResult = if (BatteryLevel.get(context) > 12) requestBestModel(root, prompt) else null
         val summaryText: String
         val sections: JSONObject
@@ -158,6 +161,13 @@ object MemoryConsolidator {
             )
             method = "extractive_local"
             modelName = ""
+        }
+        if (batch.skippedBeforeBatch > 0L) {
+            sections.put("unavailable_earlier_diary_entries", batch.skippedBeforeBatch)
+            sections.put(
+                "history_gap_note",
+                "Часть более ранних записей уже вышла из rolling-окна L2 до этой консолидации; их содержимое не восстанавливалось и не выдумывалось."
+            )
         }
 
         val versions = current.optJSONArray("previous_versions") ?: JSONArray()
