@@ -24,7 +24,7 @@ object ChatEngine {
         val facts = readJson(root, "memory/L1_facts.json").optJSONArray("facts") ?: JSONArray()
         val diary = readJson(root, "memory/L2_diary.json").optJSONArray("entries") ?: JSONArray()
         val factContext = StringBuilder()
-        for (index in 0 until minOf(facts.length(), 16)) {
+        for (index in maxOf(0, facts.length() - 16) until facts.length()) {
             val fact = facts.optJSONObject(index) ?: continue
             val value = fact.optString("text").trim()
             if (value.isNotBlank()) factContext.append("- ").append(value.take(300)).append("\n")
