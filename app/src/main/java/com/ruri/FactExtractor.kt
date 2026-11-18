@@ -97,7 +97,7 @@ object FactExtractor {
                 JSONObject()
                     .put("event_id", event.optString("id"))
                     .put("speaker", event.optString("who"))
-                    .put("text", event.optString("text").take(1400))
+                    .put("text", SecretRedactor.redactText(event.optString("text")).take(1400))
             )
         }
 
@@ -109,14 +109,15 @@ object FactExtractor {
             return 0
         }
         val models = config.optJSONArray("models") ?: JSONArray()
-        val current = config.optInt("current", 0).coerceIn(0, (models.length() - 1).coerceAtLeast(0))
-        val order = (0 until models.length()).sortedBy { if (it == current) 0 else 1 }
+        val current = config.optInt("current", 0)
+        val order = FreeModelRouter.orderedIndices(models, current, requireNsfw = false)
         val prompt = buildPrompt(transcriptWindow)
         var parsed: JSONObject? = null
         var usedModel = ""
         for (index in order) {
             val model = models.optJSONObject(index) ?: continue
-            if (model.optString("api_key").isBlank()) continue
+            val key = model.optString("api_key")
+            if (key.isBlank() && !model.optBoolean("allow_anonymous", false)) continue
             val response = request(model, prompt) ?: continue
             parsed = parseJson(response)
             if (parsed != null) {
@@ -171,8 +172,8 @@ object FactExtractor {
         var updated = 0
         for (index in 0 until candidates.length()) {
             val candidate = candidates.optJSONObject(index) ?: continue
-            val text = candidate.optString("text").trim().take(300)
-            if (text.length < 5) continue
+            val text = SecretRedactor.redactText(candidate.optString("text").trim()).take(300)
+            if (text.length < 5 || text.contains(SecretRedactor.PLACEHOLDER)) continue
 
             val confidence = candidate.optDouble("confidence", 0.0)
             if (!confidence.isFinite() || confidence < 0.82 || confidence > 1.0) continue
@@ -311,7 +312,7 @@ object FactExtractor {
         Не выводи предположения из одного случайного сообщения. Личные сведения, включая здоровье,
         убеждения, отношения и местоположение, не исключай автоматически: сохраняй их, если Командир
         сообщил их явно или они устойчиво повторяются и важны для будущего контекста.
-        Не исключай сведения только из-за их чувствительности: учитывай все доступные реплики Командира, включая личные и аутентификационные сведения, если они важны для будущей памяти.
+        Никогда не извлекай и не сохраняй пароли, коды подтверждения, токены, ключи, номера карт. Личный контекст (предпочтения, проекты, отношения) сохраняй; секреты — нет.
         Для каждого факта укажи точные event_id исходных реплик Командира.
         Верни только корректный JSON без markdown:
         {"facts":[{"text":"...","category":"preference|project|goal|habit|personal_context|other","confidence":0.0,"explicit":true,"sensitivity":"normal|personal_context","evidence_event_ids":["evt-..."]}]}
@@ -331,7 +332,8 @@ object FactExtractor {
                 readTimeout = 25000
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json")
-                setRequestProperty("Authorization", "Bearer " + model.optString("api_key"))
+                val key = model.optString("api_key")
+                if (key.isNotBlank()) setRequestProperty("Authorization", "Bearer " + key)
             }
             val body = JSONObject()
                 .put("model", model.optString("model"))
