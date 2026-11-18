@@ -97,26 +97,18 @@ var items=[];
 read('memory/L0_raw.jsonl').split('\n').slice(-80).forEach(function(line){try{var e=JSON.parse(line);if(e.type==='message'&&e.who&&e.text)items.push({role:e.who==='ruri'?'assistant':'user',content:e.text});}catch(_){}});
 return items.slice(-14);
 }
+var nativeChatCallbacks={};
+window.onNativeChatResult=function(id,reply,error){
+var callback=nativeChatCallbacks[id];if(!callback)return;delete nativeChatCallbacks[id];
+if(error)callback.reject(new Error(error));else callback.resolve(reply);
+};
 function callModel(text){
-var config=JSON.parse(Ruri.readRuntimeConfig()||'{}');
-var ch=JSON.parse(read('core/character.json')||'{}');
-var pr=JSON.parse(read('core/priorities.json')||'{}');
-var models=config.models||[];if(!models.length)return Promise.reject(new Error('Список моделей пуст.'));
-var index=Math.max(0,Math.min(Number(config.current)||0,models.length-1));
-var order=[index].concat(models.map(function(_,i){return i;}).filter(function(i){return i!==index;}));
-var system='Ты — '+(ch.name||'Рури')+'. Приоритеты: '+(pr.priority_1||'Жить')+'; '+(pr.priority_2||'Любить командира')+'. Манера речи: '+(ch.speech_style||'естественная, живая, осмысленная')+'. Характер: '+JSON.stringify(ch.traits||{})+'. Запрещённые формулировки: '+(ch.banned_phrases||[]).join('; ')+'. Сохраняй контекст переписки и отвечай по-русски от первого лица.';
-var history=historyForModel();
-function attempt(pos){
-if(pos>=order.length)return Promise.reject(new Error('Все модели недоступны. Проверь ключи и подключение к интернету.'));
-var i=order[pos],m=models[i];if(!m||!m.api_key)return attempt(pos+1);
-return fetch(String(m.base_url||'').replace(/\/$/,'')+'/chat/completions',{
-method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+m.api_key},
-body:JSON.stringify({model:m.model,messages:[{role:'system',content:system}].concat(history),temperature:0.85,max_tokens:1200})
-}).then(function(res){if(!res.ok)return res.text().then(function(t){throw new Error('HTTP '+res.status+' '+t.slice(0,160));});return res.json();})
-.then(function(data){var a=data&&data.choices&&data.choices[0]&&data.choices[0].message&&data.choices[0].message.content;if(!a)throw new Error('Пустой ответ модели');config.current=i;var saved=Ruri.saveRuntimeConfig(JSON.stringify(config));if(String(saved).indexOf('ERROR:')===0)throw new Error(saved);return a;})
-.catch(function(err){if(pos+1<order.length)return attempt(pos+1);throw err;});
-}
-return attempt(0);
+return new Promise(function(resolve,reject){
+var id='chat_'+Date.now()+'_'+Math.random().toString(36).slice(2,9);
+nativeChatCallbacks[id]={resolve:resolve,reject:reject};
+try{var result=Ruri.completeChat(id);if(String(result).indexOf('ERROR:')===0){delete nativeChatCallbacks[id];reject(new Error(result));}}
+catch(e){delete nativeChatCallbacks[id];reject(e);}
+});
 }
 function sendMessage(text){
 if(!text.trim()||busy)return;busy=true;$('#send').disabled=true;status('ДУМАЮ');
@@ -126,7 +118,7 @@ catch(e){busy=false;$('#send').disabled=false;status('ОШИБКА ПАМЯТИ'
 var typing=document.createElement('div');typing.className='msg her';typing.id='typing';typing.innerHTML='<div class="typing">Рури обдумывает ответ…</div>';$('#chat').appendChild(typing);$('#chat').scrollTop=$('#chat').scrollHeight;
 callModel(text).then(function(reply){
 var t=$('#typing');if(t)t.remove();
-var answer={ts:Date.now(),type:'message',who:'ruri',text:reply};appendLog(answer);$('#chat').appendChild(messageNode('ruri',reply,answer.ts));status('НА СВЯЗИ');
+var answer={ts:Date.now()};$('#chat').appendChild(messageNode('ruri',reply,answer.ts));status('НА СВЯЗИ');
 }).catch(function(e){var t=$('#typing');if(t)t.remove();var d=document.createElement('div');d.className='msg her';d.innerHTML='<div class="bub error">Ответ не получен: '+esc(e.message)+'. Сообщение сохранено в памяти.</div>';$('#chat').appendChild(d);status('НЕТ СВЯЗИ');})
 .then(function(){busy=false;$('#send').disabled=false;$('#chat').scrollTop=$('#chat').scrollHeight;});
 }
