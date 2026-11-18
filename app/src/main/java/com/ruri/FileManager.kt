@@ -548,7 +548,7 @@ object FileManager {
             }
         } catch (e: Exception) {
             // Preserve malformed goals rather than replacing an existing task history.
-            Log.w("Ruri", "Goal/task schema migration skipped; original file was preserved", e)
+            android.util.Log.w("Ruri", "Goal/task schema migration skipped; original file was preserved", e)
         }
     }
 
