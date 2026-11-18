@@ -7,11 +7,12 @@ package com.ruri
  */
 object CredentialGuard {
     private val credentialPattern = Regex(
-        "(?i)(\\b(password|passwd|passphrase|api[ _-]?key|access[ _-]?token|refresh[ _-]?token|bearer|client secret|private key|one[- ]time password|otp|verification code|authentication code)\\b|" +
+        "(\\b(password|passwd|passphrase|api[ _-]?key|access[ _-]?token|refresh[ _-]?token|bearer|client secret|private key|one[- ]time password|otp|verification code|authentication code)\\b|" +
             "парол\\p{L}*|ключ\\s+api|токен\\s+доступа|одноразов\\p{L}*\\s+код|код\\s+подтверждения|пин[- ]?код)"
     )
 
-    fun containsCredentials(value: String): Boolean = credentialPattern.containsMatchIn(value)
+    fun containsCredentials(value: String): Boolean =
+        credentialPattern.containsMatchIn(value.lowercase(java.util.Locale.ROOT))
 
     fun redact(value: String, placeholder: String = "[учётные данные скрыты]"): String =
         if (containsCredentials(value)) placeholder else value

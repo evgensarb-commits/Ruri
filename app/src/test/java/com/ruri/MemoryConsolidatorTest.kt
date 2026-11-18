@@ -20,6 +20,7 @@ class MemoryConsolidatorTest {
         assertTrue(summary.contains(previous))
         assertTrue(summary.contains("Рубе"))
         assertTrue(summary.contains("commander@example.com"))
+        assertTrue(CredentialGuard.containsCredentials("Пароль: hunter2"))
         assertFalse(summary.contains("hunter2"))
     }
 }

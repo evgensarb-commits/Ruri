@@ -9,6 +9,7 @@ class CredentialGuardTest {
     @Test
     fun protectsOnlyAuthenticationCredentials() {
         assertTrue(CredentialGuard.containsCredentials("My password is hunter2"))
+        assertTrue(CredentialGuard.containsCredentials("Пароль: hunter2"))
         assertTrue(CredentialGuard.containsCredentials("API key: abc123"))
         assertTrue(CredentialGuard.containsCredentials("Ваш код подтверждения: 123456"))
         assertTrue(CredentialGuard.containsCredentials("Bearer eyJhbGciOi..."))
