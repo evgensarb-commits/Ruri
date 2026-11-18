@@ -157,10 +157,15 @@ object FileManager {
         put(root, CONFIG_PATH, """
             {
               "models": [
-                { "id": "gemini", "name": "Gemini", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "api_key": "", "model": "gemini-3.8-flash", "priority": 1 },
-                { "id": "groq", "name": "Groq", "base_url": "https://api.groq.com/openai/v1", "api_key": "", "model": "openai/gpt-oss-120b", "priority": 2 }
+                { "id": "gemini", "name": "Gemini (legacy, disabled)", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "api_key": "", "model": "gemini-3.8-flash", "priority": 90, "free_tier": false, "enabled": false },
+                { "id": "groq", "name": "Groq (legacy, disabled)", "base_url": "https://api.groq.com/openai/v1", "api_key": "", "model": "openai/gpt-oss-120b", "priority": 91, "free_tier": false, "enabled": false },
+                { "id": "routeway", "name": "Routeway · Gemma MeroMero Free", "base_url": "https://api.routeway.ai/v1", "api_key": "", "model": "gemma-4-26b-a4b-it-meromero:free", "priority": 1, "free_tier": true, "enabled": true },
+                { "id": "kilo", "name": "Kilo · Auto Free", "base_url": "https://ai-gateway.kilo.ai/api/v1", "api_key": "", "model": "kilo-auto/free", "priority": 2, "free_tier": true, "enabled": true, "allow_anonymous": true, "minimal_context": true },
+                { "id": "requesty", "name": "Requesty · Google Gemma 4 Free", "base_url": "https://router.requesty.ai/v1", "api_key": "", "model": "google/gemma-4-31b-it", "priority": 3, "free_tier": true, "enabled": true }
               ],
-              "current": 0,
+              "current": 2,
+              "free_only": true,
+              "free_routes_migrated": true,
               "quota_used": 0,
               "quota_reset": 0
             }
@@ -586,9 +591,81 @@ object FileManager {
                     changed = true
                 }
             }
+
+            fun ensureProvider(id: String, defaults: JSONObject): Int {
+                for (i in 0 until models.length()) {
+                    val existing = models.optJSONObject(i) ?: continue
+                    if (existing.optString("id") == id) {
+                        for (key in defaults.keys()) {
+                            if (!existing.has(key) || (key == "api_key" && existing.optString(key).isBlank())) {
+                                existing.put(key, defaults.get(key))
+                                changed = true
+                            }
+                        }
+                        return i
+                    }
+                }
+                models.put(defaults)
+                changed = true
+                return models.length() - 1
+            }
+
+            val routewayIndex = ensureProvider("routeway", JSONObject()
+                .put("id", "routeway")
+                .put("name", "Routeway · Gemma MeroMero Free")
+                .put("base_url", "https://api.routeway.ai/v1")
+                .put("api_key", "")
+                .put("model", "gemma-4-26b-a4b-it-meromero:free")
+                .put("priority", 1)
+                .put("free_tier", true)
+                .put("enabled", true))
+
+            ensureProvider("kilo", JSONObject()
+                .put("id", "kilo")
+                .put("name", "Kilo · Auto Free")
+                .put("base_url", "https://ai-gateway.kilo.ai/api/v1")
+                .put("api_key", "")
+                .put("model", "kilo-auto/free")
+                .put("priority", 2)
+                .put("free_tier", true)
+                .put("enabled", true)
+                .put("allow_anonymous", true)
+                .put("minimal_context", true))
+
+            ensureProvider("requesty", JSONObject()
+                .put("id", "requesty")
+                .put("name", "Requesty · Google Gemma 4 Free")
+                .put("base_url", "https://router.requesty.ai/v1")
+                .put("api_key", "")
+                .put("model", "google/gemma-4-31b-it")
+                .put("priority", 3)
+                .put("free_tier", true)
+                .put("enabled", true))
+
+            // Legacy paid providers and any unknown models remain stored, but are never sent.
+            for (i in 0 until models.length()) {
+                val model = models.optJSONObject(i) ?: continue
+                if (model.optString("id") !in setOf("routeway", "kilo", "requesty")) {
+                    if (model.optBoolean("free_tier", false) || model.optBoolean("enabled", true)) {
+                        model.put("free_tier", false)
+                        model.put("enabled", false)
+                        changed = true
+                    }
+                }
+            }
+
+            config.put("free_only", true)
+            if (!config.optBoolean("free_routes_migrated", false)) {
+                config.put("current", routewayIndex)
+                config.put("free_routes_migrated", true)
+                changed = true
+            } else if (config.optInt("current", -1) !in 0 until models.length()) {
+                config.put("current", routewayIndex)
+                changed = true
+            }
             if (changed) atomicWrite(file, config.toString(2))
-        } catch (_: Exception) {
-            // Migration is best-effort and must never destroy the source file.
+        } catch (e: Exception) {
+            android.util.Log.w("Ruri", "Free provider migration skipped; original model configuration was preserved", e)
         }
     }
 
