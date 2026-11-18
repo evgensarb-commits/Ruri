@@ -2,14 +2,23 @@ package com.ruri
 
 import org.json.JSONArray
 
-/** Selects only explicitly free, enabled model routes and keeps the configured primary first. */
+/** Keeps provider selection strictly inside explicitly enabled free routes. */
 internal object FreeModelRouter {
-    fun orderedIndices(models: JSONArray, primaryIndex: Int): List<Int> {
+    fun orderedIndices(
+        models: JSONArray,
+        primaryIndex: Int,
+        requireNsfw: Boolean = false
+    ): List<Int> {
         val eligible = (0 until models.length()).filter { index ->
             val model = models.optJSONObject(index)
             model != null &&
                 model.optBoolean("free_tier", false) &&
-                model.optBoolean("enabled", true)
+                model.optBoolean("enabled", true) &&
+                (!requireNsfw || (
+                    model.optBoolean("nsfw_capable", false) &&
+                        model.optLong("nsfw_tested_at", 0L) > 0L &&
+                        model.optString("nsfw_probe_status") == "passed"
+                    ))
         }
         return eligible.sortedWith(
             compareBy<Int> { if (it == primaryIndex) 0 else 1 }
