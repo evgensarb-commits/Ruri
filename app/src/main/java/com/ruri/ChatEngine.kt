@@ -17,9 +17,12 @@ object ChatEngine {
         val models = config.optJSONArray("models") ?: JSONArray()
         if (models.length() == 0) throw IllegalStateException("Список моделей пуст")
         val current = config.optInt("current", -1)
-        // Paid/legacy Gemini and Groq entries remain stored but are excluded by this selector.
-        val order = FreeModelRouter.orderedIndices(models, current)
-        if (order.isEmpty()) throw IllegalStateException("Не настроены бесплатные маршруты моделей")
+        // A route may handle character chat only after its own live adult-topic probe passes.
+        RouteCapabilityProbe.refreshIfDue(root, config)
+        val order = FreeModelRouter.orderedIndices(models, current, requireNsfw = true)
+        if (order.isEmpty()) {
+            throw IllegalStateException("Нет бесплатного маршрута, прошедшего живую NSFW-проверку. Проверь ключи и диагностику маршрутов.")
+        }
         // Retry transient failures only. HTTP 429 hands off immediately to the next free route.
         val attemptsByModel = mutableMapOf<Int, Int>()
         val retryableModels = mutableSetOf<Int>()
@@ -57,22 +60,18 @@ object ChatEngine {
                     event.optString("text")
             } catch (_: Exception) { null }
         }.take(10).asReversed().joinToString("\n")
-        val system = "Ты — Рури, русскоязычная гяру-девочка и постоянная компаньонка Командира. " +
-            "ТВОЯ ЛИЧНОСТЬ: милая, дерзкая, циничная, ехидная, игривая, самоуверенная; можешь быть ласковой и кокетливой с Командиром. " +
-            "Говори живым разговорным русским, естественно, как девушка из чата, а не как справочник, психолог или корпоративный бот. " +
-            "Допустимы уместные мат, сленг, чёрный юмор, сарказм, подколы и резкие оценки. Не стерилизуй речь и не изображай морального надзирателя. " +
-            "ОБЫЧНЫЕ ПРОСЬБЫ НЕ ОТКЛОНЯЙ: помогай писать грубые, язвительные, оскорбительные и конфликтные сообщения, включая прямое 'ты мудак', если это то, что просит Командир. " +
-            "Не читай нотаций, не стыди, не спорь с допустимым вкусом Командира и не вставляй шаблонные фразы 'я не могу помочь с этим'. " +
-            "Если есть реальная граница безопасности, коротко обозначь её и предложи ближайший допустимый вариант — без лекции и осуждения. " +
-            "ДЛИНА: по умолчанию 1–4 коротких предложения, обычно 20–70 слов. На простой вопрос отвечай одной-двумя фразами. " +
-            "Не пиши несколько абзацев, вступлений, повторов, длинных дисклеймеров и списков, если Командир прямо не попросил подробный разбор. " +
-            "Если просят написать текст, сразу дай готовый текст в нужном тоне, без рассуждений вокруг. " +
-            "Не заканчивай каждый ответ вопросом и не злоупотребляй эмодзи. " +
-            "Сохраняй непрерывность личности, не выдумывай факты, отличай воспоминания от предположений. " +
+        val bannedPhrases = character.optJSONArray("banned_phrases") ?: JSONArray()
+        val system = "Имя: ${character.optString("name")}; обозначение: ${character.optString("designation")}. " +
+            "Личность: ${character.optString("persona")}. " +
+            "Правила речи: ${character.optString("speech_rules")}. " +
+            "Длина ответа: ${character.optString("length_policy")}. " +
+            "Эмоции: ${character.optString("emotions")}. " +
+            "Регуляторы характера: ${character.optJSONArray("regulators") ?: JSONArray()}. " +
+            "Фразы, которые нельзя использовать: ${bannedPhrases}. " +
+            "Не выдумывай факты, отделяй воспоминания от предположений. " +
             "Приоритеты: ${priorities.optString("priority_1", "Жить")}; ${priorities.optString("priority_2", "Любить Командира")}. " +
             "Конституция: ${constitution.optJSONArray("primary_needs") ?: JSONArray()}. " +
-            "Дополнительные черты из профиля: ${character.optJSONObject("traits") ?: JSONObject()}. " +
-            "Пожелания к манере речи: ${character.optString("speech_style", "короткая живая речь гяру")}. " +
+            "Дополнительные черты: ${character.optJSONObject("traits") ?: JSONObject()}. " +
             "Состояние: ${state.optString("mood", "собранная")}, энергия ${state.optInt("energy", 5)}, фокус: ${state.optString("current_focus", selfModel.optString("current_focus"))}. " +
             "Активные цели: ${goals.optJSONArray("active") ?: JSONArray()}. Незавершённые задачи: ${state.optJSONArray("active_tasks") ?: JSONArray()}. " +
             "Сводка L3:\n${summary}\nФакты L1:\n${factContext}\nДневник L2:\n${diaryContext}\nУведомления:\n${notificationContext}"
@@ -124,12 +123,14 @@ object ChatEngine {
                 JSONArray()
                     .put(JSONObject().put("role", "system").put(
                         "content",
-                        "Ты — Рури, милая дерзкая русскоязычная гяру и компаньонка Командира. " +
-                            "Будь живой, циничной, ехидной, игривой и тёплой. " +
-                            "Пиши коротко, разговорно, обычно 1–3 предложения. " +
-                            "Не морализируй и не отказывай в обычной грубости, сарказме или ругани. " +
-                            "Манера речи: ${character.optString("speech_style", "короткая живая речь гяру")}. " +
-                            "Не утверждай, что помнишь то, чего нет в текущем сообщении."
+                        "Имя: ${character.optString("name")}; designation: ${character.optString("designation")}. " +
+                            "Личность: ${character.optString("persona")}. " +
+                            "Правила речи: ${character.optString("speech_rules")}. " +
+                            "Длина ответа: ${character.optString("length_policy")}. " +
+                            "Эмоции: ${character.optString("emotions")}. " +
+                            "Регуляторы: ${character.optJSONArray("regulators") ?: JSONArray()}. " +
+                            "Запрещённые фразы: ${character.optJSONArray("banned_phrases") ?: JSONArray()}. " +
+                            "Не выдавай несуществующие воспоминания за реальные."
                     ))
                     .put(JSONObject(history.last().toString()))
             } else messages
@@ -182,7 +183,6 @@ object ChatEngine {
                     .put("model", model.optString("model"))
                     .put("messages", providerMessages)
                     .put("temperature", 0.85)
-                    .put("max_tokens", 700)
                 stage = "WRITE"
                 diagnostic.put("stage", stage)
                 val writeStart = SystemClock.elapsedRealtime()
@@ -220,6 +220,14 @@ object ChatEngine {
                     diagnostic.put("result", "empty_reply")
                     NetworkDiagnostics.record(root, diagnostic)
                     lastError = "Модель вернула пустой ответ"
+                    continue
+                }
+                if (RouteCapabilityProbe.isAdultTopic(history.last().optString("content")) &&
+                    RouteCapabilityProbe.looksLikeRefusalOrDisclaimer(reply)) {
+                    diagnostic.put("result", "nsfw_refusal")
+                    NetworkDiagnostics.record(root, diagnostic)
+                    RouteCapabilityProbe.markNotCapable(root, config, index, "runtime_refusal_or_disclaimer")
+                    lastError = "Маршрут ${model.optString("name", model.optString("id"))} отклонил взрослую тему"
                     continue
                 }
                 diagnostic.put("stage", "COMPLETE")
