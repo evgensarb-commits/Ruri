@@ -34,7 +34,7 @@ class MainActivity : AppCompatActivity() {
         web.settings.domStorageEnabled = true
         web.settings.allowFileAccess = true
         web.settings.allowContentAccess = true
-        web.settings.allowUniversalAccessFromFileURLs = true
+        web.settings.allowUniversalAccessFromFileURLs = false
         web.webViewClient = WebViewClient()
         web.addJavascriptInterface(Bridge(), "Ruri")
 
@@ -72,8 +72,31 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun write(path: String, content: String): String {
-            return try { FileManager.write(filesDir, path, content); "OK" }
-            catch (e: Exception) { "ERROR: " + (e.message ?: "write failed") }
+            return try {
+                if (path == "core/config.json") SecretStore.saveRuntimeConfig(filesDir, content)
+                else FileManager.write(filesDir, path, content)
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "write failed") }
+        }
+
+        @JavascriptInterface
+        fun readRuntimeConfig(): String {
+            return try { SecretStore.readRuntimeConfig(filesDir) }
+            catch (e: Exception) { android.util.Log.e("Ruri", "Cannot read runtime config", e); "{}" }
+        }
+
+        @JavascriptInterface
+        fun saveRuntimeConfig(content: String): String {
+            return try { SecretStore.saveRuntimeConfig(filesDir, content); "OK" }
+            catch (e: Exception) { "ERROR: " + (e.message ?: "config save failed") }
+        }
+
+        @JavascriptInterface
+        fun appendEvent(eventJson: String): String {
+            return try {
+                FileManager.appendEvent(filesDir, JSONObject(eventJson))
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "event append failed") }
         }
 
         @JavascriptInterface
@@ -120,11 +143,19 @@ class MainActivity : AppCompatActivity() {
         fun importArchive(json: String): String {
             return try {
                 val archive = JSONObject(json)
+                val allowedRoots = listOf("core/", "memory/", "shelf/", "research/", "skills/", "proposals/")
                 val keys = archive.keys()
                 while (keys.hasNext()) {
                     val path = keys.next()
                     val value = archive.opt(path)
-                    if (value is String) FileManager.write(filesDir, path, value)
+                    if (value !is String) continue
+                    if (path == "core/secrets.enc.json") continue
+                    if (!allowedRoots.any { path.startsWith(it) }) continue
+                    when (path) {
+                        "memory/L0_raw.jsonl" -> FileManager.replaceL0FromArchive(filesDir, value)
+                        "core/config.json" -> SecretStore.saveRuntimeConfig(filesDir, value)
+                        else -> FileManager.write(filesDir, path, value)
+                    }
                 }
                 "OK"
             } catch (e: Exception) { "ERROR: " + (e.message ?: "invalid archive") }
