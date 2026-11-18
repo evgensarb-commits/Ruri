@@ -70,6 +70,7 @@ class RuriLifeWorker(
             // Do useful local work first; it does not require an API key or network.
             LifeStateEngine.process(appContext, reason)
             FactExtractor.extractIfDue(appContext)
+            MemoryConsolidator.consolidateIfDue(appContext)
 
             // Avoid spending tokens on every 30-minute maintenance wake-up.
             if (shouldRunRemoteCognition(appContext, reason)) {
