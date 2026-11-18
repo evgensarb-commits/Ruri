@@ -44,7 +44,7 @@ object FileManager {
         put(root, "core/config.json", """
             {
               "models": [
-                { "name": "Gemini", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "api_key": "", "model": "gemini-2.0-flash", "priority": 1 },
+                { "name": "Gemini", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "api_key": "", "model": "gemini-3.8-flash", "priority": 1 },
                 { "name": "Groq", "base_url": "https://api.groq.com/openai/v1", "api_key": "", "model": "openai/gpt-oss-120b", "priority": 2 }
               ],
               "current": 0,
@@ -59,6 +59,7 @@ object FileManager {
         put(root, "memory/L2_diary.json", """{ "entries": [] }""")
         put(root, "memory/L3_summary.json", """{ "summary": "", "last_compressed": 0 }""")
         migrateCharacterIdentity(root)
+        migrateModelConfig(root)
 
         put(root, "memory/L4_state.json", """
             {
@@ -115,6 +116,25 @@ object FileManager {
                 changed = true
             }
             if (changed) file.writeText(character.toString(2))
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun migrateModelConfig(root: File) {
+        val file = File(root, "core/config.json")
+        if (!file.exists()) return
+        try {
+            val config = JSONObject(file.readText())
+            val models = config.optJSONArray("models") ?: return
+            var changed = false
+            for (i in 0 until models.length()) {
+                val model = models.optJSONObject(i) ?: continue
+                if (model.optString("model") == "gemini-2.0-flash") {
+                    model.put("model", "gemini-3.8-flash")
+                    changed = true
+                }
+            }
+            if (changed) file.writeText(config.toString(2))
         } catch (_: Exception) {
         }
     }
