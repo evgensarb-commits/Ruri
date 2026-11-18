@@ -89,7 +89,9 @@ object MemoryConsolidator {
         val batch = selectEntriesForConsolidation(diary, previousCount, MAX_ENTRIES_PER_CONSOLIDATION)
         val totalEntries = batch.totalEntries
         val previousCompressedAt = current.optLong("last_compressed", 0L)
-        if (totalEntries - previousCount < MIN_NEW_ENTRIES || batch.entries.size < MIN_NEW_ENTRIES) return false
+        if (totalEntries - previousCount < MIN_NEW_ENTRIES) return false
+        if (batch.entries.isEmpty()) return false
+        if (batch.entries.size < MIN_NEW_ENTRIES && batch.skippedBeforeBatch == 0L) return false
         if (previousCompressedAt > 0L && System.currentTimeMillis() - previousCompressedAt < DAY_MS) return false
 
         val now = System.currentTimeMillis()
