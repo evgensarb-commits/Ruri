@@ -10,7 +10,7 @@
 
 ## Актуальный статус CI
 
-**18 ноября 2026 года:** GitHub Actions run №165 (44329839179) завершился успешно. Kotlin compile, unit tests, проверка постоянного keystore, assembleDebug, apksigner verify и upload artifact прошли. Собранный файл — artifact `ru-r1-apk`, APK подписан RSA-сертификатом с SHA-256 `68ee119c6cfcd2ec4ca03c46d0018661a4f44850de218f7a30b045c6130dd536`.
+**18 ноября 2026 года:** GitHub Actions run №168 (44330479448) завершился успешно. Kotlin compile, unit tests, проверка постоянного keystore, assembleDebug, apksigner verify и upload artifact прошли. Собранный файл — artifact `ru-r1-apk`, APK подписан RSA-сертификатом с SHA-256 `68ee119c6cfcd2ec4ca03c46d0018661a4f44850de218f7a30b045c6130dd536`.
 
 В ходе аудита добавлена фильтрация чувствительного контекста перед удалёнными модельными запросами, уведомления в автоматической когниции заменены агрегатами по приложению-источнику; фоновые провайдеры требуют HTTPS; офлайн L3 сохраняет старую сводку; SecretStore не затирает повреждённое хранилище пустым объектом; некорректный drives.json не перезаписывается. CI подтверждает сборку и подпись, но ещё не подтверждает поведение на реальном Android-устройстве.
 
@@ -33,7 +33,7 @@
 - экспорт включает содержимое верхнего уровня каталогов shelf, research, skills и proposals;
 - Application ID остаётся `com.ruri`, версия поднята с 1.2 (versionCode 3) до 1.3 (versionCode 4).
 
-**Подтверждено GitHub Actions 18.11.2026:** run №165, ID 44329839179, commit f5c6c8c27cb989035a8e09ca7b4c3e5e8f9d03f5. Компиляция Kotlin, unit-тесты, восстановление PKCS12 keystore, сборка APK, проверка подписи Android Build Tools apksigner и загрузка artifact завершились успешно.
+**Подтверждено GitHub Actions 18.11.2026:** run №168, ID 44330479448, commit 85c02b2756a08dea15055b30164011d6a79ad53d. Компиляция Kotlin, unit-тесты, восстановление PKCS12 keystore, сборка APK, проверка подписи Android Build Tools apksigner и загрузка artifact завершились успешно.
 
 SHA-256 сертификата текущей подписи:
 68ee119c6cfcd2ec4ca03c46d0018661a4f44850de218f7a30b045c6130dd536

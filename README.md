@@ -6,7 +6,7 @@
 
 Проверены Kotlin/Android исходники, Android Manifest, WebView-интерфейс, Gradle, GitHub Actions workflow, unit-тесты и архитектурная документация.
 
-**GitHub Actions run №165** (ID 44329839179, commit f5c6c8c27cb989035a8e09ca7b4c3e5e8f9d03f5) завершился успешно:
+**GitHub Actions run №168** (ID 44330479448, commit 85c02b2756a08dea15055b30164011d6a79ad53d) завершился успешно:
 - компиляция Kotlin — успешно;
 - unit-тесты — успешно, включая новые проверки PrivacyFilter;
 - восстановление PKCS12 keystore и проверка alias — успешно;
@@ -22,9 +22,9 @@
 GitHub Actions использовал действующие secrets keystore/password/alias; их фактические значения остаются скрытыми. Успешная проверка keytool и подписи APK подтверждает, что текущий набор secrets пригоден для сборки.
 
 Артефакт:
-- имя: ru-r1-apk; ID: 14439525541;
+- имя: ru-r1-apk; ID: 14439496265;
 - размер ZIP: 3 912 813 байт;
-- SHA-256 ZIP: 86d8be124fed184219bc42ab31a2a98e30155f5a477b7d8b89f1cb8ef5131e68;
+- SHA-256 ZIP: 49dfee1aaa519ea66f984c5b077144c7e26291f2ba615ae71ca704ef410bfa1d;
 - срок хранения GitHub Actions — до 18 декабря 2026 года.
 
 APK: 4 220 734 байта; SHA-256:
