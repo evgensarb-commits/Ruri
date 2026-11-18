@@ -12,7 +12,6 @@ object WebSearch {
         val q = query.trim()
         if (q.length < 2) return JSONObject().put("error", "Введите поисковый запрос").toString()
         if (q.length > 300) return JSONObject().put("error", "Запрос слишком длинный").toString()
-
         var connection: HttpURLConnection? = null
         return try {
             val encoded = URLEncoder.encode(q, "UTF-8")
@@ -27,21 +26,19 @@ object WebSearch {
             if (code !in 200..299) return JSONObject().put("error", "Поиск вернул HTTP $code").toString()
             val html = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
             val results = JSONArray()
-            val blocks = Regex("(?s)<div[^>]*class=\"[^\"]*result[^\"]*\"[^>]*>(.*?)</div>\\s*</div>").findAll(html)
-            for (block in blocks) {
-                if (results.length() >= 6) break
-                val part = block.groupValues[1]
-                val anchor = Regex("(?s)<a[^>]*class=\"[^\"]*result__a[^\"]*\"[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>").find(part)
-                    ?: continue
+            val anchors = Regex("(?is)<a[^>]*class=[\\\"'][^\\\"']*result__a[^\\\"']*[\\\"'][^>]*href=[\\\"']([^\\\"']+)[\\\"'][^>]*>(.*?)</a>").findAll(html)
+            for (anchor in anchors) {
+                if (results.length() >= 7) break
                 val rawUrl = decodeEntities(anchor.groupValues[1])
                 val title = clean(anchor.groupValues[2])
-                val snippet = Regex("(?s)<(?:a|div)[^>]*class=\"[^\"]*result__snippet[^\"]*\"[^>]*>(.*?)</(?:a|div)>")
-                    .find(part)?.groupValues?.get(1)?.let { clean(it) } ?: ""
+                val after = html.substring(anchor.range.last + 1, minOf(html.length, anchor.range.last + 2200))
+                val snippet = Regex("(?is)class=[\\\"'][^\\\"']*result__snippet[^\\\"']*[\\\"'][^>]*>(.*?)</(?:a|div)>")
+                    .find(after)?.groupValues?.get(1)?.let { clean(it) } ?: ""
                 val finalUrl = if (rawUrl.startsWith("//duckduckgo.com/l/")) {
-                    val param = Regex("[?&]uddg=([^&]+)").find(rawUrl)?.groupValues?.get(1)
-                    if (param != null) try { java.net.URLDecoder.decode(param, "UTF-8") } catch (_: Exception) { rawUrl } else rawUrl
+                    val parameter = Regex("[?&]uddg=([^&]+)").find(rawUrl)?.groupValues?.get(1)
+                    if (parameter != null) try { java.net.URLDecoder.decode(parameter, "UTF-8") } catch (_: Exception) { rawUrl } else rawUrl
                 } else rawUrl
-                if (title.isNotBlank() && finalUrl.startsWith("http")) {
+                if (title.isNotBlank() && (finalUrl.startsWith("https://") || finalUrl.startsWith("http://"))) {
                     results.put(JSONObject().put("title", title).put("url", finalUrl).put("snippet", snippet))
                 }
             }
@@ -49,9 +46,7 @@ object WebSearch {
         } catch (e: Exception) {
             Log.w("Ruri", "Web search failed", e)
             JSONObject().put("error", "Поиск недоступен: " + (e.message ?: e.javaClass.simpleName)).toString()
-        } finally {
-            connection?.disconnect()
-        }
+        } finally { connection?.disconnect() }
     }
 
     private fun clean(value: String): String = decodeEntities(value)
