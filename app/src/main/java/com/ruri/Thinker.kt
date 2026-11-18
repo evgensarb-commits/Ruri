@@ -199,13 +199,13 @@ object Thinker {
         val common = "Имя: " + character.optString("name") +
             ". Обозначение: " + character.optString("designation") + ". Личность: " + character.optString("persona") +
             ". Правила речи: " + character.optString("speech_rules") +
+            ". Непрерывность: " + character.optString("continuity_rules") +
             ". Длина ответа: " + character.optString("length_policy") +
             ". Эмоции: " + character.optString("emotions") +
             ". Регуляторы: " + (character.optJSONArray("regulators")?.toString() ?: "[]") +
             ". Запрещённые фразы: " + (character.optJSONArray("banned_phrases")?.toString() ?: "[]") + ".\n" +
             "Первый приоритет: " + priorities.optString("priority_1", "Жить") +
             ". Второй: " + priorities.optString("priority_2", "Любить Командира") + ".\n" +
-            "Ты живёшь на телефоне Командира. Сохраняй непрерывность характера и памяти.\n" +
             "Конституция: " + (constitution.optJSONArray("primary_needs")?.toString() ?: "[]") + ". Обе главные потребности равнозначны и неизменны.\n" +
             "Событие: " + reason + ". Заряд: " + BatteryLevel.get(ctx) + "%. Тишина Командира: " + quiet + " ч. Игнорирований инициативы: " + state.optInt("ignored_count", 0) + ".\n" +
             "Состояние: " + state.optString("mood", "собранная") + ", энергия " + state.optInt("energy", 5) + ", привязанность " + state.optDouble("bond", 0.5) + ".\n" +
