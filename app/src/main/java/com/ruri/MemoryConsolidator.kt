@@ -180,8 +180,11 @@ object MemoryConsolidator {
             )
         }
 
-        val versions = current.optJSONArray("previous_versions") ?: JSONArray()
-        val oldSummary = current.optString("summary")
+        val rawVersions = current.optJSONArray("previous_versions") ?: JSONArray()
+        val versions = SecretRedactor.redactEvent(
+            JSONObject().put("versions", rawVersions)
+        ).optJSONArray("versions") ?: JSONArray()
+        val oldSummary = SecretRedactor.redactText(current.optString("summary"))
         if (oldSummary.isNotBlank()) {
             versions.put(
                 JSONObject()
@@ -320,13 +323,14 @@ object MemoryConsolidator {
     internal fun extractiveSummary(previousSummary: String, entries: List<JSONObject>): String {
         val unique = LinkedHashSet<String>()
         entries.asReversed().forEach { entry ->
-            val value = entry.optString("text").replace(Regex("\\s+"), " ").trim()
+            val value = SecretRedactor.redactText(entry.optString("text"))
+                .replace(Regex("\\s+"), " ").trim()
             if (value.length >= 20) unique.add(value.take(500))
         }
         // Preserve every record in the current 40-entry page when the LLM is unavailable.
         // The compact offline summary favours the latest pages while L1/L0 keep their own source history.
         val recent = unique.toList().asReversed().joinToString("\n").take(16000)
-        val previous = previousSummary.trim().takeLast(6000)
+        val previous = SecretRedactor.redactText(previousSummary).trim().takeLast(6000)
         return buildString {
             if (previous.isNotBlank()) append("Ранее сохранённая автобиографическая сводка:\n").append(previous)
             if (recent.isNotBlank()) {
