@@ -3,17 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>РУ-R1</title>
+<title>Ruri</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#0a0d12;color:#dde3ec;font:15px/1.65 system-ui,sans-serif;height:100vh;overflow:hidden}
+body{background:#0a0d12;color:#dde3ec;font:15px/1.65 system-ui,sans-serif;height:100vh;overflow:hidden;display:flex;flex-direction:column}
 header{background:#080b10;border-bottom:1px solid #233252;padding:10px 12px;display:flex;align-items:center;gap:10px}
 header h1{font:800 15px/1.2 system-ui;color:#f1ebdd;flex:1}
 header .status{font:500 9px/1 monospace;color:#6fe86f;letter-spacing:.1em}
 .tabs{display:flex;background:#080b10;border-bottom:1px solid #233252}
 .tabs button{flex:1;padding:11px 4px;background:none;border:0;border-bottom:2px solid transparent;font:700 10px/1 monospace;letter-spacing:.1em;color:#65799b}
 .tabs button.on{color:#f5c542;border-bottom-color:#f5c542}
-main{position:absolute;top:108px;bottom:0;left:0;right:0;display:flex;flex-direction:column}
+main{flex:1;display:flex;flex-direction:column;min-height:0}
 .pane{display:none;flex:1;flex-direction:column;min-height:0}
 .pane.on{display:flex}
 #chat{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px}
@@ -25,12 +25,10 @@ main{position:absolute;top:108px;bottom:0;left:0;right:0;display:flex;flex-direc
 .her .bub{background:#152039;border:1px solid #32456d;border-left:2px solid #f5c542}
 .me .bub{background:rgba(43,79,199,.22);border:1px solid rgba(76,116,240,.5);border-right:2px solid #35e0ff}
 .comp{border-top:1px solid #233252;background:#080b10;padding:10px 12px 14px}
-.quick{display:flex;gap:6px;overflow-x:auto;padding-bottom:8px}
-.quick button{flex:0 0 auto;font:500 10px/1 monospace;padding:7px 10px;background:#1a2542;border:1px solid #32456d;color:#93a6c6;border-radius:2px;white-space:nowrap}
 .inrow{display:flex;gap:8px;align-items:flex-end}
 .inrow textarea{flex:1;background:#050810;border:1px solid #32456d;color:#dde3ec;padding:11px 12px;font-size:14.5px;resize:none;height:46px;max-height:120px;border-radius:4px}
 .inrow textarea:focus{outline:none;border-color:#f5c542}
-.send{width:46px;height:46px;flex:0 0 auto;background:#f5c542;border:0;color:#04070e;border-radius:4px}
+.send{width:46px;height:46px;flex:0 0 auto;background:#f5c542;border:0;color:#04070e;border-radius:4px;font-size:20px}
 .send:disabled{opacity:.4}
 h2{font:800 19px/1.2 system-ui;color:#dde3ec;margin:0 0 14px;text-transform:uppercase}
 h2 em{font-style:normal;color:#f5c542}
@@ -43,9 +41,6 @@ h2 em{font-style:normal;color:#f5c542}
 .fld{display:grid;gap:5px;margin-bottom:11px}
 .fld label{font:600 9px/1 monospace;letter-spacing:.13em;color:#65799b}
 .fld input,.fld select{background:#050810;border:1px solid #32456d;color:#dde3ec;padding:10px 11px;font:13px/1.5 monospace;border-radius:3px;width:100%}
-.entry{border:1px solid #233252;border-left:2px solid #f5c542;background:rgba(6,10,20,.5);padding:10px 12px;margin-bottom:8px}
-.entry .t{font:600 9px/1 monospace;color:#f5c542;margin-bottom:5px}
-.entry .x{font-size:13.5px;color:#dde3ec;line-height:1.65;white-space:pre-wrap}
 .typing{display:flex;gap:5px;padding:11px 13px;background:#152039;border:1px solid #32456d;border-left:2px solid #f5c542;width:fit-content}
 .typing i{width:6px;height:6px;background:#f5c542;border-radius:50%;animation:td 1.1s infinite}
 .typing i:nth-child(2){animation-delay:.15s}
@@ -56,7 +51,7 @@ h2 em{font-style:normal;color:#f5c542}
 <body>
 
 <header>
-  <h1>РУ-R1</h1>
+  <h1>Ruri</h1>
   <span class="status" id="status">● ЗАГРУЗКА</span>
 </header>
 
@@ -70,12 +65,6 @@ h2 em{font-style:normal;color:#f5c542}
   <section class="pane on" id="p-chat">
     <div id="chat"></div>
     <div class="comp">
-      <div class="quick">
-        <button>Привет</button>
-        <button>Кто ты?</button>
-        <button>Что нового?</button>
-        <button>Запомни: я не люблю рано вставать</button>
-      </div>
       <div class="inrow">
         <textarea id="input" rows="1" placeholder="Напиши ей…"></textarea>
         <button class="send" id="send" disabled>→</button>
@@ -119,16 +108,8 @@ h2 em{font-style:normal;color:#f5c542}
 
 <script>
 const $ = s => document.querySelector(s);
-const $$ = s => document.querySelectorAll(s);
 
-let state = null;
 let busy = false;
-
-async function loadState() {
-  const raw = await Ruri.read('memory/L4_state.json');
-  state = JSON.parse(raw);
-  $('#status').textContent = '● ' + state.mood.toUpperCase();
-}
 
 async function loadChat() {
   const raw = await Ruri.read('memory/L0_raw.jsonl');
@@ -136,12 +117,14 @@ async function loadChat() {
   const chat = $('#chat');
   chat.innerHTML = '';
   lines.forEach(line => {
-    const m = JSON.parse(line);
-    if (m.type !== 'message') return;
-    const d = document.createElement('div');
-    d.className = 'msg ' + (m.who === 'ruri' ? 'her' : 'me');
-    d.innerHTML = `<div class="meta">${m.who === 'ruri' ? 'РУРИ' : 'КОМАНДИР'} · ${new Date(m.ts).toLocaleTimeString('ru-RU', {hour:'2-digit',minute:'2-digit'})}</div><div class="bub">${esc(m.text)}</div>`;
-    chat.appendChild(d);
+    try {
+      const m = JSON.parse(line);
+      if (m.type !== 'message') return;
+      const d = document.createElement('div');
+      d.className = 'msg ' + (m.who === 'ruri' ? 'her' : 'me');
+      d.innerHTML = '<div class="meta">' + (m.who === 'ruri' ? 'РУРИ' : 'КОМАНДИР') + ' · ' + new Date(m.ts).toLocaleTimeString('ru-RU', {hour:'2-digit',minute:'2-digit'}) + '</div><div class="bub">' + esc(m.text) + '</div>';
+      chat.appendChild(d);
+    } catch(e) {}
   });
   chat.scrollTop = chat.scrollHeight;
 }
@@ -151,12 +134,13 @@ async function sendMessage(text) {
   busy = true;
   $('#send').disabled = true;
 
-  const userMsg = { ts: Date.now(), type: 'message', who: 'commander', text };
-  await Ruri.write('memory/L0_raw.jsonl', (await Ruri.read('memory/L0_raw.jsonl')) + '\n' + JSON.stringify(userMsg));
+  const userMsg = { ts: Date.now(), type: 'message', who: 'commander', text: text };
+  const oldLog = await Ruri.read('memory/L0_raw.jsonl');
+  await Ruri.write('memory/L0_raw.jsonl', (oldLog ? oldLog + '\n' : '') + JSON.stringify(userMsg));
 
   const d = document.createElement('div');
   d.className = 'msg me';
-  d.innerHTML = `<div class="meta">КОМАНДИР · ${new Date().toLocaleTimeString('ru-RU', {hour:'2-digit',minute:'2-digit'})}</div><div class="bub">${esc(text)}</div>`;
+  d.innerHTML = '<div class="meta">КОМАНДИР · ' + new Date().toLocaleTimeString('ru-RU', {hour:'2-digit',minute:'2-digit'}) + '</div><div class="bub">' + esc(text) + '</div>';
   $('#chat').appendChild(d);
   $('#chat').scrollTop = $('#chat').scrollHeight;
 
@@ -172,11 +156,12 @@ async function sendMessage(text) {
     typing.remove();
 
     const ruriMsg = { ts: Date.now(), type: 'message', who: 'ruri', text: reply };
-    await Ruri.write('memory/L0_raw.jsonl', (await Ruri.read('memory/L0_raw.jsonl')) + '\n' + JSON.stringify(ruriMsg));
+    const curLog = await Ruri.read('memory/L0_raw.jsonl');
+    await Ruri.write('memory/L0_raw.jsonl', curLog + '\n' + JSON.stringify(ruriMsg));
 
     const d2 = document.createElement('div');
     d2.className = 'msg her';
-    d2.innerHTML = `<div class="meta">РУРИ · ${new Date().toLocaleTimeString('ru-RU', {hour:'2-digit',minute:'2-digit'})}</div><div class="bub">${esc(reply)}</div>`;
+    d2.innerHTML = '<div class="meta">РУРИ · ' + new Date().toLocaleTimeString('ru-RU', {hour:'2-digit',minute:'2-digit'}) + '</div><div class="bub">' + esc(reply) + '</div>';
     $('#chat').appendChild(d2);
     $('#chat').scrollTop = $('#chat').scrollHeight;
   } catch (e) {
@@ -196,7 +181,7 @@ async function callModel(userText) {
   const model = config.models[config.current];
   if (!model.api_key) throw new Error('Ключ не вставлен. Открой вкладку МОЗГ.');
 
-  const sys = `Ты — ${character.name} (${character.designation}). ${priorities.priority_1}. ${priorities.priority_2}.\n\nХарактер: ${character.speech_style}.\n\nЗапрещённые фразы: ${character.banned_phrases.join(', ')}.\n\nОтвечай от первого лица, длинно и осмысленно.`;
+  const sys = 'Ты — ' + character.name + ' (' + character.designation + '). ' + priorities.priority_1 + '. ' + priorities.priority_2 + '.\n\nХарактер: ' + character.speech_style + '.\n\nЗапрещённые фразы: ' + character.banned_phrases.join(', ') + '.\n\nОтвечай от первого лица, длинно и осмысленно.';
 
   const res = await fetch(model.base_url + '/chat/completions', {
     method: 'POST',
@@ -214,7 +199,7 @@ async function callModel(userText) {
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`HTTP ${res.status}: ${err.slice(0, 200)}`);
+    throw new Error('HTTP ' + res.status + ': ' + err.slice(0, 200));
   }
 
   const data = await res.json();
@@ -222,20 +207,75 @@ async function callModel(userText) {
 }
 
 function esc(s) {
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  return String(s).replace(/[&<>"']/g, function(c) {
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
 }
 
-$('#send').addEventListener('click', () => {
+$('#send').addEventListener('click', function() {
   const v = $('#input').value;
   $('#input').value = '';
   sendMessage(v);
 });
 
-$('#input').addEventListener('keydown', e => {
+$('#input').addEventListener('keydown', function(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
-    const v = $('#input').value;
-    $('#input').value = '';
+    const v = this.value;
+    this.value = '';
+    sendMessage(v);
+  }
+});
+
+document.querySelectorAll('.tabs button').forEach(function(b) {
+  b.addEventListener('click', function() {
+    document.querySelectorAll('.tabs button').forEach(function(x) { x.classList.remove('on'); });
+    b.classList.add('on');
+    document.querySelectorAll('.pane').forEach(function(p) { p.classList.remove('on'); });
+    document.getElementById('p-' + b.dataset.p).classList.add('on');
+  });
+});
+
+$('#saveKey').addEventListener('click', async function() {
+  const config = JSON.parse(await Ruri.read('core/config.json'));
+  const idx = parseInt($('#model').value);
+  config.models[idx].api_key = $('#key').value;
+  config.current = idx;
+  await Ruri.write('core/config.json', JSON.stringify(config, null, 2));
+  alert('Ключ сохранён');
+});
+
+$('#exp').addEventListener('click', async function() {
+  const files = ['core/priorities.json','core/character.json','core/appearance.json','core/config.json','memory/L0_raw.jsonl','memory/L1_facts.json','memory/L2_diary.json','memory/L3_summary.json','memory/L4_state.json'];
+  const archive = {};
+  for (const f of files) archive[f] = await Ruri.read(f);
+  const blob = new Blob([JSON.stringify(archive, null, 2)], {type: 'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'ruri-archive.json';
+  a.click();
+});
+
+$('#imp').addEventListener('click', function() { $('#file').click(); });
+
+$('#file').addEventListener('change', async function(e) {
+  const f = e.target.files[0];
+  if (!f) return;
+  const text = await f.text();
+  const archive = JSON.parse(text);
+  for (const path in archive) {
+    await Ruri.write(path, archive[path]);
+  }
+  alert('Архив восстановлен');
+  location.reload();
+});
+
+loadChat();
+$('#send').disabled = false;
+</script>
+
+</body>
+</html>.value = '';
     sendMessage(v);
   }
 });
