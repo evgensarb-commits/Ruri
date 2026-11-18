@@ -67,8 +67,8 @@ object MemoryRetriever {
         }
 
         val now = System.currentTimeMillis()
-        val direct = memories.mapNotNull { memory ->
-            val memoryTerms = tokenize(memory.text)
+        val tokenizedMemories = memories.map { memory -> memory to tokenize(memory.text) }
+        val direct = tokenizedMemories.mapNotNull { (memory, memoryTerms) ->
             val overlapTerms = terms.intersect(memoryTerms)
             if (overlapTerms.isEmpty()) return@mapNotNull null
             val coverage = overlapTerms.size.toDouble() / terms.size.toDouble()
@@ -86,11 +86,18 @@ object MemoryRetriever {
         val expandedTerms = seeds.flatMap { seed ->
             tokenize(seed.first.text)
         }.toSet() - terms
-        val associationTerms = expandedTerms.filter { it.length >= 5 }.toSet()
+        val documentFrequency = HashMap<String, Int>()
+        tokenizedMemories.forEach { (_, memoryTerms) ->
+            memoryTerms.forEach { term -> documentFrequency[term] = (documentFrequency[term] ?: 0) + 1 }
+        }
+        // Common words are weak links; retain terms that occur in only a minority of memories.
+        val maxLinkFrequency = maxOf(2, memories.size / 3)
+        val associationTerms = expandedTerms.filter {
+            it.length >= 5 && (documentFrequency[it] ?: 0) <= maxLinkFrequency
+        }.toSet()
         val directMemories = direct.map { it.first }.toSet()
-        val associated = if (associationTerms.isEmpty()) emptyList() else memories.mapNotNull { memory ->
+        val associated = if (associationTerms.isEmpty()) emptyList() else tokenizedMemories.mapNotNull { (memory, memoryTerms) ->
             if (memory in directMemories) return@mapNotNull null
-            val memoryTerms = tokenize(memory.text)
             val links = associationTerms.intersect(memoryTerms)
             if (links.isEmpty()) return@mapNotNull null
             val ageDays = if (memory.timestamp > 0L) ((now - memory.timestamp).coerceAtLeast(0L) / 86400000.0) else 3650.0
