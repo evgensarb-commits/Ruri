@@ -121,6 +121,7 @@ object Thinker {
             config.put("current", successfulIndex)
             SecretStore.saveRuntimeConfig(root, config.toString(2))
         }
+        val safeReply = SecretRedactor.redactText(reply.trim())
 
         val diary = readJson(root, "memory/L2_diary.json")
         val entries = diary.optJSONArray("entries") ?: JSONArray()
@@ -130,7 +131,7 @@ object Thinker {
             JSONObject()
                 .put("sequence", totalEntries)
                 .put("ts", now)
-                .put("text", reply.trim())
+                .put("text", safeReply)
                 .put("trigger", reason)
                 .put("kind", "thought")
         )
@@ -140,7 +141,7 @@ object Thinker {
         diary.put("updated_at", now)
         FileManager.write(root, "memory/L2_diary.json", diary.toString(2))
         if (initiative) {
-            appendChatMessage(root, "ruri", reply.trim(), now)
+            appendChatMessage(root, "ruri", safeReply, now)
             state.put("waiting_for_reply", true)
             state.put("initiative_sent_at", now)
             state.put("last_initiative", now)
@@ -149,7 +150,7 @@ object Thinker {
         state.put("mood", moodFor(state, reason))
         state.put("energy", energyFor())
         FileManager.write(root, "memory/L4_state.json", state.toString(2))
-        Notifier.thought(ctx, reply.trim())
+        Notifier.thought(ctx, safeReply)
     }
 
     private fun buildPrompt(ctx: Context, root: File, state: JSONObject, reason: String, initiative: Boolean): String {
