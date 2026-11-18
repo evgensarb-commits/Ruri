@@ -12,6 +12,8 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.webkit.JavascriptInterface
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
@@ -26,6 +28,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var web: WebView
     private val chatExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var importFileCallback: ValueCallback<Array<Uri>>? = null
+    private val importFileRequestCode = 2002
 
     @SuppressLint("SetJavaScriptEnabled", "AddJavascriptInterface")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -41,6 +45,36 @@ class MainActivity : AppCompatActivity() {
         web.settings.allowContentAccess = true
         web.settings.allowUniversalAccessFromFileURLs = false
         web.webViewClient = WebViewClient()
+        web.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(
+                view: WebView?,
+                filePathCallback: ValueCallback<Array<Uri>>?,
+                fileChooserParams: FileChooserParams?
+            ): Boolean {
+                if (this@MainActivity.importFileCallback != null) {
+                    this@MainActivity.importFileCallback?.onReceiveValue(null)
+                }
+                this@MainActivity.importFileCallback = filePathCallback
+                return try {
+                    val intent = fileChooserParams?.createIntent()
+                        ?: Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "application/json"
+                        }
+                    if (intent.action == Intent.ACTION_GET_CONTENT ||
+                        intent.action == Intent.ACTION_OPEN_DOCUMENT) {
+                        intent.addCategory(Intent.CATEGORY_OPENABLE)
+                    }
+                    startActivityForResult(intent, importFileRequestCode)
+                    true
+                } catch (e: Exception) {
+                    this@MainActivity.importFileCallback?.onReceiveValue(null)
+                    this@MainActivity.importFileCallback = null
+                    Toast.makeText(this@MainActivity, "Не удалось открыть выбор файла: ${e.message}", Toast.LENGTH_LONG).show()
+                    false
+                }
+            }
+        }
         web.addJavascriptInterface(Bridge(), "Ruri")
 
         requestNotificationPermission()
@@ -48,6 +82,20 @@ class MainActivity : AppCompatActivity() {
         catch (e: Exception) { android.util.Log.e("Ruri", "Could not schedule periodic life", e) }
         startRuriService()
         web.loadUrl("file:///android_asset/index.html")
+    }
+
+    @Deprecated("Deprecated in Android API; retained for WebView file chooser compatibility")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == importFileRequestCode) {
+            val callback = importFileCallback
+            importFileCallback = null
+            val result = if (resultCode == RESULT_OK) {
+                val uri = data?.data
+                if (uri != null) arrayOf(uri) else null
+            } else null
+            callback?.onReceiveValue(result)
+        }
     }
 
     override fun onResume() {
