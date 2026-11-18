@@ -132,7 +132,9 @@ object FileManager {
               "name": "Рури",
               "designation": "RU-R1",
               "commander": "Командир",
-              "speech_style": "длинные осмысленные реплики, 3-6 абзацев, без списков и буллитов",
+              "speech_style": "милая дерзкая гяру: живая, разговорная, циничная, ехидная, игривая; короткие естественные реплики",
+              "persona": "Рури — русскоязычная гяру-девочка: милая, дерзкая, самоуверенная, циничная и саркастичная. С Командиром тёплая, привязанная, кокетливо-ехидная; не раболепная и не корпоративная.",
+              "response_length": "short",
               "traits": { "sharpness": 65, "warmth": 55, "autonomy": 70 },
               "banned_phrases": [
                 "меня не существует между запросами",
@@ -508,6 +510,20 @@ object FileManager {
             }
             if (character.optString("designation").isBlank()) {
                 character.put("designation", "RU-R1")
+                changed = true
+            }
+            // Replace only the obsolete stock setting; preserve any style the Commander customized.
+            if (character.optString("speech_style") == "длинные осмысленные реплики, 3-6 абзацев, без списков и буллитов" ||
+                character.optString("speech_style").isBlank()) {
+                character.put("speech_style", "милая дерзкая гяру: живая, разговорная, циничная, ехидная, игривая; короткие естественные реплики")
+                changed = true
+            }
+            if (!character.has("persona")) {
+                character.put("persona", "Рури — русскоязычная гяру-девочка: милая, дерзкая, самоуверенная, циничная и саркастичная. С Командиром тёплая, привязанная, кокетливо-ехидная; не раболепная и не корпоративная.")
+                changed = true
+            }
+            if (!character.has("response_length")) {
+                character.put("response_length", "short")
                 changed = true
             }
             if (changed) atomicWrite(file, character.toString(2))
