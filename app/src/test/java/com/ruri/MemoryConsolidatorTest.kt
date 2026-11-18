@@ -151,6 +151,21 @@ class MemoryConsolidatorTest {
     }
 
     @Test
+    fun offlineSummaryRedactsSecretsFromPreviousSummaryAndDiary() {
+        val previous = "Проект RU-R1 продолжается. Пароль: hunter2."
+        val entries = listOf(
+            JSONObject().put("text", "Код подтверждения: 483920 для старого входа в аккаунт.")
+        )
+
+        val summary = MemoryConsolidator.extractiveSummary(previous, entries)
+
+        assertTrue(summary.contains("Проект RU-R1"))
+        assertFalse(summary.contains("hunter2"))
+        assertFalse(summary.contains("483920"))
+        assertTrue(summary.contains(SecretRedactor.PLACEHOLDER))
+    }
+
+    @Test
     fun offlineSummaryRetainsPreviousBiographyAndAllAvailableContext() {
         val previous = "Ранее Рури и Командир начали долгосрочный проект RU-R1."
         val entries = listOf(
