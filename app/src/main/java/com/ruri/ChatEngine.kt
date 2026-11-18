@@ -42,7 +42,7 @@ object ChatEngine {
             try {
                 val event = JSONObject(line)
                 if (event.optString("type") != "phone_notification") return@mapNotNull null
-                "- \${event.optString("package")}: " +
+                "- ${event.optString("package")}: " +
                     CredentialGuard.redact(event.optString("title").take(250)) + " — " +
                     CredentialGuard.redact(event.optString("text").take(500))
             } catch (_: Exception) { null }
@@ -61,7 +61,8 @@ object ChatEngine {
             "Активные цели: ${goals.optJSONArray("active") ?: JSONArray()}.\n" +
             "Долговременная сводка L3:\n${summary}\n" +
             "Проверенные факты L1:\n${factContext}\n" +
-            "Последние записи дневника L2:\n${diaryContext}"
+            "Последние записи дневника L2:\n${diaryContext}\n" +
+            "Последние доступные уведомления телефона:\n${notificationContext}"
 
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", system))
         val lines = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 4000)
