@@ -79,6 +79,11 @@ object LocalBackupManager {
 
         createSnapshotLocked(root, now)
         val entries = verified.files
+        // Make the restored data tree match the snapshot, while preserving the separately encrypted API-key store.
+        allowedRoots.forEach { relative ->
+            val base = File(root, relative)
+            if (base.exists()) removeFilesNotInSnapshot(root, base, entries.keys)
+        }
         // Restore append-only history first; state files are then replaced atomically.
         entries["memory/L0_raw.jsonl"]?.let {
             FileManager.replaceL0FromArchive(root, it.toString(Charsets.UTF_8))
@@ -141,6 +146,21 @@ object LocalBackupManager {
         }
         prune(directory)
         return target
+    }
+
+    private fun removeFilesNotInSnapshot(root: File, file: File, included: Set<String>) {
+        if (file.isDirectory) {
+            file.listFiles()?.forEach { removeFilesNotInSnapshot(root, it, included) }
+            if (file != root && file.listFiles()?.isEmpty() == true) file.delete()
+            return
+        }
+        if (!file.isFile) return
+        val relative = root.toPath().relativize(file.canonicalFile.toPath()).toString()
+            .replace(File.separatorChar, '/')
+        if (relative == "core/secrets.enc.json") return
+        if (relative !in included) {
+            require(file.delete()) { "Cannot remove file absent from backup: $relative" }
+        }
     }
 
     private fun collectFiles(root: File, file: File, output: MutableMap<String, ByteArray>) {
