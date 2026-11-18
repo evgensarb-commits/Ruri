@@ -6,7 +6,6 @@ import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotBlank
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -72,7 +71,7 @@ class EventQueueTest {
                 JSONObject().put("type", "test_event").put("source", "unit_test")
             )
         )
-        assertNotBlank(stored.optString("id"))
+        assertTrue(stored.optString("id").isNotBlank())
         assertTrue(stored.optLong("timestamp") > 0L)
 
         val l0 = File(root, "memory/L0_raw.jsonl")
