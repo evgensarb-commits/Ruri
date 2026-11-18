@@ -74,7 +74,7 @@ function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){retur
 function status(s){$('#status').textContent='● '+s;}
 function read(p){return Ruri.read(p)||'';}
 function write(p,v){var r=Ruri.write(p,v);if(typeof r==='string'&&r.indexOf('ERROR:')===0)throw new Error(r);return r;}
-function appendLog(obj){var old=read('memory/L0_raw.jsonl');write('memory/L0_raw.jsonl',(old&& !old.endsWith('\n')?old+'\n':old)+JSON.stringify(obj));}
+function appendLog(obj){var result=Ruri.appendEvent(JSON.stringify(obj));if(typeof result==='string'&&result.indexOf('ERROR:')===0)throw new Error(result);}
 function messageNode(who,text,ts){
 var d=document.createElement('div');d.className='msg '+(who==='ruri'?'her':'me');
 d.innerHTML='<div class="meta">'+(who==='ruri'?'РУРИ':'КОМАНДИР')+' · '+new Date(ts||Date.now()).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+'</div><div class="bub">'+esc(text)+'</div>';return d;
@@ -98,7 +98,7 @@ read('memory/L0_raw.jsonl').split('\n').slice(-80).forEach(function(line){try{va
 return items.slice(-14);
 }
 function callModel(text){
-var config=JSON.parse(read('core/config.json')||'{}');
+var config=JSON.parse(Ruri.readRuntimeConfig()||'{}');
 var ch=JSON.parse(read('core/character.json')||'{}');
 var pr=JSON.parse(read('core/priorities.json')||'{}');
 var models=config.models||[];if(!models.length)return Promise.reject(new Error('Список моделей пуст.'));
@@ -113,7 +113,7 @@ return fetch(String(m.base_url||'').replace(/\/$/,'')+'/chat/completions',{
 method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+m.api_key},
 body:JSON.stringify({model:m.model,messages:[{role:'system',content:system}].concat(history),temperature:0.85,max_tokens:1200})
 }).then(function(res){if(!res.ok)return res.text().then(function(t){throw new Error('HTTP '+res.status+' '+t.slice(0,160));});return res.json();})
-.then(function(data){var a=data&&data.choices&&data.choices[0]&&data.choices[0].message&&data.choices[0].message.content;if(!a)throw new Error('Пустой ответ модели');config.current=i;write('core/config.json',JSON.stringify(config,null,2));return a;})
+.then(function(data){var a=data&&data.choices&&data.choices[0]&&data.choices[0].message&&data.choices[0].message.content;if(!a)throw new Error('Пустой ответ модели');config.current=i;var saved=Ruri.saveRuntimeConfig(JSON.stringify(config));if(String(saved).indexOf('ERROR:')===0)throw new Error(saved);return a;})
 .catch(function(err){if(pos+1<order.length)return attempt(pos+1);throw err;});
 }
 return attempt(0);
@@ -146,12 +146,12 @@ document.querySelectorAll('nav button').forEach(function(x){x.classList.remove('
 document.querySelectorAll('.pane').forEach(function(p){p.classList.remove('on');});$('#pane-'+b.dataset.pane).classList.add('on');
 if(b.dataset.pane==='diary')loadDiary();if(b.dataset.pane==='shelf')loadShelf();if(b.dataset.pane==='brain')loadCharacter();
 });});
-$('#saveKey').addEventListener('click',function(){try{var c=JSON.parse(read('core/config.json')||'{}'),i=Number($('#model').value),k=$('#key').value.trim();if(!k)throw new Error('Вставь API-ключ');if(!c.models||!c.models[i])throw new Error('Модель не найдена');c.models[i].api_key=k;c.current=i;write('core/config.json',JSON.stringify(c,null,2));$('#key').value='';alert('Ключ сохранён в памяти приложения.');}catch(e){alert(e.message);}});
+$('#saveKey').addEventListener('click',function(){try{var c=JSON.parse(Ruri.readRuntimeConfig()||'{}'),i=Number($('#model').value),k=$('#key').value.trim();if(!k)throw new Error('Вставь API-ключ');if(!c.models||!c.models[i])throw new Error('Модель не найдена');c.models[i].api_key=k;c.current=i;var saved=Ruri.saveRuntimeConfig(JSON.stringify(c));if(String(saved).indexOf('ERROR:')===0)throw new Error(saved);$('#key').value='';alert('Ключ сохранён в памяти приложения.');}catch(e){alert(e.message);}});
 function loadCharacter(){try{var c=JSON.parse(read('core/character.json')||'{}');$('#charName').value=c.name||'';$('#charStyle').value=c.speech_style||'';}catch(_){}}
 $('#saveCharacter').addEventListener('click',function(){try{var c=JSON.parse(read('core/character.json')||'{}');c.name=$('#charName').value.trim()||'Рури';c.speech_style=$('#charStyle').value.trim();write('core/character.json',JSON.stringify(c,null,2));alert('Характер сохранён.');}catch(e){alert(e.message);}});
 $('#notificationAccess').addEventListener('click',function(){var r=Ruri.openNotificationAccessSettings();if(String(r).indexOf('ERROR:')===0)alert(r);});
 $('#saveFact').addEventListener('click',function(){try{var text=$('#factInput').value.trim();if(!text)return;var d=JSON.parse(read('memory/L1_facts.json')||'{"facts":[]}');d.facts=d.facts||[];d.facts.push({ts:Date.now(),text:text});if(d.facts.length>500)d.facts=d.facts.slice(-500);write('memory/L1_facts.json',JSON.stringify(d,null,2));$('#factInput').value='';alert('Факт сохранён в L1.');}catch(e){alert(e.message);}});
-var paths=['core/priorities.json','core/character.json','core/appearance.json','core/config.json','memory/L0_raw.jsonl','memory/L1_facts.json','memory/L2_diary.json','memory/L3_summary.json','memory/L4_state.json'];
+var paths=['core/priorities.json','core/constitution.json','core/character.json','core/appearance.json','core/drives.json','core/permissions.json','core/config.json','memory/L0_raw.jsonl','memory/L1_facts.json','memory/L2_diary.json','memory/L3_summary.json','memory/L4_state.json','memory/goals.json','memory/self_model.json'];
 $('#exp').addEventListener('click',function(){try{var a={};paths.forEach(function(p){a[p]=read(p);});var r=Ruri.exportArchive(JSON.stringify(a,null,2));if(String(r).indexOf('ERROR:')===0)throw new Error(r);}catch(e){alert('Экспорт: '+e.message);}});
 $('#imp').addEventListener('click',function(){$('#file').click();});
 $('#file').addEventListener('change',function(e){var f=e.target.files&&e.target.files[0];if(!f)return;var rd=new FileReader();rd.onload=function(ev){try{var r=Ruri.importArchive(String(ev.target.result));if(String(r).indexOf('ERROR:')===0)throw new Error(r);alert('Архив восстановлен.');location.reload();}catch(err){alert('Импорт: '+err.message);}};rd.readAsText(f);e.target.value='';});
