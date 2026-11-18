@@ -90,6 +90,50 @@ class LifeStateRecoveryTest {
     }
 
     @Test
+    fun damagedL4RestoresActiveTasksFromDurableGoalStore() {
+        val goals = JSONObject()
+            .put("schema_version", 2)
+            .put("active", JSONArray().put(JSONObject().put("id", "project-ruri")))
+            .put("completed", JSONArray())
+            .put(
+                "active_tasks",
+                JSONArray().put(
+                    JSONObject()
+                        .put("id", "task-memory-audit")
+                        .put("title", "Проверить целостность L0")
+                        .put("status", "in_progress")
+                )
+            )
+            .put("completed_tasks", JSONArray())
+        FileManager.write(root, "memory/goals.json", goals.toString(2))
+
+        val recovered = LifeStateEngine.recoverStateFromHistory(root, "{damaged")
+        val tasks = recovered.optJSONArray("active_tasks") ?: JSONArray()
+
+        assertEquals(1, tasks.length())
+        assertEquals("task-memory-audit", tasks.getJSONObject(0).optString("id"))
+        assertEquals("in_progress", tasks.getJSONObject(0).optString("status"))
+        assertEquals(1, recovered.optJSONArray("active_goals")?.length())
+    }
+
+    @Test
+    fun fileManagerMigratesLegacyGoalStoreWithoutDroppingExistingGoals() {
+        val legacy = JSONObject()
+            .put("schema_version", 1)
+            .put("active", JSONArray().put(JSONObject().put("id", "legacy-goal")))
+            .put("completed", JSONArray())
+        FileManager.write(root, "memory/goals.json", legacy.toString())
+
+        FileManager.init(root)
+
+        val migrated = JSONObject(FileManager.read(root, "memory/goals.json"))
+        assertEquals(2, migrated.optInt("schema_version"))
+        assertEquals("legacy-goal", migrated.getJSONArray("active").getJSONObject(0).optString("id"))
+        assertTrue(migrated.has("active_tasks"))
+        assertTrue(migrated.has("completed_tasks"))
+    }
+
+    @Test
     fun damagedL4IsBackedUpAndRebuiltFromL0WithoutSkippingHistory() {
         val firstTs = 1_790_000_000_000L
         FileManager.appendEvent(
