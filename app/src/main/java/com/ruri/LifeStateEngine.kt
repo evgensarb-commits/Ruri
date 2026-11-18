@@ -100,6 +100,7 @@ object LifeStateEngine {
         state.put("last_local_reason", reason.take(180))
         state.put("last_quiet_hours", quietHours)
         updateDrives(root, newEvents.size, battery, now)
+        if (newEvents.isNotEmpty()) appendActivityDiary(root, newEvents.size, typeCounts, battery, now)
 
         if (now - state.optLong("last_memory_audit", 0L) >= DAY_MS) {
             val report = auditMemory(root, now)
@@ -182,6 +183,55 @@ object LifeStateEngine {
             .put("l0_event_count", eventCount)
             .put("l0_malformed_lines", malformedEvents)
             .put("healthy", invalid.length() == 0 && malformedEvents == 0)
+    }
+
+    private fun appendActivityDiary(
+        root: File,
+        eventCount: Int,
+        eventTypes: JSONObject,
+        battery: Int,
+        now: Long
+    ) {
+        try {
+            val diary = readJson(root, DIARY_PATH)
+            val entries = diary.optJSONArray("entries") ?: JSONArray()
+            val keys = eventTypes.keys()
+            val parts = ArrayList<String>()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                parts.add(key + ": " + eventTypes.optInt(key))
+            }
+            val details = parts.joinToString(", ").take(500)
+            val text = "Обработала " + eventCount + " новых системных событий (" + details +
+                "). Уровень заряда устройства при обработке: " + battery + "%. Содержимое личных сообщений и уведомлений в эту сводную запись не копировала."
+
+            val previous = if (entries.length() > 0) entries.optJSONObject(entries.length() - 1) else null
+            if (previous != null &&
+                previous.optString("kind") == "activity_summary" &&
+                now - previous.optLong("ts", 0L) < 10L * 60L * 1000L
+            ) {
+                previous.put("ts", now)
+                previous.put("text", text)
+                previous.put("event_count", previous.optInt("event_count") + eventCount)
+                previous.put("event_types", eventTypes)
+                previous.put("battery_percent", battery)
+            } else {
+                entries.put(
+                    JSONObject()
+                        .put("ts", now)
+                        .put("kind", "activity_summary")
+                        .put("text", text)
+                        .put("event_count", eventCount)
+                        .put("event_types", eventTypes)
+                        .put("battery_percent", battery)
+                )
+            }
+            while (entries.length() > 500) entries.remove(0)
+            diary.put("entries", entries)
+            FileManager.write(root, DIARY_PATH, diary.toString(2))
+        } catch (e: Exception) {
+            Log.w("Ruri", "Could not write local activity diary entry", e)
+        }
     }
 
     private fun appendMaintenanceDiary(root: File, report: JSONObject, now: Long) {
