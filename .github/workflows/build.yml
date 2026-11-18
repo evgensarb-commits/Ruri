@@ -13,9 +13,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      RURI_SIGNING_STORE_PASSWORD: ${{ secrets.RURI_SIGNING_STORE_PASSWORD }}
-      RURI_SIGNING_KEY_PASSWORD: ${{ secrets.RURI_SIGNING_KEY_PASSWORD }}
-      RURI_SIGNING_ALIAS: ${{ secrets.RURI_SIGNING_ALIAS }}
+      RURI_SIGNING_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      RURI_SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      RURI_SIGNING_ALIAS: ${{ secrets.KEY_ALIAS }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,7 +45,7 @@ jobs:
           set -euo pipefail
           for name in RURI_SIGNING_STORE_PASSWORD RURI_SIGNING_KEY_PASSWORD RURI_SIGNING_ALIAS; do
             if [ -z "${!name:-}" ]; then
-              echo "::error::Missing required GitHub Actions secret: $name"
+              echo "::error::Missing required GitHub Actions secret for $name"
               exit 1
             fi
           done
