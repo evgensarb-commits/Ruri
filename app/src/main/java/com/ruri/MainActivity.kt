@@ -39,6 +39,8 @@ class MainActivity : AppCompatActivity() {
         web.addJavascriptInterface(Bridge(), "Ruri")
 
         requestNotificationPermission()
+        try { LifeScheduler.ensurePeriodic(this) }
+        catch (e: Exception) { android.util.Log.e("Ruri", "Could not schedule periodic life", e) }
         startRuriService()
         web.loadUrl("file:///android_asset/index.html")
     }
