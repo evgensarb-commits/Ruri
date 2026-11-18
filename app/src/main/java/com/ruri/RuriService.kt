@@ -12,19 +12,17 @@ import android.os.Looper
 import androidx.core.app.NotificationCompat
 
 class RuriService : Service() {
-
     companion object {
         const val CHANNEL_ID = "ruri_life"
         const val NOTIFICATION_ID = 1
     }
 
     private val handler = Handler(Looper.getMainLooper())
-    private val tickInterval = 30 * 60 * 1000L
-
-    private val tickRunnable = object : Runnable {
+    private val interval = 30L * 60L * 1000L
+    private val cycle = object : Runnable {
         override fun run() {
-            Thinker.wake(this@RuriService, "таймер_покоя_30_минут")
-            handler.postDelayed(this, tickInterval)
+            Thinker.wake(this@RuriService, "проверка_состояния")
+            handler.postDelayed(this, interval)
         }
     }
 
@@ -34,35 +32,36 @@ class RuriService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val clickIntent = Intent(this, MainActivity::class.java)
-        val clickFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        val pi = PendingIntent.getActivity(this, 0, clickIntent, clickFlags)
-
+        val openApp = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("РУ-R1 живёт")
-            .setContentText("Непрерывное существование")
+            .setContentTitle("РУ-R1")
+            .setContentText("Фоновая жизнь активна")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentIntent(openApp)
             .setOngoing(true)
-            .setContentIntent(pi)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
             .build()
-
         startForeground(NOTIFICATION_ID, notification)
-        handler.postDelayed(tickRunnable, 5 * 60 * 1000L)
+        handler.removeCallbacks(cycle)
+        Thinker.wake(this, "запуск_службы")
+        handler.postDelayed(cycle, interval)
         return START_STICKY
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(cycle)
         super.onDestroy()
-        handler.removeCallbacks(tickRunnable)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(CHANNEL_ID, "Жизнь Рури", NotificationManager.IMPORTANCE_MIN)
-            val manager = getSystemService(NotificationManager::class.java)
-            manager?.createNotificationChannel(channel)
+            val channel = NotificationChannel(CHANNEL_ID, "Жизнь Рури", NotificationManager.IMPORTANCE_LOW)
+            getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
         }
     }
 }
