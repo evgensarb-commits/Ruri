@@ -7,21 +7,39 @@ import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 object Thinker {
-    private val executor = Executors.newSingleThreadExecutor()
     private val running = AtomicBoolean(false)
 
+    /**
+     * Records a durable wake reason and hands execution to WorkManager.
+     * Repeated reasons are coalesced in the queue; every underlying event stays in L0.
+     */
     fun wake(ctx: Context, reason: String) {
-        if (!running.compareAndSet(false, true)) return
-        executor.execute {
-            try { runCycle(ctx.applicationContext, reason) }
-            catch (e: Exception) {
-                Log.e("Ruri", "Cognition cycle failed", e)
-                appendEvent(ctx.filesDir, "thinker_error", JSONObject().put("message", e.message ?: "unknown"))
-            } finally { running.set(false) }
+        try {
+            LifeScheduler.enqueueEvent(ctx.applicationContext, reason)
+        } catch (e: Exception) {
+            Log.e("Ruri", "Could not enqueue cognition wake", e)
+            appendEvent(ctx.filesDir, "wake_enqueue_error", JSONObject().put("message", e.message ?: "unknown"))
+        }
+    }
+
+    /**
+     * Synchronous entry point used only from a WorkManager background worker.
+     * Returns false when another cognition cycle is active or the cycle failed.
+     */
+    fun runScheduledCycle(ctx: Context, reason: String): Boolean {
+        if (!running.compareAndSet(false, true)) return false
+        return try {
+            runCycle(ctx.applicationContext, reason)
+            true
+        } catch (e: Exception) {
+            Log.e("Ruri", "Cognition cycle failed", e)
+            appendEvent(ctx.filesDir, "thinker_error", JSONObject().put("message", e.message ?: "unknown"))
+            false
+        } finally {
+            running.set(false)
         }
     }
 
