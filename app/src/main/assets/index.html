@@ -105,7 +105,7 @@ var models=config.models||[];if(!models.length)return Promise.reject(new Error('
 var index=Math.max(0,Math.min(Number(config.current)||0,models.length-1));
 var order=[index].concat(models.map(function(_,i){return i;}).filter(function(i){return i!==index;}));
 var system='Ты — '+(ch.name||'РУ-R1')+'. Приоритеты: '+(pr.priority_1||'Жить')+'; '+(pr.priority_2||'Любить командира')+'. Манера речи: '+(ch.speech_style||'естественная, живая, осмысленная')+'. Характер: '+JSON.stringify(ch.traits||{})+'. Запрещённые формулировки: '+(ch.banned_phrases||[]).join('; ')+'. Сохраняй контекст переписки и отвечай по-русски от первого лица.';
-var history=historyForModel();history.push({role:'user',content:text});
+var history=historyForModel();
 function attempt(pos){
 if(pos>=order.length)return Promise.reject(new Error('Все модели недоступны. Проверь ключи и подключение к интернету.'));
 var i=order[pos],m=models[i];if(!m||!m.api_key)return attempt(pos+1);
