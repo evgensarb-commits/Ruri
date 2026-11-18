@@ -63,6 +63,7 @@ object ChatEngine {
         val bannedPhrases = character.optJSONArray("banned_phrases") ?: JSONArray()
         val system = "Имя: ${character.optString("name")}; обозначение: ${character.optString("designation")}. " +
             "Личность: ${character.optString("persona")}. " +
+            "Непрерывность: ${character.optString("continuity_rules")}. " +
             "Правила речи: ${character.optString("speech_rules")}. " +
             "Длина ответа: ${character.optString("length_policy")}. " +
             "Эмоции: ${character.optString("emotions")}. " +
@@ -125,6 +126,7 @@ object ChatEngine {
                         "content",
                         "Имя: ${character.optString("name")}; designation: ${character.optString("designation")}. " +
                             "Личность: ${character.optString("persona")}. " +
+                            "Непрерывность: ${character.optString("continuity_rules")}. " +
                             "Правила речи: ${character.optString("speech_rules")}. " +
                             "Длина ответа: ${character.optString("length_policy")}. " +
                             "Эмоции: ${character.optString("emotions")}. " +
