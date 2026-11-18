@@ -53,7 +53,7 @@ object ChatEngine {
             "Последние записи дневника L2:\n${diaryContext}"
 
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", system))
-        val lines = FileManager.read(root, "memory/L0_raw.jsonl").lineSequence().toList()
+        val lines = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 4000)
         val history = lines.asReversed().mapNotNull { line ->
             try {
                 val event = JSONObject(line)
