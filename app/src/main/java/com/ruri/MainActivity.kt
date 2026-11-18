@@ -154,6 +154,24 @@ class MainActivity : AppCompatActivity() {
         fun readNetworkDiagnostics(): String = NetworkDiagnostics.latest(filesDir)
 
         @JavascriptInterface
+        fun readAutomaticBackupStatus(): String = LocalBackupManager.status(filesDir).toString()
+
+        @JavascriptInterface
+        fun verifyAutomaticBackup(fileName: String): String {
+            val safeName = fileName.takeIf { it.matches(Regex("ruri_auto_[0-9]{8}_[0-9]{6}_[0-9]+\\\\.zip")) }
+                ?: return JSONObject().put("valid", false).put("error", "Invalid backup name").toString()
+            val result = LocalBackupManager.verify(File(File(filesDir, "backup/automatic"), safeName))
+            return JSONObject().put("valid", result.valid).put("error", result.error)
+                .put("files", result.files.size).toString()
+        }
+
+        @JavascriptInterface
+        fun restoreAutomaticBackup(fileName: String): String {
+            return try { LocalBackupManager.restore(filesDir, fileName).toString() }
+            catch (e: Exception) { "ERROR: " + (e.message ?: "restore failed") }
+        }
+
+        @JavascriptInterface
         fun write(path: String, content: String): String {
             return try {
                 if (path == "core/config.json") SecretStore.saveRuntimeConfig(filesDir, content)
@@ -240,6 +258,7 @@ class MainActivity : AppCompatActivity() {
         fun importArchive(json: String): String {
             return try {
                 val archive = JSONObject(json)
+                LocalBackupManager.createSnapshot(filesDir)
                 val allowedRoots = listOf("core/", "memory/", "shelf/", "research/", "skills/", "proposals/")
                 val keys = archive.keys()
                 while (keys.hasNext()) {
