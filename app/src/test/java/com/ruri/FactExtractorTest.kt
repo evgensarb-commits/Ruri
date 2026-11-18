@@ -56,16 +56,15 @@ class FactExtractorTest {
             now = 123456L
         )
 
-        assertEquals(2, result.added)
+        assertEquals(1, result.added)
         assertEquals(0, result.updated)
-        assertEquals(2, facts.length())
+        assertEquals(1, facts.length())
         val personalFact = facts.getJSONObject(0)
         assertTrue(personalFact.optString("text").contains("Рубе"))
         assertEquals("Gemini", personalFact.optString("source_model"))
         assertEquals(1, personalFact.getJSONArray("source_event_ids").length())
         assertEquals("commander-1", personalFact.getJSONArray("source_event_ids").getString(0))
-        val credentialFact = facts.getJSONObject(1)
-        assertEquals("Пароль: hunter2", credentialFact.optString("text"))
+        assertTrue((0 until facts.length()).none { facts.getJSONObject(it).optString("text").contains("Пароль") })
     }
 
     @Test
@@ -101,7 +100,7 @@ class FactExtractorTest {
     }
 
     @Test
-    fun explicitlyRequestedSensitiveContextIsRetainedAsAFact() {
+    fun explicitlyRequestedAccessCodesAreNeverRetainedAsFacts() {
         val facts = JSONArray()
         val candidates = JSONArray().put(
             JSONObject()
@@ -113,7 +112,7 @@ class FactExtractorTest {
         val result = FactExtractor.applyCandidates(
             facts, candidates, setOf("commander-1"), "Gemini", 123L
         )
-        assertEquals(1, result.added)
-        assertEquals("Код доступа к домашнему архиву: 2468", facts.getJSONObject(0).optString("text"))
+        assertEquals(0, result.added)
+        assertEquals(0, facts.length())
     }
 }
