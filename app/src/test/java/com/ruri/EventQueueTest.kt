@@ -84,6 +84,21 @@ class EventQueueTest {
     }
 
     @Test
+    fun boundedLogTailReturnsNewestCompleteUtf8Lines() {
+        repeat(5) { index ->
+            FileManager.appendEvent(
+                root,
+                JSONObject().put("type", "tail_test").put("text", "событие-$index")
+            )
+        }
+
+        val tail = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 2)
+        assertEquals(2, tail.size)
+        assertTrue(tail[0].contains("событие-3"))
+        assertTrue(tail[1].contains("событие-4"))
+    }
+
+    @Test
     fun pathTraversalIsRejected() {
         assertThrows(IllegalArgumentException::class.java) {
             FileManager.write(root, "../outside.json", "{}")
