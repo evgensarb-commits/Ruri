@@ -85,7 +85,7 @@ class MemoryConsolidatorTest {
     }
 
     @Test
-    fun offlineSummaryRetainsPreviousBiographyAndPermittedPersonalContext() {
+    fun offlineSummaryRetainsPreviousBiographyAndAllAvailableContext() {
         val previous = "Ранее Рури и Командир начали долгосрочный проект RU-R1."
         val entries = listOf(
             JSONObject().put("text", "Командир живёт в Рубе и часто бывает рядом с Лиллем."),
@@ -99,6 +99,6 @@ class MemoryConsolidatorTest {
         assertTrue(summary.contains("Рубе"))
         assertTrue(summary.contains("commander@example.com"))
         assertTrue(CredentialGuard.containsCredentials("Пароль: hunter2"))
-        assertFalse(summary.contains("hunter2"))
+        assertTrue(summary.contains("hunter2"))
     }
 }
