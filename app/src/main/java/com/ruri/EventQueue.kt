@@ -88,16 +88,26 @@ object EventQueue {
         val raw = FileManager.read(root, PATH)
         if (raw.isBlank()) return JSONObject().put("schema_version", 1).put("pending", JSONArray())
         return try {
-            JSONObject(raw)
+            val parsed = JSONObject(raw)
+            if (parsed.optJSONArray("pending") != null) parsed
+            else {
+                preserveCorruptState(root, raw)
+                JSONObject().put("schema_version", 1).put("pending", JSONArray())
+                    .put("recovery_warning", "pending_events.json did not contain a valid pending array")
+            }
         } catch (_: Exception) {
-            // Keep a copy of the damaged queue before a later enqueue atomically repairs it.
-            try {
-                val backup = File(root, "backup/pending_events_corrupt_" + System.currentTimeMillis() + ".json")
-                backup.parentFile?.mkdirs()
-                backup.writeText(raw, Charsets.UTF_8)
-            } catch (_: Exception) { }
+            preserveCorruptState(root, raw)
             JSONObject().put("schema_version", 1).put("pending", JSONArray())
                 .put("recovery_warning", "pending_events.json was unreadable")
         }
+    }
+
+    private fun preserveCorruptState(root: File, raw: String) {
+        try {
+            val backup = File(root, "backup/pending_events_corrupt_" + System.currentTimeMillis() + ".json")
+            backup.parentFile?.mkdirs()
+            if (!backup.exists()) backup.writeText(raw, Charsets.UTF_8)
+        } catch (_: Exception) { }
+
     }
 }

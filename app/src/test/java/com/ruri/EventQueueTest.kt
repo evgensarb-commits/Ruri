@@ -140,6 +140,39 @@ class EventQueueTest {
     }
 
     @Test
+    fun eventQueueWithValidJsonButMissingPendingArrayIsBackedUp() {
+        File(root, "memory").mkdirs()
+        val queueFile = File(root, "memory/pending_events.json")
+        queueFile.writeText("{\"schema_version\":1,\"wrong_key\":[]}", Charsets.UTF_8)
+
+        assertTrue(EventQueue.snapshot(root).isEmpty())
+        EventQueue.enqueue(root, "commander_message")
+        assertEquals(1, EventQueue.snapshot(root).size)
+        val backups = File(root, "backup").listFiles()?.filter { it.name.startsWith("pending_events_corrupt_") }.orEmpty()
+        assertTrue(backups.isNotEmpty())
+        assertTrue(backups.any { it.readText(Charsets.UTF_8).contains("wrong_key") })
+    }
+
+    @Test
+    fun l0BatchWalksSeveralPagesWithoutSkippingOrRepeatingEvents() {
+        repeat(7) { index ->
+            FileManager.appendEvent(root, JSONObject().put("type", "paged").put("index", index))
+        }
+        var offset = 0L
+        val indices = ArrayList<Int>()
+        var hasMore: Boolean
+        do {
+            val batch = FileManager.readL0Batch(root, offset, maxRecords = 2)
+            indices.addAll(batch.events.map { it.optInt("index") })
+            assertTrue(batch.nextOffset >= offset)
+            offset = batch.nextOffset
+            hasMore = batch.hasMore
+        } while (hasMore)
+
+        assertEquals((0..6).toList(), indices)
+    }
+
+    @Test
     fun pathTraversalIsRejected() {
         assertThrows(IllegalArgumentException::class.java) {
             FileManager.write(root, "../outside.json", "{}")

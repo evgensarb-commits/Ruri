@@ -416,7 +416,10 @@ object LifeStateEngine {
         } else {
             Log.w("Ruri", "L4 state is empty; reconstructing a baseline")
         }
+        return recoverStateFromHistory(root, raw)
+    }
 
+    internal fun recoverStateFromHistory(root: File, raw: String): JSONObject {
         preserveCorruptFile(root, STATE_PATH, raw)
         val latestCommander = FileManager.readLastLines(
             root, L0_PATH, maxLines = 12000, maxBytes = 8 * 1024 * 1024
