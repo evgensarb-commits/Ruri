@@ -37,6 +37,9 @@ jobs:
       - name: Compile Kotlin before signing
         run: gradle --no-daemon clean :app:compileDebugKotlin
 
+      - name: Run unit tests
+        run: gradle --no-daemon :app:testDebugUnitTest
+
       - name: Restore and verify permanent signing key
         env:
           RURI_SIGNING_KEYSTORE_BASE64: ${{ secrets.RURI_SIGNING_KEYSTORE_BASE64 }}
