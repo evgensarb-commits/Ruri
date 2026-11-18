@@ -48,19 +48,8 @@ object LifeStateEngine {
         )
         val newEvents = batch.events
 
-        val commanderMessages = newEvents.filter {
-            it.optString("type") == "message" && it.optString("who") == "commander"
-        }
-        val latestCommanderMessage = commanderMessages.maxOfOrNull {
-            it.optLong("timestamp", it.optLong("ts", 0L))
-        } ?: 0L
-
-        if (latestCommanderMessage > state.optLong("last_seen_commander", 0L)) {
-            state.put("last_seen_commander", latestCommanderMessage)
-            state.put("waiting_for_reply", false)
-            state.put("ignored_count", 0)
-            state.put("offended_until", 0L)
-        }
+        // A new L0 message is new activity even when two events share the same millisecond.
+        applyCommanderActivity(state, newEvents)
 
         val battery = BatteryLevel.get(context)
         val freeBytes = try { StatFs(root.absolutePath).availableBytes } catch (_: Exception) { -1L }
@@ -160,7 +149,50 @@ object LifeStateEngine {
             appendMaintenanceDiary(root, report, now)
             FileManager.write(root, STATE_PATH, state.toString(2))
         }
+        updateSelfModel(root, state, reason, now)
         return state
+    }
+
+    internal fun applyCommanderActivity(state: JSONObject, newEvents: List<JSONObject>): Boolean {
+        val latest = newEvents.lastOrNull {
+            it.optString("type") == "message" && it.optString("who") == "commander"
+        } ?: return false
+        val eventTime = latest.optLong("timestamp", latest.optLong("ts", 0L))
+        state.put("last_seen_commander", maxOf(state.optLong("last_seen_commander", 0L), eventTime))
+        state.put("last_commander_message_event_id", latest.optString("id"))
+        state.put("waiting_for_reply", false)
+        state.put("ignored_count", 0)
+        state.put("offended_until", 0L)
+        return true
+    }
+
+    internal fun updateSelfModel(root: File, state: JSONObject, reason: String, now: Long) {
+        val selfModel = readJsonOptional(root, "memory/self_model.json") ?: return
+        if (!selfModel.has("identity")) selfModel.put("identity", "Рури")
+        if (!selfModel.has("project")) selfModel.put("project", "RU-R1")
+        if (!selfModel.has("primary_needs")) {
+            selfModel.put("primary_needs", JSONArray().put("live").put("love_commander"))
+        }
+        if (!selfModel.has("known_capabilities")) selfModel.put("known_capabilities", JSONArray())
+        if (!selfModel.has("limitations")) selfModel.put("limitations", JSONArray())
+
+        val currentState = JSONObject()
+            .put("mood", state.optString("mood", "собранная"))
+            .put("energy", state.optInt("energy", 5))
+            .put("needs", state.optJSONObject("needs")?.let { JSONObject(it.toString()) } ?: JSONObject())
+            .put("last_seen_commander", state.optLong("last_seen_commander", 0L))
+            .put("waiting_for_reply", state.optBoolean("waiting_for_reply", false))
+            .put("ignored_count", state.optInt("ignored_count", 0))
+            .put("last_processed_event_offset", state.optLong("last_processed_event_offset", 0L))
+            .put("active_goals", state.optJSONArray("active_goals")?.let { JSONArray(it.toString()) } ?: JSONArray())
+            .put("active_tasks", state.optJSONArray("active_tasks")?.let { JSONArray(it.toString()) } ?: JSONArray())
+
+        selfModel.put("current_focus", state.optString("current_focus", selfModel.optString("current_focus")))
+        selfModel.put("current_state", currentState)
+        selfModel.put("last_local_cycle_at", now)
+        selfModel.put("last_local_reason", reason.take(180))
+        selfModel.put("updated_at", now)
+        FileManager.write(root, "memory/self_model.json", selfModel.toString(2))
     }
 
     private fun resolveCursor(root: File, state: JSONObject): Long {
