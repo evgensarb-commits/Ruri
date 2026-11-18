@@ -16,4 +16,10 @@ class ThinkerTest {
         val state = JSONObject().put("ignored_count", 1)
         assertEquals("обиженная", Thinker.moodFor(state, "initiative_ignored"))
     }
+
+    @Test
+    fun alreadyOffendedMoodSurvivesMaintenanceWake() {
+        val state = JSONObject().put("mood", "обиженная").put("ignored_count", 0).put("bond", 0.9)
+        assertEquals("обиженная", Thinker.moodFor(state, "maintenance"))
+    }
 }
