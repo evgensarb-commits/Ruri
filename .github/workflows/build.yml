@@ -12,6 +12,10 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || 'ruri-temporary-store' }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || 'ruri-temporary-key' }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'ruri' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,14 +29,11 @@ jobs:
       - name: Restore signing key
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 --decode > "$HOME/ruri.keystore"
           else
-            echo "::warning::KEYSTORE_BASE64 is missing. A temporary key will be generated; this APK may not update-install over a previous build."
+            echo "::warning::No persistent signing key is configured. This build uses a temporary keystore."
             keytool -genkey -v -keystore "$HOME/ruri.keystore" -alias "$KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 10000 -storepass "$KEYSTORE_PASSWORD" -keypass "$KEY_PASSWORD" -dname "CN=Ruri, OU=Ruri, O=Ruri, L=Ruri, S=Ruri, C=RU"
           fi
 
