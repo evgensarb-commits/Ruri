@@ -119,6 +119,7 @@ object ChatEngine {
                 .put("stage", "CONFIG")
                 .put("result", "failed")
             var stage = "CONFIG"
+            var stageStartedAt = 0L
             try {
                 val base = model.optString("base_url").trimEnd('/')
                 require(base.startsWith("https://")) { "Для модели требуется HTTPS" }
@@ -127,9 +128,9 @@ object ChatEngine {
                 diagnostic.put("host", host)
                 stage = "DNS"
                 diagnostic.put("stage", stage)
-                val dnsStart = SystemClock.elapsedRealtime()
+                stageStartedAt = SystemClock.elapsedRealtime()
                 val addresses = InetAddress.getAllByName(host)
-                diagnostic.put("dns_ms", SystemClock.elapsedRealtime() - dnsStart)
+                diagnostic.put("dns_ms", SystemClock.elapsedRealtime() - stageStartedAt)
                 diagnostic.put("dns_addresses", addresses.size)
                 diagnostic.put("dns_status", if (addresses.isNotEmpty()) "resolved" else "empty")
                 connection = (endpoint.openConnection() as HttpURLConnection).apply {
@@ -164,7 +165,9 @@ object ChatEngine {
                 val stream = if (code in 200..299) connection.inputStream else connection.errorStream
                 stage = "READ_RESPONSE"
                 diagnostic.put("stage", stage)
+                val bodyReadStart = SystemClock.elapsedRealtime()
                 val responseText = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                diagnostic.put("response_body_ms", SystemClock.elapsedRealtime() - bodyReadStart)
                 if (code !in 200..299) {
                     diagnostic.put("stage", "HTTP")
                     diagnostic.put("result", "http_error")
@@ -197,6 +200,9 @@ object ChatEngine {
                 return reply
             } catch (e: Exception) {
                 diagnostic.put("stage", stage)
+                if (stage == "DNS" && diagnostic.isNull("dns_ms")) {
+                    diagnostic.put("dns_ms", SystemClock.elapsedRealtime() - stageStartedAt)
+                }
                 diagnostic.put("result", if (e is SocketTimeoutException) "timeout" else "failed")
                 diagnostic.put("error_type", e.javaClass.simpleName)
                 if (e is UnknownHostException) diagnostic.put("dns_status", "failed")
