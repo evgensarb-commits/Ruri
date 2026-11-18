@@ -109,9 +109,20 @@ object Thinker {
 
         val diary = readJson(root, "memory/L2_diary.json")
         val entries = diary.optJSONArray("entries") ?: JSONArray()
-        entries.put(JSONObject().put("ts", now).put("text", reply.trim()).put("trigger", reason))
+        // Use a monotonic sequence independent of the rolling 500-entry window.
+        val totalEntries = maxOf(diary.optLong("total_entries", entries.length().toLong()), entries.length().toLong()) + 1L
+        entries.put(
+            JSONObject()
+                .put("sequence", totalEntries)
+                .put("ts", now)
+                .put("text", reply.trim())
+                .put("trigger", reason)
+                .put("kind", "thought")
+        )
         while (entries.length() > 500) entries.remove(0)
         diary.put("entries", entries)
+        diary.put("total_entries", totalEntries)
+        diary.put("updated_at", now)
         FileManager.write(root, "memory/L2_diary.json", diary.toString(2))
         if (initiative) {
             appendChatMessage(root, "ruri", reply.trim(), now)
