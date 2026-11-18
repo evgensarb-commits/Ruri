@@ -60,6 +60,45 @@ class MemoryRetrieverTest {
         assertTrue(result.contains("старый маяк"))
     }
 
+
+    @Test
+    fun followsAssociationsFromDirectMatchToRelatedEpisode() {
+        FileManager.write(
+            root,
+            "memory/L1_facts.json",
+            JSONObject().put(
+                "facts",
+                org.json.JSONArray()
+                    .put(JSONObject().put(
+                        "text",
+                        "Мы обсуждали проект маяка на севере"
+                    ).put("confidence", 0.95))
+            ).toString()
+        )
+        FileManager.write(
+            root,
+            "memory/L2_diary.json",
+            JSONObject().put(
+                "entries",
+                org.json.JSONArray()
+                    .put(JSONObject().put(
+                        "text",
+                        "Вспомнила наш разговор о северном побережье и старой обсерватории"
+                    ).put("ts", System.currentTimeMillis()))
+                    .put(JSONObject().put(
+                        "text",
+                        "Сегодня читала о комнатных растениях и поливе"
+                    ).put("ts", System.currentTimeMillis()))
+            ).toString()
+        )
+
+        val result = MemoryRetriever.recall(root, "Расскажи о проекте", limit = 6)
+        assertTrue(result.contains("проект маяка"))
+        assertTrue(result.contains("старой обсерватории"))
+        assertTrue(result.contains("связано через:"))
+        assertTrue(!result.contains("комнатных растениях"))
+    }
+
     @Test
     fun returnsEmptyWhenQueryHasNoUsefulTerms() {
         assertTrue(MemoryRetriever.recall(root, "это как что для меня").isBlank())
