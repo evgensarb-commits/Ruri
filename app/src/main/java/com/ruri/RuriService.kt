@@ -34,7 +34,7 @@ class RuriService : Service() {
         )
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("RU-R1 · Рури")
-            .setContentText("Состояние и планы сохраняются; фоновые задачи запланированы")
+            .setContentText("Фоновая служба Рури активна")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(openApp)
             .setOngoing(true)
@@ -45,6 +45,18 @@ class RuriService : Service() {
         LifeScheduler.ensurePeriodic(this)
         Thinker.wake(this, "запуск_службы")
         return START_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // stopWithTask=false keeps this foreground service alive when the launcher
+        // removes only the recent-apps task. Refresh durable scheduling; do not stop/restart the service.
+        try {
+            LifeScheduler.ensurePeriodic(this)
+            Thinker.wake(this, "окно_приложения_смахнуто")
+        } catch (e: Exception) {
+            android.util.Log.w("Ruri", "Could not refresh life schedule after task removal", e)
+        }
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {
