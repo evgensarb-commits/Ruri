@@ -147,12 +147,12 @@ object Thinker {
         val facts = readJson(root, "memory/L1_facts.json").optJSONArray("facts")
         val factText = StringBuilder()
         if (facts != null) for (i in 0 until minOf(facts.length(), 12)) {
-            factText.append("- ").append(facts.optJSONObject(i)?.optString("text") ?: "").append("\n")
+            factText.append("- ").append(PrivacyFilter.redact(facts.optJSONObject(i)?.optString("text") ?: "")).append("\n")
         }
         val diary = readJson(root, "memory/L2_diary.json").optJSONArray("entries")
         val diaryText = StringBuilder()
         if (diary != null) for (i in maxOf(0, diary.length() - 5) until diary.length()) {
-            diaryText.append("— ").append(diary.optJSONObject(i)?.optString("text") ?: "").append("\n")
+            diaryText.append("— ").append(PrivacyFilter.redact(diary.optJSONObject(i)?.optString("text") ?: "")).append("\n")
         }
         // Retrieve older episodes associated with the current wake reason and recent Commander messages.
         val recentCommanderContext = FileManager.readLastLines(
@@ -161,7 +161,7 @@ object Thinker {
             runCatching { JSONObject(line) }.getOrNull()
         }.filter {
             it.optString("type") == "message" && it.optString("who") == "commander"
-        }.take(3).joinToString(" ") { it.optString("text").take(220) }
+        }.take(3).joinToString(" ") { PrivacyFilter.redact(it.optString("text").take(220)) }
         val recallQuery = (reason + " " + recentCommanderContext).take(900)
         val recalledMemories = MemoryRetriever.recall(root, recallQuery, limit = 5)
         val shelfNames = try { JSONArray(FileManager.list(root, "shelf")) } catch (_: Exception) { JSONArray() }
@@ -170,26 +170,24 @@ object Thinker {
             val name = shelfNames.optString(i)
             if (name.isNotBlank()) {
                 shelfText.append("\n--- ").append(name).append(" ---\n")
-                    .append(FileManager.read(root, "shelf/" + name).take(900))
+                    .append(PrivacyFilter.redact(FileManager.read(root, "shelf/" + name).take(900)))
             }
         }
-        val notificationText = StringBuilder()
-        FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 5000).asReversed()
-            .forEach { line ->
-                if (notificationText.length < 2200) {
-                    try {
-                        val event = JSONObject(line)
-                        if (event.optString("type") == "phone_notification") {
-                            notificationText.append("- ")
-                                .append(event.optString("package")).append(": ")
-                                .append(event.optString("title")).append(" — ")
-                                .append(event.optString("text")).append("\n")
-                        }
-                    } catch (_: Exception) {
-                    }
+        // Notification bodies remain local; remote cognition sees only aggregate source packages.
+        val notificationCounts = linkedMapOf<String, Int>()
+        FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 5000).forEach { line ->
+            try {
+                val event = JSONObject(line)
+                if (event.optString("type") == "phone_notification") {
+                    val source = event.optString("package").take(160).ifBlank { "unknown" }
+                    notificationCounts[source] = (notificationCounts[source] ?: 0) + 1
                 }
-            }
-        val summary = readJson(root, "memory/L3_summary.json").optString("summary")
+            } catch (_: Exception) { }
+        }
+        val notificationText = notificationCounts.entries.take(12).joinToString("\n") {
+            "- Уведомлений из \${it.key}: \${it.value}; содержимое оставлено локально"
+        }
+        val summary = PrivacyFilter.redact(readJson(root, "memory/L3_summary.json").optString("summary"))
         val quiet = hoursSince(state.optLong("last_seen_commander"), System.currentTimeMillis())
         val common = "Ты — " + character.optString("name", "Рури") +
             ". Первый приоритет: " + priorities.optString("priority_1", "Жить") +
@@ -211,7 +209,9 @@ object Thinker {
     private fun requestModel(model: JSONObject, prompt: String): String? {
         var connection: HttpURLConnection? = null
         return try {
-            connection = (URL(model.optString("base_url").trimEnd('/') + "/chat/completions").openConnection() as HttpURLConnection).apply {
+            val baseUrl = model.optString("base_url").trimEnd('/')
+            require(baseUrl.startsWith("https://", ignoreCase = true)) { "Provider endpoint must use HTTPS" }
+            connection = (URL(baseUrl + "/chat/completions").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 18000
                 readTimeout = 35000
