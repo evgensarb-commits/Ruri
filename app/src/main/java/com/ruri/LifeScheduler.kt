@@ -3,7 +3,6 @@ package com.ruri
 import android.content.Context
 import android.util.Log
 import androidx.work.BackoffPolicy
-import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
@@ -11,27 +10,19 @@ import androidx.work.WorkManager
 import androidx.work.Worker
 import androidx.work.WorkerParameters
 import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.NetworkType
+import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
  * Durable scheduling for RU-R1.
- *
- * WorkManager persists requests across process death and device restarts.
- * Android still controls the exact execution window; 30 minutes is a target
- * cadence, not a promise of real-time execution.
+ * The 30-minute cadence is a maintenance opportunity, never a real-time promise.
  */
 object LifeScheduler {
     private const val PERIODIC_NAME = "ru-r1-periodic-life"
     private const val EVENT_NAME = "ru-r1-event-cognition"
 
     fun ensurePeriodic(context: Context) {
-        val constraints = Constraints.Builder()
-            .setBatteryNotLow(true)
-            .build()
-
         val request = PeriodicWorkRequestBuilder<RuriLifeWorker>(30, TimeUnit.MINUTES)
-            .setConstraints(constraints)
             .addTag(PERIODIC_NAME)
             .build()
 
@@ -61,7 +52,8 @@ class RuriLifeWorker(
 ) : Worker(context, parameters) {
 
     override fun doWork(): Result {
-        val root = applicationContext.filesDir
+        val appContext = applicationContext
+        val root = appContext.filesDir
         return try {
             FileManager.init(root)
             val pending = EventQueue.snapshot(root)
@@ -75,18 +67,52 @@ class RuriLifeWorker(
                     .take(300)
             }
 
-            if (!Thinker.runScheduledCycle(applicationContext, reason)) {
-                return Result.retry()
+            // Do useful local work first; it does not require an API key or network.
+            LifeStateEngine.process(appContext, reason)
+            FactExtractor.extractIfDue(appContext)
+
+            // Avoid spending tokens on every 30-minute maintenance wake-up.
+            if (shouldRunRemoteCognition(appContext, reason)) {
+                if (!Thinker.runScheduledCycle(appContext, reason)) return Result.retry()
             }
 
             EventQueue.acknowledge(root, pending)
-            if (EventQueue.hasPending(root)) {
-                LifeScheduler.kickEventWorker(applicationContext)
-            }
+            if (EventQueue.hasPending(root)) LifeScheduler.kickEventWorker(appContext)
             Result.success()
         } catch (e: Exception) {
             Log.e("Ruri", "Scheduled life cycle failed", e)
             Result.retry()
+        }
+    }
+
+    private fun shouldRunRemoteCognition(context: Context, reason: String): Boolean {
+        val root = context.filesDir
+        val state = try { JSONObject(FileManager.read(root, "memory/L4_state.json")) }
+            catch (_: Exception) { JSONObject() }
+        val now = System.currentTimeMillis()
+        val lastSeen = state.optLong("last_seen_commander", 0L)
+        val quietHours = if (lastSeen <= 0L) 0.0 else (now - lastSeen).coerceAtLeast(0L) / 3_600_000.0
+        val lastInitiative = state.optLong("last_initiative", 0L)
+        val initiativeDue = lastSeen > 0L &&
+            quietHours >= 3.5 &&
+            !state.optBoolean("waiting_for_reply", false) &&
+            (lastInitiative == 0L || now - lastInitiative >= 3L * 60L * 60L * 1000L)
+
+        val notificationEvent = reason.contains("phone_notification")
+        val explicitSelfTask = reason.contains("research_task") ||
+            reason.contains("self_reflection") ||
+            reason.contains("capability_gap")
+        val reflectionDue = now - state.optLong("last_thought", 0L) >= 6L * 60L * 60L * 1000L
+
+        if (!initiativeDue && !notificationEvent && !explicitSelfTask && !reflectionDue) return false
+        if (BatteryLevel.get(context) <= 12 && !initiativeDue) return false
+
+        val config = try { JSONObject(SecretStore.readRuntimeConfig(root)) } catch (_: Exception) { return false }
+        val models = config.optJSONArray("models") ?: return false
+        return (0 until models.length()).any { index ->
+            val model = models.optJSONObject(index)
+            model != null && model.optString("api_key").isNotBlank() &&
+                model.optString("base_url").isNotBlank() && model.optString("model").isNotBlank()
         }
     }
 }

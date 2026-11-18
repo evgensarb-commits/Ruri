@@ -96,7 +96,11 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun appendEvent(eventJson: String): String {
             return try {
-                FileManager.appendEvent(filesDir, JSONObject(eventJson))
+                val event = JSONObject(eventJson)
+                FileManager.appendEvent(filesDir, event)
+                if (event.optString("type") == "message" && event.optString("who") == "commander") {
+                    LifeScheduler.enqueueEvent(this@MainActivity, "commander_message")
+                }
                 "OK"
             } catch (e: Exception) { "ERROR: " + (e.message ?: "event append failed") }
         }
