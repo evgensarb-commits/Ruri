@@ -27,15 +27,15 @@ object ChatEngine {
         for (index in maxOf(0, facts.length() - 16) until facts.length()) {
             val fact = facts.optJSONObject(index) ?: continue
             val value = fact.optString("text").trim()
-            if (value.isNotBlank()) factContext.append("- ").append(value.take(300)).append("\n")
+            if (value.isNotBlank()) factContext.append("- ").append(PrivacyFilter.redact(value.take(300))).append("\n")
         }
         val diaryContext = StringBuilder()
         for (index in maxOf(0, diary.length() - 6) until diary.length()) {
             val entry = diary.optJSONObject(index) ?: continue
             val value = entry.optString("text").trim()
-            if (value.isNotBlank()) diaryContext.append("- ").append(value.take(500)).append("\n")
+            if (value.isNotBlank()) diaryContext.append("- ").append(PrivacyFilter.redact(value.take(500))).append("\n")
         }
-        val summary = readJson(root, "memory/L3_summary.json").optString("summary").take(5000)
+        val summary = PrivacyFilter.redact(readJson(root, "memory/L3_summary.json").optString("summary").take(5000))
         val system = "Ты — ${character.optString("name", "Рури")}. " +
             "Приоритеты: ${priorities.optString("priority_1", "Жить")}; " +
             "${priorities.optString("priority_2", "Любить Командира")}. " +
@@ -61,7 +61,10 @@ object ChatEngine {
                 val text = event.optString("text").trim()
                 if (text.isBlank()) return@mapNotNull null
                 val role = if (event.optString("who") == "ruri") "assistant" else "user"
-                JSONObject().put("role", role).put("content", text)
+                JSONObject().put("role", role).put(
+                    "content",
+                    PrivacyFilter.redact(text, "[сообщение скрыто локальным фильтром приватности]")
+                )
             } catch (_: Exception) { null }
         }.take(14).reversed()
         if (history.isEmpty() || history.last().optString("role") != "user") {
