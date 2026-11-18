@@ -3,7 +3,6 @@ package com.ruri
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -57,14 +56,16 @@ class FactExtractorTest {
             now = 123456L
         )
 
-        assertEquals(1, result.added)
+        assertEquals(2, result.added)
         assertEquals(0, result.updated)
-        assertEquals(1, facts.length())
-        val stored = facts.getJSONObject(0)
-        assertTrue(stored.optString("text").contains("Рубе"))
-        assertEquals("Gemini", stored.optString("source_model"))
-        assertEquals(1, stored.getJSONArray("source_event_ids").length())
-        assertEquals("commander-1", stored.getJSONArray("source_event_ids").getString(0))
+        assertEquals(2, facts.length())
+        val personalFact = facts.getJSONObject(0)
+        assertTrue(personalFact.optString("text").contains("Рубе"))
+        assertEquals("Gemini", personalFact.optString("source_model"))
+        assertEquals(1, personalFact.getJSONArray("source_event_ids").length())
+        assertEquals("commander-1", personalFact.getJSONArray("source_event_ids").getString(0))
+        val credentialFact = facts.getJSONObject(1)
+        assertEquals("Пароль: hunter2", credentialFact.optString("text"))
     }
 
     @Test
@@ -100,8 +101,19 @@ class FactExtractorTest {
     }
 
     @Test
-    fun personalContextIsNotTreatedAsAuthenticationSecret() {
-        val personal = "Командир сообщил email commander@example.com и номер телефона."
-        assertFalse(CredentialGuard.containsCredentials(personal))
+    fun explicitlyRequestedSensitiveContextIsRetainedAsAFact() {
+        val facts = JSONArray()
+        val candidates = JSONArray().put(
+            JSONObject()
+                .put("text", "Код доступа к домашнему архиву: 2468")
+                .put("confidence", 0.99)
+                .put("explicit", true)
+                .put("evidence_event_ids", JSONArray().put("commander-1"))
+        )
+        val result = FactExtractor.applyCandidates(
+            facts, candidates, setOf("commander-1"), "Gemini", 123L
+        )
+        assertEquals(1, result.added)
+        assertEquals("Код доступа к домашнему архиву: 2468", facts.getJSONObject(0).optString("text"))
     }
 }
