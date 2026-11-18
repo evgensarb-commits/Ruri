@@ -164,6 +164,7 @@ class MemoryConsolidatorTest {
         assertTrue(summary.contains(previous))
         assertTrue(summary.contains("Рубе"))
         assertTrue(summary.contains("commander@example.com"))
-        assertTrue(summary.contains("hunter2"))
+        assertFalse(summary.contains("hunter2"))
+        assertTrue(summary.contains(SecretRedactor.PLACEHOLDER))
     }
 }
