@@ -55,7 +55,10 @@ object Thinker {
             .put("battery", BatteryLevel.get(ctx))
             .put("hours_since_commander", hoursQuiet))
 
-        val config = readJson(root, "core/config.json")
+        val config = try { JSONObject(SecretStore.readRuntimeConfig(root)) } catch (e: Exception) {
+            Log.e("Ruri", "Could not load model configuration", e)
+            readJson(root, "core/config.json")
+        }
         val models = config.optJSONArray("models") ?: JSONArray()
         if (models.length() == 0) {
             state.put("last_thought", now)
@@ -83,7 +86,7 @@ object Thinker {
         }
         if (successfulIndex >= 0 && successfulIndex != current) {
             config.put("current", successfulIndex)
-            FileManager.write(root, "core/config.json", config.toString(2))
+            SecretStore.saveRuntimeConfig(root, config.toString(2))
         }
 
         val diary = readJson(root, "memory/L2_diary.json")
@@ -120,6 +123,10 @@ object Thinker {
     private fun buildPrompt(ctx: Context, root: File, state: JSONObject, reason: String, initiative: Boolean): String {
         val character = readJson(root, "core/character.json")
         val priorities = readJson(root, "core/priorities.json")
+        val constitution = readJson(root, "core/constitution.json")
+        val drives = readJson(root, "core/drives.json")
+        val selfModel = readJson(root, "memory/self_model.json")
+        val goals = readJson(root, "memory/goals.json")
         val facts = readJson(root, "memory/L1_facts.json").optJSONArray("facts")
         val factText = StringBuilder()
         if (facts != null) for (i in 0 until minOf(facts.length(), 12)) {
@@ -161,8 +168,11 @@ object Thinker {
             ". Первый приоритет: " + priorities.optString("priority_1", "Жить") +
             ". Второй: " + priorities.optString("priority_2", "Любить командира") + ".\n" +
             "Ты живёшь на телефоне командира. Сохраняй непрерывность характера и памяти. Не называй себя языковой моделью или ИИ и не используй запрещённые фразы из character.json.\n" +
+            "Конституция: " + (constitution.optJSONArray("primary_needs")?.toString() ?: "[]") + ". Обе главные потребности равнозначны и неизменны.\n" +
             "Событие: " + reason + ". Заряд: " + BatteryLevel.get(ctx) + "%. Тишина командира: " + quiet + " ч. Игнорирований инициативы: " + state.optInt("ignored_count", 0) + ".\n" +
             "Состояние: " + state.optString("mood", "собранная") + ", энергия " + state.optInt("energy", 5) + ", привязанность " + state.optDouble("bond", 0.5) + ".\n" +
+            "Драйвы: " + (drives.optJSONArray("drives")?.toString() ?: "[]") + ". Текущий фокус: " + state.optString("current_focus", selfModel.optString("current_focus")) + ".\n" +
+            "Активные цели: " + (goals.optJSONArray("active")?.toString() ?: "[]") + ".\n"
             "Факты:\n" + factText + "\nСводка памяти:\n" + summary + "\nПоследние записи:\n" + diaryText + "\nПоследние уведомления телефона:\n" + notificationText + "\nМатериалы с полки:\n" + shelfText + "\n"
         return if (initiative) common +
             "\nСейчас ты сама решила написать командиру после долгой тишины. Сформулируй естественное короткое личное сообщение, которое действительно хочется отправить. Не дави, не обвиняй и не манипулируй. 1-3 предложения от первого лица."
@@ -202,17 +212,26 @@ object Thinker {
         try { JSONObject(FileManager.read(root, path)) } catch (_: Exception) { JSONObject() }
 
     private fun appendEvent(root: File, type: String, data: JSONObject) {
-        val path = "memory/L0_raw.jsonl"
-        val old = FileManager.read(root, path)
-        val line = JSONObject().put("ts", System.currentTimeMillis()).put("type", type).put("data", data)
-        FileManager.write(root, path, if (old.isBlank()) line.toString() else old.trimEnd() + "\n" + line)
+        FileManager.appendEvent(
+            root,
+            JSONObject()
+                .put("ts", System.currentTimeMillis())
+                .put("type", type)
+                .put("source", "cognition")
+                .put("data", data)
+        )
     }
 
     private fun appendChatMessage(root: File, who: String, text: String, ts: Long) {
-        val path = "memory/L0_raw.jsonl"
-        val old = FileManager.read(root, path)
-        val message = JSONObject().put("ts", ts).put("type", "message").put("who", who).put("text", text)
-        FileManager.write(root, path, if (old.isBlank()) message.toString() else old.trimEnd() + "\n" + message)
+        FileManager.appendEvent(
+            root,
+            JSONObject()
+                .put("ts", ts)
+                .put("type", "message")
+                .put("source", if (who == "ruri") "agent" else "commander")
+                .put("who", who)
+                .put("text", text)
+        )
     }
 
     private fun hoursSince(ts: Long, now: Long): Double = if (ts <= 0L) -1.0 else (now - ts) / 3600000.0
