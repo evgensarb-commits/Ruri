@@ -1,6 +1,5 @@
 package com.ruri
 
-import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
