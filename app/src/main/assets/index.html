@@ -1,189 +1,159 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Ruri</title>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>РУ-R1 · Рури</title>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#0a0d12;color:#dde3ec;font:15px/1.65 system-ui,sans-serif;height:100vh;overflow:hidden;display:flex;flex-direction:column}
-header{background:#080b10;border-bottom:1px solid #233252;padding:10px 12px;display:flex;align-items:center}
-header h1{font:800 15px system-ui;color:#f1ebdd;flex:1}
-header .st{font:500 9px monospace;color:#6fe86f;letter-spacing:.1em}
-.tabs{display:flex;background:#080b10;border-bottom:1px solid #233252}
-.tabs button{flex:1;padding:11px 4px;background:none;border:0;border-bottom:2px solid transparent;font:700 10px monospace;letter-spacing:.1em;color:#65799b}
-.tabs button.on{color:#f5c542;border-bottom-color:#f5c542}
-main{flex:1;display:flex;flex-direction:column;min-height:0}
-.pane{display:none;flex:1;flex-direction:column;min-height:0}
-.pane.on{display:flex}
-#chat{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px}
-.msg{max-width:93%;display:grid;gap:4px}
-.msg.her{align-self:flex-start}
-.msg.me{align-self:flex-end;justify-items:end}
-.meta{font:500 8.5px monospace;letter-spacing:.1em;color:#65799b}
-.bub{padding:11px 13px;font-size:14.5px;line-height:1.72;white-space:pre-wrap;border-radius:4px}
-.her .bub{background:#152039;border:1px solid #32456d;border-left:2px solid #f5c542}
-.me .bub{background:rgba(43,79,199,.22);border:1px solid rgba(76,116,240,.5);border-right:2px solid #35e0ff}
-.comp{border-top:1px solid #233252;background:#080b10;padding:10px 12px 14px}
-.inrow{display:flex;gap:8px;align-items:flex-end}
-.inrow textarea{flex:1;background:#050810;border:1px solid #32456d;color:#dde3ec;padding:11px 12px;font-size:14.5px;resize:none;height:46px;border-radius:4px}
-.send{width:46px;height:46px;background:#f5c542;border:0;color:#04070e;border-radius:4px;font-size:20px}
-.send:disabled{opacity:.4}
-h2{font:800 19px system-ui;color:#dde3ec;margin:0 0 14px;text-transform:uppercase}
-h2 em{font-style:normal;color:#f5c542}
-.scroll{flex:1;overflow-y:auto;padding:14px}
-.card{background:#131d33;border:1px solid #233252;border-radius:4px;padding:13px;margin-bottom:11px}
-.card p{font-size:13.5px;color:#93a6c6}
-.btn{font:700 10.5px monospace;letter-spacing:.1em;text-transform:uppercase;padding:11px 14px;border:1px solid #f5c542;background:#f5c542;color:#04070e;border-radius:3px}
-.btn.ghost{background:transparent;color:#f5c542}
-.row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
-.fld{display:grid;gap:5px;margin-bottom:11px}
-.fld label{font:600 9px monospace;letter-spacing:.13em;color:#65799b}
-.fld input,.fld select{background:#050810;border:1px solid #32456d;color:#dde3ec;padding:10px 11px;font:13px monospace;border-radius:3px;width:100%}
-.typing{display:flex;gap:5px;padding:11px 13px;background:#152039;border:1px solid #32456d;border-left:2px solid #f5c542;width:fit-content}
-.typing i{width:6px;height:6px;background:#f5c542;border-radius:50%;animation:td 1.1s infinite}
-.typing i:nth-child(2){animation-delay:.15s}
-.typing i:nth-child(3){animation-delay:.3s}
-@keyframes td{0%,60%,100%{opacity:.25}30%{opacity:1;transform:translateY(-4px)}}
+*{box-sizing:border-box}body{margin:0;background:#090d14;color:#dce4f2;font:15px/1.55 system-ui,sans-serif;height:100dvh;display:flex;flex-direction:column}
+header{padding:10px 14px;background:#070a10;border-bottom:1px solid #273653;display:flex;align-items:center}
+header strong{font-size:15px;letter-spacing:.08em;color:#f2e9d5;flex:1}#status{font:10px monospace;color:#79db91}
+nav{display:flex;background:#070a10;border-bottom:1px solid #273653;overflow:auto}
+nav button{flex:1;min-width:65px;padding:12px 4px;background:none;border:0;border-bottom:2px solid transparent;color:#7f91ad;font:700 10px monospace}
+nav button.on{color:#f4c94f;border-bottom-color:#f4c94f}
+main{flex:1;min-height:0;display:flex;flex-direction:column}.pane{display:none;flex:1;min-height:0;flex-direction:column}.pane.on{display:flex}
+#chat{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:12px}
+.msg{max-width:94%;display:grid;gap:4px}.msg.her{align-self:flex-start}.msg.me{align-self:flex-end;justify-items:end}
+.meta{font:9px monospace;color:#7f91ad;letter-spacing:.08em}
+.bub{white-space:pre-wrap;overflow-wrap:anywhere;padding:10px 13px;border-radius:4px;line-height:1.65}
+.her .bub{background:#15213a;border:1px solid #31476e;border-left:2px solid #f4c94f}.me .bub{background:#182b4c;border:1px solid #34558d;border-right:2px solid #36d7e9}
+.composer{padding:10px 12px 14px;background:#070a10;border-top:1px solid #273653}.inrow{display:flex;gap:8px;align-items:flex-end}
+textarea,input,select{background:#060a12;border:1px solid #354a70;color:#e0e8f5;padding:11px;border-radius:4px;font:14px system-ui;width:100%}
+#input{flex:1;resize:none;min-height:46px;max-height:140px}
+button.action{border:1px solid #f4c94f;background:#f4c94f;color:#10141b;border-radius:4px;padding:11px 14px;font:700 11px monospace}
+button.secondary{background:transparent;color:#f4c94f}
+#send{width:48px;height:46px;font-size:18px}
+.scroll{padding:14px;overflow:auto;flex:1}.section{font-size:18px;margin:2px 0 14px;color:#f2e9d5}.section span{color:#f4c94f}
+.card{background:#121d32;border:1px solid #273653;padding:13px;margin:0 0 11px;border-radius:4px}
+.card p{margin:0;color:#9cafcb;font-size:13px}.field{display:grid;gap:5px;margin:12px 0}.field label{font:10px monospace;color:#8395b2;letter-spacing:.1em}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.result{padding:12px 0;border-bottom:1px solid #273653}.result a{color:#f4c94f;font-weight:650;text-decoration:none}.result p{font-size:13px;color:#9cafcb;margin:6px 0}
+.small{font-size:11px;color:#8395b2}.error{color:#ff9a9a}.typing{padding:10px 13px;background:#15213a;border-left:2px solid #f4c94f}
 </style>
 </head>
 <body>
-<header><h1>Ruri</h1><span class="st" id="status">● ЗАГРУЗКА</span></header>
-<nav class="tabs">
-<button data-p="chat" class="on">ЧАТ</button>
-<button data-p="life">ДНЕВНИК</button>
-<button data-p="brain">МОЗГ</button>
+<header><strong>РУ-R1 · РУРИ</strong><span id="status">● ЗАГРУЗКА</span></header>
+<nav>
+<button class="on" data-pane="chat">ЧАТ</button><button data-pane="diary">ДНЕВНИК</button><button data-pane="brain">МОЗГ</button><button data-pane="shelf">ПОЛКА</button><button data-pane="search">ПОИСК</button>
 </nav>
 <main>
-<section class="pane on" id="p-chat">
+<section class="pane on" id="pane-chat">
 <div id="chat"></div>
-<div class="comp"><div class="inrow">
-<textarea id="input" rows="1"></textarea>
-<button class="send" id="send">→</button>
-</div></div>
+<div class="composer"><div class="inrow"><textarea id="input" rows="1" placeholder="Написать Рури…"></textarea><button class="action" id="send">➤</button></div><div class="small">Enter — отправить · Shift+Enter — новая строка</div></div>
 </section>
-<section class="pane" id="p-life"><div class="scroll">
-<h2>Дневник <em>Рури</em></h2><div id="diary"></div>
+<section class="pane" id="pane-diary"><div class="scroll"><h2 class="section">ДНЕВНИК <span>Рури</span></h2><div id="diary"></div></div></section>
+<section class="pane" id="pane-brain"><div class="scroll">
+<h2 class="section">МОЗГ <span>и личность</span></h2>
+<div class="card"><p>Ключи хранятся в локальном файле приложения core/config.json. Рури сначала обращается к выбранной модели, затем пробует остальные настроенные модели.</p></div>
+<div class="field"><label>МОДЕЛЬ</label><select id="model"><option value="0">Gemini</option><option value="1">Groq</option></select></div>
+<div class="field"><label>API KEY</label><input id="key" type="password" autocomplete="off" placeholder="Вставь ключ модели"></div>
+<button class="action" id="saveKey">СОХРАНИТЬ КЛЮЧ</button>
+<div class="field"><label>ИМЯ И ХАРАКТЕР</label><input id="charName" placeholder="Имя"></div>
+<div class="field"><label>МАНЕРА РЕЧИ</label><textarea id="charStyle" rows="3" placeholder="Описание характера и речи"></textarea></div>
+<button class="action secondary" id="saveCharacter">СОХРАНИТЬ ХАРАКТЕР</button>
+<div class="actions"><button class="action secondary" id="exp">ЭКСПОРТ ПАМЯТИ</button><button class="action secondary" id="imp">ИМПОРТ ПАМЯТИ</button><input id="file" type="file" accept=".json,application/json" hidden></div>
 </div></section>
-<section class="pane" id="p-brain"><div class="scroll">
-<h2>Мозг <em>напрокат</em></h2>
-<div class="card"><p>Вставь ключ Gemini или Groq.</p></div>
-<div class="fld"><label>МОДЕЛЬ</label><select id="model">
-<option value="0">Gemini</option><option value="1">Groq</option>
-</select></div>
-<div class="fld"><label>API KEY</label><input id="key" type="password"></div>
-<button class="btn" id="saveKey">Сохранить</button>
-<div class="row" style="margin-top:20px">
-<button class="btn ghost" id="exp">Экспорт</button>
-<button class="btn ghost" id="imp">Импорт</button>
-<input type="file" id="file" accept=".json" hidden>
-</div>
+<section class="pane" id="pane-shelf"><div class="scroll">
+<h2 class="section">ПОЛКА <span>файлов</span></h2>
+<div class="card"><p>Локальные заметки и материалы, которые Рури может учитывать в следующих циклах мышления. Файлы остаются на телефоне.</p></div>
+<div class="field"><label>ИМЯ ФАЙЛА</label><input id="shelfName" placeholder="например: заметка.txt"></div>
+<div class="field"><label>СОДЕРЖИМОЕ</label><textarea id="shelfText" rows="4" placeholder="Текст заметки"></textarea></div>
+<button class="action" id="saveShelf">СОХРАНИТЬ НА ПОЛКУ</button>
+<div id="shelfList" style="margin-top:16px"></div>
+</div></section>
+<section class="pane" id="pane-search"><div class="scroll">
+<h2 class="section">ПОИСК <span>в сети</span></h2>
+<div class="card"><p>Рури ищет открытые веб-страницы через DuckDuckGo. Нажми на результат, чтобы открыть страницу в браузере телефона.</p></div>
+<div class="field"><label>ПОИСКОВЫЙ ЗАПРОС</label><input id="searchQuery" placeholder="Что найти в интернете?"></div>
+<button class="action" id="searchButton">ИСКАТЬ В СЕТИ</button>
+<div id="searchStatus" class="small" style="margin:12px 0"></div><div id="searchResults"></div>
 </div></section>
 </main>
 <script>
 function $(s){return document.querySelector(s);}
 var busy=false;
-function esc(s){return String(s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
-function loadChat(){
-Ruri.read('memory/L0_raw.jsonl').then(function(raw){
-var lines=raw.trim().split('\n').filter(function(l){return l;});
-var chat=$('#chat');chat.innerHTML='';
-lines.forEach(function(line){
-try{var m=JSON.parse(line);if(m.type!=='message')return;
-var d=document.createElement('div');
-d.className='msg '+(m.who==='ruri'?'her':'me');
-d.innerHTML='<div class="meta">'+(m.who==='ruri'?'РУРИ':'КОМАНДИР')+' · '+new Date(m.ts).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+'</div><div class="bub">'+esc(m.text)+'</div>';
-chat.appendChild(d);}catch(e){}
-});
-chat.scrollTop=chat.scrollHeight;
-});}
-function loadDiary(){
-Ruri.read('memory/L2_diary.json').then(function(raw){
-try{var d=JSON.parse(raw);var arr=d.entries||[];var el=$('#diary');el.innerHTML='';
-arr.slice(-20).reverse().forEach(function(e){
-var div=document.createElement('div');div.className='msg her';
-div.innerHTML='<div class="meta">МЫСЛЬ · '+new Date(e.ts).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+'</div><div class="bub">'+esc(e.text)+'</div>';
-el.appendChild(div);
-});}catch(err){}
-});}
-function sendMessage(text){
-if(!text.trim()||busy)return;
-busy=true;$('#send').disabled=true;
-var userMsg={ts:Date.now(),type:'message',who:'commander',text:text};
-Ruri.read('memory/L0_raw.jsonl').then(function(old){
-return Ruri.write('memory/L0_raw.jsonl',(old?old+'\n':'')+JSON.stringify(userMsg));
-}).then(function(){
-var d=document.createElement('div');d.className='msg me';
-d.innerHTML='<div class="meta">КОМАНДИР · '+new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+'</div><div class="bub">'+esc(text)+'</div>';
-$('#chat').appendChild(d);$('#chat').scrollTop=$('#chat').scrollHeight;
-var typing=document.createElement('div');typing.className='msg her';typing.id='typing';
-typing.innerHTML='<div class="typing"><i></i><i></i><i></i></div>';
-$('#chat').appendChild(typing);$('#chat').scrollTop=$('#chat').scrollHeight;
-return callModel(text);
-}).then(function(reply){
-var t=document.getElementById('typing');if(t)t.remove();
-var ruriMsg={ts:Date.now(),type:'message',who:'ruri',text:reply};
-return Ruri.read('memory/L0_raw.jsonl').then(function(cur){
-return Ruri.write('memory/L0_raw.jsonl',cur+'\n'+JSON.stringify(ruriMsg));
-}).then(function(){
-var d2=document.createElement('div');d2.className='msg her';
-d2.innerHTML='<div class="meta">РУРИ · '+new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+'</div><div class="bub">'+esc(reply)+'</div>';
-$('#chat').appendChild(d2);$('#chat').scrollTop=$('#chat').scrollHeight;
-});
-}).catch(function(e){
-var t=document.getElementById('typing');if(t)t.remove();
-var err=document.createElement('div');err.className='msg sys';
-err.innerHTML='<div class="bub" style="border-color:#ff4d4d;color:#ff9b9b">Ошибка: '+esc(e.message)+'</div>';
-$('#chat').appendChild(err);$('#chat').scrollTop=$('#chat').scrollHeight;
-}).then(function(){busy=false;$('#send').disabled=false;});
+function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function status(s){$('#status').textContent='● '+s;}
+function read(p){return Ruri.read(p)||'';}
+function write(p,v){var r=Ruri.write(p,v);if(typeof r==='string'&&r.indexOf('ERROR:')===0)throw new Error(r);return r;}
+function appendLog(obj){var old=read('memory/L0_raw.jsonl');write('memory/L0_raw.jsonl',(old&& !old.endsWith('\n')?old+'\n':old)+JSON.stringify(obj));}
+function messageNode(who,text,ts){
+var d=document.createElement('div');d.className='msg '+(who==='ruri'?'her':'me');
+d.innerHTML='<div class="meta">'+(who==='ruri'?'РУРИ':'КОМАНДИР')+' · '+new Date(ts||Date.now()).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+'</div><div class="bub">'+esc(text)+'</div>';return d;
 }
-function callModel(userText){
-return Promise.all([Ruri.read('core/config.json'),Ruri.read('core/character.json'),Ruri.read('core/priorities.json')]).then(function(arr){
-var config=JSON.parse(arr[0]);var character=JSON.parse(arr[1]);var priorities=JSON.parse(arr[2]);
-var model=config.models[config.current];
-if(!model.api_key)throw new Error('Ключ не вставлен. Открой вкладку МОЗГ.');
-var sys='Ты — '+character.name+' ('+character.designation+'). '+priorities.priority_1+'. '+priorities.priority_2+'.\n\nХарактер: '+character.speech_style+'.\n\nЗапрещённые фразы: '+character.banned_phrases.join(', ')+'.\n\nОтвечай от первого лица, длинно и осмысленно.';
-return fetch(model.base_url+'/chat/completions',{
-method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+model.api_key},
-body:JSON.stringify({model:model.model,messages:[{role:'system',content:sys},{role:'user',content:userText}],temperature:0.9,max_tokens:1000})
-}).then(function(res){
-if(!res.ok)return res.text().then(function(err){throw new Error('HTTP '+res.status+': '+err.slice(0,200));});
-return res.json();
-}).then(function(data){return data.choices[0].message.content;});
-});}
+function loadChat(){
+var box=$('#chat');box.innerHTML='';
+read('memory/L0_raw.jsonl').split('\n').forEach(function(line){
+try{var e=JSON.parse(line);if(e.type==='message'&&e.who)box.appendChild(messageNode(e.who,e.text,e.ts));}catch(_){}
+});
+box.scrollTop=box.scrollHeight;
+}
+function loadDiary(){
+try{var entries=JSON.parse(read('memory/L2_diary.json')||'{"entries":[]}').entries||[];
+var box=$('#diary');box.innerHTML='';
+entries.slice(-100).reverse().forEach(function(e){var d=messageNode('ruri',e.text,e.ts);d.querySelector('.meta').textContent='МЫСЛЬ · '+new Date(e.ts).toLocaleString('ru-RU');box.appendChild(d);});
+}catch(e){$('#diary').textContent='Ошибка чтения дневника: '+e.message;}
+}
+function historyForModel(){
+var items=[];
+read('memory/L0_raw.jsonl').split('\n').slice(-80).forEach(function(line){try{var e=JSON.parse(line);if(e.type==='message'&&e.who&&e.text)items.push({role:e.who==='ruri'?'assistant':'user',content:e.text});}catch(_){}});
+return items.slice(-14);
+}
+function callModel(text){
+var config=JSON.parse(read('core/config.json')||'{}');
+var ch=JSON.parse(read('core/character.json')||'{}');
+var pr=JSON.parse(read('core/priorities.json')||'{}');
+var models=config.models||[];if(!models.length)return Promise.reject(new Error('Список моделей пуст.'));
+var index=Math.max(0,Math.min(Number(config.current)||0,models.length-1));
+var order=[index].concat(models.map(function(_,i){return i;}).filter(function(i){return i!==index;}));
+var system='Ты — '+(ch.name||'РУ-R1')+'. Приоритеты: '+(pr.priority_1||'Жить')+'; '+(pr.priority_2||'Любить командира')+'. Манера речи: '+(ch.speech_style||'естественная, живая, осмысленная')+'. Характер: '+JSON.stringify(ch.traits||{})+'. Запрещённые формулировки: '+(ch.banned_phrases||[]).join('; ')+'. Сохраняй контекст переписки и отвечай по-русски от первого лица.';
+var history=historyForModel();history.push({role:'user',content:text});
+function attempt(pos){
+if(pos>=order.length)return Promise.reject(new Error('Все модели недоступны. Проверь ключи и подключение к интернету.'));
+var i=order[pos],m=models[i];if(!m||!m.api_key)return attempt(pos+1);
+return fetch(String(m.base_url||'').replace(/\/$/,'')+'/chat/completions',{
+method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+m.api_key},
+body:JSON.stringify({model:m.model,messages:[{role:'system',content:system}].concat(history),temperature:0.85,max_tokens:1200})
+}).then(function(res){if(!res.ok)return res.text().then(function(t){throw new Error('HTTP '+res.status+' '+t.slice(0,160));});return res.json();})
+.then(function(data){var a=data&&data.choices&&data.choices[0]&&data.choices[0].message&&data.choices[0].message.content;if(!a)throw new Error('Пустой ответ модели');config.current=i;write('core/config.json',JSON.stringify(config,null,2));return a;})
+.catch(function(err){if(pos+1<order.length)return attempt(pos+1);throw err;});
+}
+return attempt(0);
+}
+function sendMessage(text){
+if(!text.trim()||busy)return;busy=true;$('#send').disabled=true;status('ДУМАЮ');
+var user={ts:Date.now(),type:'message',who:'commander',text:text};
+try{appendLog(user);Ruri.markCommanderSeen();$('#chat').appendChild(messageNode('commander',text,user.ts));}
+catch(e){busy=false;$('#send').disabled=false;status('ОШИБКА ПАМЯТИ');alert(e.message);return;}
+var typing=document.createElement('div');typing.className='msg her';typing.id='typing';typing.innerHTML='<div class="typing">Рури обдумывает ответ…</div>';$('#chat').appendChild(typing);$('#chat').scrollTop=$('#chat').scrollHeight;
+callModel(text).then(function(reply){
+var t=$('#typing');if(t)t.remove();
+var answer={ts:Date.now(),type:'message',who:'ruri',text:reply};appendLog(answer);$('#chat').appendChild(messageNode('ruri',reply,answer.ts));status('НА СВЯЗИ');
+}).catch(function(e){var t=$('#typing');if(t)t.remove();var d=document.createElement('div');d.className='msg her';d.innerHTML='<div class="bub error">Ответ не получен: '+esc(e.message)+'. Сообщение сохранено в памяти.</div>';$('#chat').appendChild(d);status('НЕТ СВЯЗИ');})
+.then(function(){busy=false;$('#send').disabled=false;$('#chat').scrollTop=$('#chat').scrollHeight;});
+}
 $('#send').addEventListener('click',function(){var v=$('#input').value;$('#input').value='';sendMessage(v);});
-$('#input').addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();}});
-document.querySelectorAll('.tabs button').forEach(function(b){b.addEventListener('click',function(){
-document.querySelectorAll('.tabs button').forEach(function(x){x.classList.remove('on');});
-b.classList.add('on');
-document.querySelectorAll('.pane').forEach(function(p){p.classList.remove('on');});
-document.getElementById('p-'+b.dataset.p).classList.add('on');
-if(b.dataset.p==='life')loadDiary();
+$('#input').addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();var v=this.value;this.value='';sendMessage(v);}});
+document.querySelectorAll('nav button').forEach(function(b){b.addEventListener('click',function(){
+document.querySelectorAll('nav button').forEach(function(x){x.classList.remove('on');});b.classList.add('on');
+document.querySelectorAll('.pane').forEach(function(p){p.classList.remove('on');});$('#pane-'+b.dataset.pane).classList.add('on');
+if(b.dataset.pane==='diary')loadDiary();if(b.dataset.pane==='shelf')loadShelf();if(b.dataset.pane==='brain')loadCharacter();
 });});
-$('#saveKey').addEventListener('click',function(){
-Ruri.read('core/config.json').then(function(raw){
-var config=JSON.parse(raw);var idx=parseInt($('#model').value);
-config.models[idx].api_key=$('#key').value;config.current=idx;
-return Ruri.write('core/config.json',JSON.stringify(config,null,2));
-}).then(function(){alert('Ключ сохранён');});
-});
-$('#exp').addEventListener('click',function(){
-var files=['core/priorities.json','core/character.json','core/appearance.json','core/config.json','memory/L0_raw.jsonl','memory/L1_facts.json','memory/L2_diary.json','memory/L3_summary.json','memory/L4_state.json'];
-var archive={};var pending=files.map(function(f){return Ruri.read(f).then(function(c){archive[f]=c;});});
-Promise.all(pending).then(function(){
-Ruri.exportArchive(JSON.stringify(archive,null,2));
-});});
+$('#saveKey').addEventListener('click',function(){try{var c=JSON.parse(read('core/config.json')||'{}'),i=Number($('#model').value),k=$('#key').value.trim();if(!k)throw new Error('Вставь API-ключ');if(!c.models||!c.models[i])throw new Error('Модель не найдена');c.models[i].api_key=k;c.current=i;write('core/config.json',JSON.stringify(c,null,2));$('#key').value='';alert('Ключ сохранён в памяти приложения.');}catch(e){alert(e.message);}});
+function loadCharacter(){try{var c=JSON.parse(read('core/character.json')||'{}');$('#charName').value=c.name||'';$('#charStyle').value=c.speech_style||'';}catch(_){}}
+$('#saveCharacter').addEventListener('click',function(){try{var c=JSON.parse(read('core/character.json')||'{}');c.name=$('#charName').value.trim()||'РУ-R1';c.speech_style=$('#charStyle').value.trim();write('core/character.json',JSON.stringify(c,null,2));alert('Характер сохранён.');}catch(e){alert(e.message);}});
+var paths=['core/priorities.json','core/character.json','core/appearance.json','core/config.json','memory/L0_raw.jsonl','memory/L1_facts.json','memory/L2_diary.json','memory/L3_summary.json','memory/L4_state.json'];
+$('#exp').addEventListener('click',function(){try{var a={};paths.forEach(function(p){a[p]=read(p);});var r=Ruri.exportArchive(JSON.stringify(a,null,2));if(String(r).indexOf('ERROR:')===0)throw new Error(r);}catch(e){alert('Экспорт: '+e.message);}});
 $('#imp').addEventListener('click',function(){$('#file').click();});
-$('#file').addEventListener('change',function(e){
-var f=e.target.files[0];if(!f)return;
-var reader=new FileReader();
-reader.onload=function(ev){
-Ruri.importArchive(ev.target.result);
-alert('Архив восстановлен');location.reload();
-};
-reader.readAsText(f);
+$('#file').addEventListener('change',function(e){var f=e.target.files&&e.target.files[0];if(!f)return;var rd=new FileReader();rd.onload=function(ev){try{var r=Ruri.importArchive(String(ev.target.result));if(String(r).indexOf('ERROR:')===0)throw new Error(r);alert('Архив восстановлен.');location.reload();}catch(err){alert('Импорт: '+err.message);}};rd.readAsText(f);e.target.value='';});
+function loadShelf(){try{var names=JSON.parse(Ruri.list('shelf')||'[]'),box=$('#shelfList');box.innerHTML='';if(!names.length){box.textContent='Полка пока пуста.';return;}names.forEach(function(name){var d=document.createElement('div');d.className='card';d.innerHTML='<b>'+esc(name)+'</b><div class="small" id="shelf-'+esc(name).replace(/[^a-zA-Z0-9_-]/g,'_')+'"></div><button class="action secondary" data-file="'+esc(name)+'">ПРОЧИТАТЬ</button>';box.appendChild(d);});box.querySelectorAll('button[data-file]').forEach(function(b){b.addEventListener('click',function(){var text=read('shelf/'+b.dataset.file);alert(text.slice(0,3500)||'(пустой файл)');});});}catch(e){$('#shelfList').textContent='Ошибка: '+e.message;}}
+$('#saveShelf').addEventListener('click',function(){try{var name=$('#shelfName').value.trim().replace(/[\\/\\\\]/g,'_');if(!name)throw new Error('Укажи имя файла');write('shelf/'+name,$('#shelfText').value);$('#shelfText').value='';loadShelf();alert('Файл сохранён на полке.');}catch(e){alert(e.message);}});
+$('#searchButton').addEventListener('click',function(){
+var q=$('#searchQuery').value.trim();if(!q)return;$('#searchStatus').textContent='Ищу в сети…';$('#searchResults').innerHTML='';
+try{var data=JSON.parse(Ruri.searchWeb(q));if(data.error)throw new Error(data.error);var results=data.results||[];$('#searchStatus').textContent='Найдено результатов: '+results.length;
+results.forEach(function(r){var d=document.createElement('div');d.className='result';d.innerHTML='<a href="#" class="open">'+esc(r.title)+'</a><p>'+esc(r.snippet)+'</p><div class="small">'+esc(r.url)+'</div>';d.querySelector('a').addEventListener('click',function(e){e.preventDefault();Ruri.openUrl(r.url);});$('#searchResults').appendChild(d);});
+if(!results.length)$('#searchStatus').textContent='Результаты не получены. Попробуй другой запрос.';
+}catch(e){$('#searchStatus').textContent=e.message;$('#searchStatus').className='small error';}
 });
-loadChat();
+$('#searchQuery').addEventListener('keydown',function(e){if(e.key==='Enter')$('#searchButton').click();});
+try{loadChat();loadCharacter();status('НА СВЯЗИ');}catch(e){status('ОШИБКА ЗАПУСКА');}
 </script>
-</body>
-</html>
+</body></html>
