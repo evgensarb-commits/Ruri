@@ -13,9 +13,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      RURI_SIGNING_STORE_PASSWORD: ${{ secrets.RURI_SIGNING_STORE_PASSWORD || 'ru-r1-temporary-store' }}
-      RURI_SIGNING_KEY_PASSWORD: ${{ secrets.RURI_SIGNING_KEY_PASSWORD || 'ru-r1-temporary-key' }}
-      RURI_SIGNING_ALIAS: ${{ secrets.RURI_SIGNING_ALIAS || 'ru-r1-temporary' }}
+      RURI_SIGNING_STORE_PASSWORD: ${{ secrets.RURI_SIGNING_STORE_PASSWORD }}
+      RURI_SIGNING_KEY_PASSWORD: ${{ secrets.RURI_SIGNING_KEY_PASSWORD }}
+      RURI_SIGNING_ALIAS: ${{ secrets.RURI_SIGNING_ALIAS }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,22 +26,6 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Restore permanent signing key or create a test key
-        env:
-          RURI_SIGNING_KEYSTORE_BASE64: ${{ secrets.RURI_SIGNING_KEYSTORE_BASE64 }}
-        run: |
-          set -euo pipefail
-          if [ -n "$RURI_SIGNING_KEYSTORE_BASE64" ] &&
-             printf '%s' "$RURI_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$HOME/ruri.keystore.tmp" 2>/dev/null &&
-             keytool -list -keystore "$HOME/ruri.keystore.tmp" -storepass "$RURI_SIGNING_STORE_PASSWORD" -alias "$RURI_SIGNING_ALIAS" > /dev/null 2>&1; then
-            mv "$HOME/ruri.keystore.tmp" "$HOME/ruri.keystore"
-            echo "Using the configured permanent signing key."
-          else
-            rm -f "$HOME/ruri.keystore.tmp"
-            echo "::warning::No valid permanent keystore secret found. Using a temporary test key for this APK."
-            keytool -genkey -v -storetype JKS -keystore "$HOME/ruri.keystore" -alias "$RURI_SIGNING_ALIAS" -keyalg RSA -keysize 2048 -validity 10000 -storepass "$RURI_SIGNING_STORE_PASSWORD" -keypass "$RURI_SIGNING_STORE_PASSWORD" -dname "CN=RU-R1, OU=RU-R1, O=RU-R1, L=RU-R1, S=RU"
-            echo "RURI_SIGNING_KEY_PASSWORD=$RURI_SIGNING_STORE_PASSWORD" >> "$GITHUB_ENV"
-          fi
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -50,8 +34,35 @@ jobs:
       - name: Accept Android licenses
         run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
-      - name: Compile and package APK
-        run: gradle --no-daemon clean assembleDebug
+      - name: Compile Kotlin before signing
+        run: gradle --no-daemon clean :app:compileDebugKotlin
+
+      - name: Restore and verify permanent signing key
+        env:
+          RURI_SIGNING_KEYSTORE_BASE64: ${{ secrets.RURI_SIGNING_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          for name in RURI_SIGNING_KEYSTORE_BASE64 RURI_SIGNING_STORE_PASSWORD RURI_SIGNING_KEY_PASSWORD RURI_SIGNING_ALIAS; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing required GitHub Actions secret: $name"
+              exit 1
+            fi
+          done
+
+          printf '%s' "$RURI_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$HOME/ruri.keystore"
+          keytool -list             -keystore "$HOME/ruri.keystore"             -storepass "$RURI_SIGNING_STORE_PASSWORD"             -alias "$RURI_SIGNING_ALIAS" > /dev/null
+
+          echo "Permanent RU-R1 signing keystore was restored and alias verified."
+
+      - name: Assemble signed APK
+        run: gradle --no-daemon assembleDebug
+
+      - name: Verify APK signature
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          apksigner verify --verbose "$APK"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
