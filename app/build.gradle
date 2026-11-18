@@ -18,6 +18,7 @@ android {
     signingConfigs {
         release {
             storeFile file(System.getenv("HOME") + "/ruri.keystore")
+            storeType "PKCS12"
             storePassword System.getenv("RURI_SIGNING_STORE_PASSWORD")
             keyAlias System.getenv("RURI_SIGNING_ALIAS")
             keyPassword System.getenv("RURI_SIGNING_KEY_PASSWORD")
