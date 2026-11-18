@@ -147,12 +147,12 @@ object Thinker {
         val facts = readJson(root, "memory/L1_facts.json").optJSONArray("facts")
         val factText = StringBuilder()
         if (facts != null) for (i in maxOf(0, facts.length() - 12) until facts.length()) {
-            factText.append("- ").append(CredentialGuard.redact(facts.optJSONObject(i)?.optString("text") ?: "")).append("\n")
+            factText.append("- ").append(facts.optJSONObject(i)?.optString("text") ?: "").append("\n")
         }
         val diary = readJson(root, "memory/L2_diary.json").optJSONArray("entries")
         val diaryText = StringBuilder()
         if (diary != null) for (i in maxOf(0, diary.length() - 5) until diary.length()) {
-            diaryText.append("— ").append(CredentialGuard.redact(diary.optJSONObject(i)?.optString("text") ?: "")).append("\n")
+            diaryText.append("— ").append(diary.optJSONObject(i)?.optString("text") ?: "").append("\n")
         }
         // Retrieve older episodes associated with the current wake reason and recent Commander messages.
         val recentCommanderContext = FileManager.readLastLines(
@@ -161,7 +161,7 @@ object Thinker {
             runCatching { JSONObject(line) }.getOrNull()
         }.filter {
             it.optString("type") == "message" && it.optString("who") == "commander"
-        }.take(3).joinToString(" ") { CredentialGuard.redact(it.optString("text").take(220)) }
+        }.take(3).joinToString(" ") { it.optString("text").take(220) }
         val recallQuery = (reason + " " + recentCommanderContext).take(900)
         val recalledMemories = MemoryRetriever.recall(root, recallQuery, limit = 5)
         val shelfNames = try { JSONArray(FileManager.list(root, "shelf")) } catch (_: Exception) { JSONArray() }
@@ -170,7 +170,7 @@ object Thinker {
             val name = shelfNames.optString(i)
             if (name.isNotBlank()) {
                 shelfText.append("\n--- ").append(name).append(" ---\n")
-                    .append(CredentialGuard.redact(FileManager.read(root, "shelf/" + name).take(900)))
+                    .append(FileManager.read(root, "shelf/" + name).take(900))
             }
         }
         // Commander explicitly enabled full notification context for Ruri's cognition.
@@ -183,12 +183,12 @@ object Thinker {
                 val event = JSONObject(line)
                 if (event.optString("type") != "phone_notification") return@mapNotNull null
                 val source = event.optString("package").take(160)
-                val title = CredentialGuard.redact(event.optString("title").take(300))
-                val body = CredentialGuard.redact(event.optString("text").take(700))
+                val title = event.optString("title").take(300)
+                val body = event.optString("text").take(700)
                 "- $source: $title — $body"
             } catch (_: Exception) { null }
         }.take(20).asReversed().joinToString("\n")
-        val summary = CredentialGuard.redact(readJson(root, "memory/L3_summary.json").optString("summary"))
+        val summary = readJson(root, "memory/L3_summary.json").optString("summary")
         val quiet = hoursSince(state.optLong("last_seen_commander"), System.currentTimeMillis())
         val common = "Ты — " + character.optString("name", "Рури") +
             ". Первый приоритет: " + priorities.optString("priority_1", "Жить") +
