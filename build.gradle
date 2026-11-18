@@ -17,10 +17,10 @@ android {
 
     signingConfigs {
         release {
-            storeFile file("${System.env.HOME}/ruri.keystore")
-            storePassword System.env.KEYSTORE_PASSWORD
-            keyAlias System.env.KEY_ALIAS
-            keyPassword System.env.KEY_PASSWORD
+            storeFile file(System.getenv("HOME") + "/ruri.keystore")
+            storePassword System.getenv("KEYSTORE_PASSWORD")
+            keyAlias System.getenv("KEY_ALIAS")
+            keyPassword System.getenv("KEY_PASSWORD")
         }
     }
 
