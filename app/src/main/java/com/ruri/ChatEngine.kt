@@ -27,13 +27,13 @@ object ChatEngine {
         for (index in 0 until minOf(facts.length(), 16)) {
             val fact = facts.optJSONObject(index) ?: continue
             val value = fact.optString("text").trim()
-            if (value.isNotBlank()) factContext.append("- ").append(value.take(300)).append("\\n")
+            if (value.isNotBlank()) factContext.append("- ").append(value.take(300)).append("\n")
         }
         val diaryContext = StringBuilder()
         for (index in maxOf(0, diary.length() - 6) until diary.length()) {
             val entry = diary.optJSONObject(index) ?: continue
             val value = entry.optString("text").trim()
-            if (value.isNotBlank()) diaryContext.append("- ").append(value.take(500)).append("\\n")
+            if (value.isNotBlank()) diaryContext.append("- ").append(value.take(500)).append("\n")
         }
         val summary = readJson(root, "memory/L3_summary.json").optString("summary").take(5000)
         val system = "Ты — ${character.optString("name", "Рури")}. " +
@@ -47,10 +47,10 @@ object ChatEngine {
             "Отвечай по-русски от первого лица и учитывай историю диалога.\\n" +
             "Текущее состояние: ${state.optString("mood", "собранная")}, энергия ${state.optInt("energy", 5)}, " +
             "текущий фокус: ${state.optString("current_focus", selfModel.optString("current_focus"))}.\\n" +
-            "Активные цели: ${goals.optJSONArray("active") ?: JSONArray()}.\\n" +
-            "Долговременная сводка L3:\\n${summary}\\n" +
-            "Проверенные факты L1:\\n${factContext}\\n" +
-            "Последние записи дневника L2:\\n${diaryContext}"
+            "Активные цели: ${goals.optJSONArray("active") ?: JSONArray()}.\n" +
+            "Долговременная сводка L3:\n${summary}\n" +
+            "Проверенные факты L1:\n${factContext}\n" +
+            "Последние записи дневника L2:\n${diaryContext}"
 
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", system))
         val lines = FileManager.read(root, "memory/L0_raw.jsonl").lineSequence().toList()
