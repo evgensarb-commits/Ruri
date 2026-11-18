@@ -34,7 +34,7 @@ object MemoryRetriever {
         for (i in 0 until facts.length()) {
             val fact = facts.optJSONObject(i) ?: continue
             val text = fact.optString("text").trim()
-            if (text.isNotBlank()) memories.add(
+            if (text.isNotBlank() && !PrivacyFilter.containsSensitive(text)) memories.add(
                 Memory("устойчивый факт", text, fact.optLong("updated_at", fact.optLong("created_at", 0L)),
                     fact.optDouble("confidence", 1.0))
             )
@@ -44,7 +44,7 @@ object MemoryRetriever {
         for (i in 0 until diary.length()) {
             val entry = diary.optJSONObject(i) ?: continue
             val text = entry.optString("text").trim()
-            if (text.isNotBlank()) memories.add(
+            if (text.isNotBlank() && !PrivacyFilter.containsSensitive(text)) memories.add(
                 Memory("эпизод дневника", text, entry.optLong("ts", 0L))
             )
         }
@@ -58,7 +58,7 @@ object MemoryRetriever {
         // Recent conversation is already supplied as chat history; recall older episodes here.
         for (event in messageEvents.dropLast(14)) {
             val text = event.optString("text").trim()
-            if (text.isNotBlank()) memories.add(
+            if (text.isNotBlank() && !PrivacyFilter.containsSensitive(text)) memories.add(
                 Memory(
                     if (event.optString("who") == "ruri") "прошлый ответ Рури" else "прошлая реплика Командира",
                     text, event.optLong("timestamp", event.optLong("ts", 0L))
