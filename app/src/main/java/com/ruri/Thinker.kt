@@ -154,6 +154,16 @@ object Thinker {
         if (diary != null) for (i in maxOf(0, diary.length() - 5) until diary.length()) {
             diaryText.append("— ").append(diary.optJSONObject(i)?.optString("text") ?: "").append("\n")
         }
+        // Retrieve older episodes associated with the current wake reason and recent Commander messages.
+        val recentCommanderContext = FileManager.readLastLines(
+            root, "memory/L0_raw.jsonl", maxLines = 250
+        ).asReversed().mapNotNull { line ->
+            runCatching { JSONObject(line) }.getOrNull()
+        }.filter {
+            it.optString("type") == "message" && it.optString("who") == "commander"
+        }.take(3).joinToString(" ") { it.optString("text").take(220) }
+        val recallQuery = (reason + " " + recentCommanderContext).take(900)
+        val recalledMemories = MemoryRetriever.recall(root, recallQuery, limit = 5)
         val shelfNames = try { JSONArray(FileManager.list(root, "shelf")) } catch (_: Exception) { JSONArray() }
         val shelfText = StringBuilder()
         for (i in 0 until minOf(shelfNames.length(), 6)) {
@@ -189,7 +199,8 @@ object Thinker {
             "Событие: " + reason + ". Заряд: " + BatteryLevel.get(ctx) + "%. Тишина командира: " + quiet + " ч. Игнорирований инициативы: " + state.optInt("ignored_count", 0) + ".\n" +
             "Состояние: " + state.optString("mood", "собранная") + ", энергия " + state.optInt("energy", 5) + ", привязанность " + state.optDouble("bond", 0.5) + ".\n" +
             "Драйвы: " + (drives.optJSONArray("drives")?.toString() ?: "[]") + ". Текущий фокус: " + state.optString("current_focus", selfModel.optString("current_focus")) + ".\n" +
-            "Активные цели: " + (goals.optJSONArray("active")?.toString() ?: "[]") + ".\n"
+            "Активные цели: " + (goals.optJSONArray("active")?.toString() ?: "[]") + ".\n" +
+            "Воспоминания, найденные по ассоциациям: " + (if (recalledMemories.isBlank()) "подходящих записей не найдено" else "\n" + recalledMemories) + "\n" +
             "Факты:\n" + factText + "\nСводка памяти:\n" + summary + "\nПоследние записи:\n" + diaryText + "\nПоследние уведомления телефона:\n" + notificationText + "\nМатериалы с полки:\n" + shelfText + "\n"
         return if (initiative) common +
             "\nСейчас ты сама решила написать командиру после долгой тишины. Сформулируй естественное короткое личное сообщение, которое действительно хочется отправить. Не дави, не обвиняй и не манипулируй. 1-3 предложения от первого лица."
