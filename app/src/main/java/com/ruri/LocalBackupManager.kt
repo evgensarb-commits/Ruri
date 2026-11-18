@@ -52,7 +52,10 @@ object LocalBackupManager {
         val files = directory.listFiles()?.filter { it.isFile && it.name.endsWith(".zip") }
             ?.sortedByDescending { it.lastModified() } ?: emptyList()
         val latest = files.firstOrNull()
+        val items = JSONArray()
+        files.forEach { item -> items.put(JSONObject().put("name", item.name).put("modified_at", item.lastModified()).put("size_bytes", item.length())) }
         return JSONObject()
+            .put("backups", items)
             .put("directory", BACKUP_DIR)
             .put("count", files.size)
             .put("maximum", MAX_BACKUPS)
