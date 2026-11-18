@@ -1,4 +1,4 @@
-name: Build Ruri APK
+name: Build RU-R1 APK
 
 on:
   push:
@@ -6,16 +6,16 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ruri-main-build
+  group: ru-r1-main-build
   cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || 'ruri-temporary-store' }}
-      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || 'ruri-temporary-key' }}
-      KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'ruri' }}
+      RURI_SIGNING_STORE_PASSWORD: ${{ secrets.RURI_SIGNING_STORE_PASSWORD }}
+      RURI_SIGNING_KEY_PASSWORD: ${{ secrets.RURI_SIGNING_KEY_PASSWORD }}
+      RURI_SIGNING_ALIAS: ${{ secrets.RURI_SIGNING_ALIAS }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,16 +26,17 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Restore signing key
+      - name: Restore permanent signing key
         env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          RURI_SIGNING_KEYSTORE_BASE64: ${{ secrets.RURI_SIGNING_KEYSTORE_BASE64 }}
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 --decode > "$HOME/ruri.keystore"
-          else
-            echo "::warning::No persistent signing key is configured. This build uses a temporary keystore."
-            keytool -genkey -v -keystore "$HOME/ruri.keystore" -alias "$KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 10000 -storepass "$KEYSTORE_PASSWORD" -keypass "$KEY_PASSWORD" -dname "CN=Ruri, OU=Ruri, O=Ruri, L=Ruri, S=Ruri, C=RU"
-          fi
+          set -euo pipefail
+          test -n "$RURI_SIGNING_KEYSTORE_BASE64" || { echo "::error::Add RURI_SIGNING_KEYSTORE_BASE64 in GitHub Actions secrets."; exit 1; }
+          test -n "$RURI_SIGNING_STORE_PASSWORD" || { echo "::error::Add RURI_SIGNING_STORE_PASSWORD in GitHub Actions secrets."; exit 1; }
+          test -n "$RURI_SIGNING_KEY_PASSWORD" || { echo "::error::Add RURI_SIGNING_KEY_PASSWORD in GitHub Actions secrets."; exit 1; }
+          test -n "$RURI_SIGNING_ALIAS" || { echo "::error::Add RURI_SIGNING_ALIAS in GitHub Actions secrets."; exit 1; }
+          echo "$RURI_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$HOME/ruri.keystore"
+          keytool -list -keystore "$HOME/ruri.keystore" -storepass "$RURI_SIGNING_STORE_PASSWORD" -alias "$RURI_SIGNING_ALIAS" > /dev/null
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -51,7 +52,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ruri-debug-apk
+          name: ru-r1-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
