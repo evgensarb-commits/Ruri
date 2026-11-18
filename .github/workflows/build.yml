@@ -43,21 +43,20 @@ jobs:
       - name: Restore and verify permanent signing key
         run: |
           set -euo pipefail
-          for name in RURI_SIGNING_STORE_PASSWORD RURI_SIGNING_KEY_PASSWORD RURI_SIGNING_ALIAS; do
-            if [ -z "${!name:-}" ]; then
-              echo "::error::Missing required GitHub Actions secret for $name"
-              exit 1
-            fi
-          done
-
-          test -s signing/ruri-signing.keystore.b64
-          base64 --decode signing/ruri-signing.keystore.b64 > "$HOME/ruri.keystore"
-          keytool -list \
-            -keystore "$HOME/ruri.keystore" \
-            -storepass "$RURI_SIGNING_STORE_PASSWORD" \
-            -alias "$RURI_SIGNING_ALIAS" > /dev/null
-
-          echo "Permanent RU-R1 signing keystore was restored and alias verified."
+          [ -n "$RURI_SIGNING_STORE_PASSWORD" ] || { echo "::error::KEYSTORE_PASSWORD secret is empty"; exit 1; }
+          [ -n "$RURI_SIGNING_KEY_PASSWORD" ] || { echo "::error::KEY_PASSWORD secret is empty"; exit 1; }
+          [ -n "$RURI_SIGNING_ALIAS" ] || { echo "::error::KEY_ALIAS secret is empty"; exit 1; }
+          [ -s signing/ruri-signing.keystore.b64 ] || { echo "::error::Keystore base64 file is missing or empty"; exit 1; }
+          if ! base64 --decode signing/ruri-signing.keystore.b64 > "$HOME/ruri.keystore"; then
+            echo "::error::Could not decode the keystore file"
+            exit 1
+          fi
+          if ! keytool -list -keystore "$HOME/ruri.keystore" -storepass "$RURI_SIGNING_STORE_PASSWORD" -alias "$RURI_SIGNING_ALIAS" > "$HOME/keystore-check.txt" 2>&1; then
+            echo "::error::Keystore verification failed. Check KEYSTORE_PASSWORD and KEY_ALIAS against the stored keystore."
+            cat "$HOME/keystore-check.txt"
+            exit 1
+          fi
+          echo "Permanent RU-R1 signing keystore restored and alias verified."
 
       - name: Assemble signed APK
         run: gradle --no-daemon assembleDebug
