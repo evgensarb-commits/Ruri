@@ -42,7 +42,7 @@ button.secondary{background:transparent;color:#f4c94f}
 <section class="pane" id="pane-diary"><div class="scroll"><h2 class="section">ДНЕВНИК <span>Рури</span></h2><div id="diary"></div></div></section>
 <section class="pane" id="pane-brain"><div class="scroll">
 <h2 class="section">МОЗГ <span>и личность</span></h2>
-<div class="card"><p>Ключи хранятся в локальном файле приложения core/config.json. Рури сначала обращается к выбранной модели, затем пробует остальные настроенные модели.</p></div>
+<div class="card"><p>API-ключи шифруются с помощью Android Keystore и не включаются в обычный экспорт памяти. В core/config.json остаются только настройки моделей. Рури сначала обращается к выбранной модели, затем пробует остальные настроенные модели.</p></div>
 <div class="field"><label>МОДЕЛЬ</label><select id="model"><option value="0">Gemini</option><option value="1">Groq</option></select></div>
 <div class="field"><label>API KEY</label><input id="key" type="password" autocomplete="off" placeholder="Вставь ключ модели"></div>
 <button class="action" id="saveKey">СОХРАНИТЬ КЛЮЧ</button>
