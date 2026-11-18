@@ -116,7 +116,7 @@ object MemoryConsolidator {
         val safeDiary = JSONArray()
         sourceEntries.forEach { entry ->
             val rawText = entry.optString("text")
-            val safeText = rawText.take(1000)
+            val safeText = SecretRedactor.redactText(rawText).take(1000)
             safeDiary.put(
                 JSONObject()
                     .put("sequence", entry.optLong("sequence", 0L))
@@ -130,8 +130,8 @@ object MemoryConsolidator {
         val safeFacts = JSONArray()
         for (index in 0 until minOf(facts.length(), 80)) {
             val fact = facts.optJSONObject(index) ?: continue
-            val text = fact.optString("text")
-            if (text.isBlank()) continue
+            val text = SecretRedactor.redactText(fact.optString("text"))
+            if (text.isBlank() || text.contains(SecretRedactor.PLACEHOLDER)) continue
             safeFacts.put(
                 JSONObject()
                     .put("id", fact.optString("id"))
@@ -142,10 +142,12 @@ object MemoryConsolidator {
             )
         }
 
-        val prompt = buildPrompt(current.optString("summary"), safeFacts, safeDiary) +
-            if (batch.skippedBeforeBatch > 0L) {
-                "\n\nВажно для точности автобиографии: до первой доступной записи этой пачки в rolling-окне дневника отсутствует ${batch.skippedBeforeBatch} более ранних записей. Не выдумывай их содержание; явно сохрани факт этого пробела."
-            } else ""
+        val prompt = SecretRedactor.redactText(
+            buildPrompt(current.optString("summary"), safeFacts, safeDiary) +
+                if (batch.skippedBeforeBatch > 0L) {
+                    "\n\nВажно для точности автобиографии: до первой доступной записи этой пачки в rolling-окне дневника отсутствует ${batch.skippedBeforeBatch} более ранних записей. Не выдумывай их содержание; явно сохрани факт этого пробела."
+                } else ""
+        )
         val modelResult = if (BatteryLevel.get(context) > 12) requestBestModel(root, prompt) else null
         val summaryText: String
         val sections: JSONObject
@@ -153,8 +155,12 @@ object MemoryConsolidator {
         val modelName: String
 
         if (modelResult != null && modelResult.first.optString("summary").isNotBlank()) {
-            summaryText = modelResult.first.optString("summary").trim().take(9000)
-            sections = modelResult.first.optJSONObject("sections") ?: JSONObject()
+            summaryText = SecretRedactor.redactText(
+                modelResult.first.optString("summary").trim()
+            ).take(9000)
+            sections = SecretRedactor.redactEvent(
+                modelResult.first.optJSONObject("sections") ?: JSONObject()
+            )
             method = "semantic_llm"
             modelName = modelResult.second
         } else {
@@ -236,7 +242,8 @@ object MemoryConsolidator {
             изменения характера и отношений, открытые вопросы и незавершённые темы.
             Не выдумывай события, эмоции, договорённости или выводы. Отделяй факт от интерпретации.
             Если сведения противоречат прежней сводке, отмечай неопределённость вместо выдуманного разрешения.
-            Разрешённые Командиром личные сведения сохраняй, если они важны для будущего контекста.
+            Личный контекст (предпочтения, проекты, отношения) сохраняй, если он важен для будущей памяти.
+            Никогда не включай в сводку пароли, коды подтверждения и доступа, токены, ключи или номера карт.
             Верни только JSON:
             {"summary":"связный компактный текст","sections":{"commander_context":[],"ongoing_projects":[],"stable_preferences":[],"important_events":[],"relationship_context":"","open_questions":[],"uncertainties":[]}}
             Предыдущая сводка:
@@ -252,12 +259,13 @@ object MemoryConsolidator {
         val config = try { JSONObject(SecretStore.readRuntimeConfig(root)) } catch (_: Exception) { return null }
         val models = config.optJSONArray("models") ?: return null
         if (models.length() == 0) return null
-        val current = config.optInt("current", 0).coerceIn(0, models.length() - 1)
-        val order = (0 until models.length()).sortedBy { if (it == current) 0 else 1 }
+        val current = config.optInt("current", 0)
+        val order = FreeModelRouter.orderedIndices(models, current, requireNsfw = false)
         for (index in order) {
             val model = models.optJSONObject(index) ?: continue
-            if (model.optString("api_key").isBlank()) continue
-            val response = request(model, prompt) ?: continue
+            val key = model.optString("api_key")
+            if (key.isBlank() && !model.optBoolean("allow_anonymous", false)) continue
+            val response = request(model, SecretRedactor.redactText(prompt)) ?: continue
             val parsed = parseJson(response) ?: continue
             if (parsed.optString("summary").isNotBlank()) {
                 val name = model.optString("name", model.optString("id", "model"))
@@ -278,7 +286,8 @@ object MemoryConsolidator {
                 readTimeout = 25000
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json")
-                setRequestProperty("Authorization", "Bearer " + model.optString("api_key"))
+                val key = model.optString("api_key")
+                if (key.isNotBlank()) setRequestProperty("Authorization", "Bearer " + key)
             }
             val body = JSONObject()
                 .put("model", model.optString("model"))
