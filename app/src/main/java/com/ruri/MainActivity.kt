@@ -158,7 +158,7 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun verifyAutomaticBackup(fileName: String): String {
-            val safeName = fileName.takeIf { it.matches(Regex("ruri_auto_[0-9]{8}_[0-9]{6}_[0-9]+\\\\.zip")) }
+            val safeName = fileName.takeIf { it.matches(Regex("ruri_auto_[0-9]{8}_[0-9]{6}_[0-9]+\\.zip")) }
                 ?: return JSONObject().put("valid", false).put("error", "Invalid backup name").toString()
             val result = LocalBackupManager.verify(File(File(filesDir, "backup/automatic"), safeName))
             return JSONObject().put("valid", result.valid).put("error", result.error)
