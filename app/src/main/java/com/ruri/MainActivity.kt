@@ -33,6 +33,7 @@ class MainActivity : AppCompatActivity() {
         web.settings.domStorageEnabled = true
         web.settings.allowFileAccess = true
         web.settings.allowContentAccess = true
+        web.settings.allowUniversalAccessFromFileURLs = true
         web.webViewClient = WebViewClient()
         web.addJavascriptInterface(Bridge(), "Ruri")
 
