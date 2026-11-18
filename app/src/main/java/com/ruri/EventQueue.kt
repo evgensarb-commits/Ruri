@@ -26,6 +26,7 @@ object EventQueue {
             val existing = pending.optJSONObject(index) ?: continue
             if (existing.optString("reason") == normalizedReason) {
                 existing.put("occurrences", existing.optInt("occurrences", 1) + 1)
+                existing.put("revision", existing.optLong("revision", 0L) + 1L)
                 existing.put("updated_at", System.currentTimeMillis())
                 state.put("pending", pending)
                 state.put("updated_at", System.currentTimeMillis())
@@ -41,6 +42,7 @@ object EventQueue {
                 .put("reason", normalizedReason)
                 .put("created_at", System.currentTimeMillis())
                 .put("updated_at", System.currentTimeMillis())
+                .put("revision", 1L)
                 .put("occurrences", 1)
         )
         state.put("schema_version", 1)
@@ -60,7 +62,7 @@ object EventQueue {
     fun acknowledge(root: File, processed: List<JSONObject>) = synchronized(lock) {
         if (processed.isEmpty()) return@synchronized
         val revisions = processed.associate {
-            it.optString("id") to it.optLong("updated_at", it.optLong("created_at", 0L))
+            it.optString("id") to it.optLong("revision", it.optLong("updated_at", it.optLong("created_at", 0L)))
         }
         val state = readState(root)
         val pending = state.optJSONArray("pending") ?: JSONArray()
@@ -69,7 +71,7 @@ object EventQueue {
             val item = pending.optJSONObject(index) ?: continue
             val id = item.optString("id")
             val processedRevision = revisions[id]
-            val currentRevision = item.optLong("updated_at", item.optLong("created_at", 0L))
+            val currentRevision = item.optLong("revision", item.optLong("updated_at", item.optLong("created_at", 0L)))
             // Keep the queue item if another same-kind event arrived during cognition.
             if (processedRevision == null || processedRevision != currentRevision) remaining.put(item)
         }
