@@ -56,6 +56,8 @@ class RuriLifeWorker(
         val root = appContext.filesDir
         return try {
             FileManager.init(root)
+            try { LocalBackupManager.createIfDue(root) }
+            catch (backupError: Exception) { Log.e("Ruri", "Automatic local backup failed; life cycle will continue", backupError) }
             val pending = EventQueue.snapshot(root)
             val reason = if (pending.isEmpty()) {
                 "проверка_состояния"
