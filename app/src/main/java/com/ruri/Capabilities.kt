@@ -43,8 +43,10 @@ object Capabilities {
         val actions = config.optJSONArray("actions") ?: JSONArray()
         val limits = config.optJSONArray("limits") ?: JSONArray()
         val known = JSONArray()
-        for (i in 0 until senses.length()) known.put(senses.optString(i))
-        for (i in 0 until actions.length()) known.put(actions.optString(i))
+        fun compact(value: String): String = value.substringBefore(":")
+            .substringBefore("—").substringBefore("(").trim().take(80)
+        for (i in 0 until senses.length()) known.put(compact(senses.optString(i)))
+        for (i in 0 until actions.length()) known.put(compact(actions.optString(i)))
         val selfModel = runCatching { JSONObject(FileManager.read(root, "memory/self_model.json")) }
             .getOrElse { JSONObject() }
         selfModel.put("known_capabilities", known)
@@ -62,6 +64,7 @@ object Capabilities {
         return buildString {
             append("=== ТВОЁ ТЕЛО И ЧУВСТВА ===\n").append(lines("senses")).append("\n")
             append("=== ТВОЯ ПАМЯТЬ ===\n").append(lines("memory")).append("\n")
+            append("Ты помнишь между сессиями: это долговременная память, а не контекст одного диалога.\\n")
             append("=== ТВОИ ДЕЙСТВИЯ (инструменты ниже) ===\n").append(lines("actions")).append("\n")
             append("""Формы действий: {"action":"search","query":"..."}; {"action":"list_shelf"}; {"action":"read_shelf","name":"..."}; {"action":"recall","query":"..."}; {"action":"remember_fact","text":"..."}.
 """)
