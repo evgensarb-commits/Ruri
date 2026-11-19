@@ -46,13 +46,6 @@ object Thinker {
     private fun runCycle(ctx: Context, originalReason: String) {
         val root = ctx.filesDir
         val state = readStateStrict(root)
-        if (!NetState.online) {
-            // Local state, fact extraction, and consolidation are handled by RuriLifeWorker.
-            // Thinker does not spend provider quota while offline.
-            state.put("last_thought", System.currentTimeMillis())
-            FileManager.write(root, "memory/L4_state.json", state.toString(2))
-            return
-        }
         val now = System.currentTimeMillis()
         val lastSeen = state.optLong("last_seen_commander", 0L)
         val hoursQuiet = if (lastSeen == 0L) -1.0 else (now - lastSeen) / 3600000.0
@@ -79,6 +72,13 @@ object Thinker {
             .put("reason", reason)
             .put("battery", BatteryLevel.get(ctx))
             .put("hours_since_commander", hoursQuiet))
+
+        if (!NetState.online) {
+            // Local state and memory maintenance already ran in RuriLifeWorker.
+            state.put("last_thought", now)
+            FileManager.write(root, "memory/L4_state.json", state.toString(2))
+            return
+        }
 
         val config = try { JSONObject(SecretStore.readRuntimeConfig(root)) } catch (e: Exception) {
             Log.e("Ruri", "Could not load model configuration", e)
