@@ -195,10 +195,12 @@ object FileManager {
         """.trimIndent())
 
         migrateCharacterIdentity(root)
+        // Import every legacy key before route pruning so removing Kilo/minimal routes
+        // never discards credentials from the encrypted SecretStore.
+        SecretStore.migrateLegacyApiKeys(root)
         migrateModelConfig(root)
         migrateGoalSchema(root)
         ensureRemoteModelContextPolicy(root)
-        SecretStore.migrateLegacyApiKeys(root)
 
         Capabilities.ensure(root)
 
