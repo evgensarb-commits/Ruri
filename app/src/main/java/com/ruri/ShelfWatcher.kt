@@ -16,7 +16,7 @@ object ShelfWatcher {
         val app = ctx.applicationContext
         val dir = File(app.filesDir, "shelf").apply { mkdirs() }
         stop()
-        observer = object : FileObserver(dir, CLOSE_WRITE or MOVED_TO) {
+        observer = object : FileObserver(dir, FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO) {
             override fun onEvent(event: Int, path: String?) {
                 if (path != null) markAdded(app, path)
             }
