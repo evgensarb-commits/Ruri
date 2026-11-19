@@ -113,6 +113,8 @@ class KiloRemovedTest : BodyHandsTestBase() {
         }
         assertFalse(config.toString().contains("kilo-auto"))
         assertTrue(config.optBoolean("free_only"))
+        assertTrue(FreeModelRouter.orderedIndices(models, config.optInt("current", 0))
+            .all { !models.getJSONObject(it).optBoolean("minimal_context", false) })
     }
 
     @Test fun emptyRouteSetQueuesReplyInsteadOfSendingAmnesicRequest() {
@@ -120,7 +122,8 @@ class KiloRemovedTest : BodyHandsTestBase() {
         FileManager.write(root, "core/config.json", JSONObject()
             .put("models", JSONArray()).put("current", 0).put("free_only", true).toString())
         FileManager.write(root, "memory/L4_state.json", JSONObject().toString())
-        runCatching { ChatEngine.respond(root) }
+        val outcome = runCatching { ChatEngine.respond(root) }
+        assertTrue(outcome.isSuccess || outcome.exceptionOrNull()?.message.orEmpty().contains("маршрутов"))
         assertTrue(OfflineQueue.hasPending(root))
     }
 }
