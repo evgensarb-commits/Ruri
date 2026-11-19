@@ -69,6 +69,26 @@ class RouteMetaTest {
     }
 
     @Test
+    fun cheapHeartbeatIsThrottledToTwentyMinutes() {
+        val root = Files.createTempDirectory("ruri-heartbeat-rate").toFile()
+        try {
+            val config = org.json.JSONObject().put("models", org.json.JSONArray())
+            val first = System.currentTimeMillis()
+            Probe.heartbeat(root, config, first)
+            assertEquals(first, RouteMeta.route(root, "_global").optLong("last_heartbeat_at"))
+
+            Probe.heartbeat(root, config, first + 19L * 60L * 1000L)
+            assertEquals(first, RouteMeta.route(root, "_global").optLong("last_heartbeat_at"))
+
+            val next = first + Probe.HEARTBEAT_MS + 1L
+            Probe.heartbeat(root, config, next)
+            assertEquals(next, RouteMeta.route(root, "_global").optLong("last_heartbeat_at"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun twoOrdinaryFailuresApplyCooldownAndQuotaFailureBlocksUntilUtcMidnight() {
         val root = Files.createTempDirectory("ruri-route-cooldown").toFile()
         try {
