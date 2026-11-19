@@ -8,6 +8,21 @@ import org.junit.Test
 
 class OfflineQueueTest {
     @Test
+    fun offlineChatReturnsTransientAndDoesNotAppendItToL0() {
+        val root = Files.createTempDirectory("ruri-offline-chat").toFile()
+        try {
+            FileManager.write(root, "memory/L4_state.json", JSONObject().put("mood", "собранная").toString())
+            val response = ChatEngine.respond(root)
+
+            assertEquals(ChatEngine.OFFLINE_REPLY, response)
+            assertTrue(OfflineQueue.hasPending(root))
+            assertFalse(FileManager.exists(root, "memory/L0_raw.jsonl"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun pendingReplySurvivesUntilARealReplyIsStored() {
         val root = Files.createTempDirectory("ruri-offline-queue").toFile()
         try {
