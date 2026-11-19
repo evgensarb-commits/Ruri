@@ -121,7 +121,8 @@ object RouteMeta {
         var claimed = false
         update(root, id) {
             val last = it.optLong("last_full_probe_at", 0L)
-            if (force || now - last >= Probe.FULL_PROBE_MS) {
+            val allowed = if (force) now - last >= 60_000L else now - last >= Probe.FULL_PROBE_MS
+            if (allowed) {
                 it.put("last_full_probe_at", now)
                 claimed = true
             }

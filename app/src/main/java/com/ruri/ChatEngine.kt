@@ -19,8 +19,19 @@ object ChatEngine {
     private fun respondInternal(root: File, allowRecovery: Boolean, assumeReachable: Boolean = false): String {
         val config = JSONObject(SecretStore.readRuntimeConfig(root))
         val models = config.optJSONArray("models") ?: JSONArray()
-        if (models.length() == 0) throw IllegalStateException("Список моделей пуст")
         val current = config.optInt("current", -1)
+        if (!NetState.online && !assumeReachable) {
+            if (allowRecovery && Probe.claimRecoveryRefresh()) {
+                Probe.refreshReachability(root, models, topOnly = false, force = true)
+            }
+            val reachableOrder = RouteSelector.ordered(
+                root, models, current, Task.CHAT, needNsfw = false, online = true, vpn = NetState.vpn
+            )
+            if (reachableOrder.isNotEmpty()) return respondInternal(root, allowRecovery = false, assumeReachable = true)
+            OfflineQueue.markPending(root)
+            return OFFLINE_REPLY
+        }
+        if (models.length() == 0) throw IllegalStateException("Список моделей пуст")
         // Capability probes run at most once per day per free route; do not NSFW-gate ordinary chat.
         RouteCapabilityProbe.refreshIfDue(root, config)
         // Retry transient failures only. HTTP 429 hands off immediately to the next free route.
