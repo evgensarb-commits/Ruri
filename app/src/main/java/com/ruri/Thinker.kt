@@ -46,6 +46,13 @@ object Thinker {
     private fun runCycle(ctx: Context, originalReason: String) {
         val root = ctx.filesDir
         val state = readStateStrict(root)
+        if (!NetState.online) {
+            // Local state, fact extraction, and consolidation are handled by RuriLifeWorker.
+            // Thinker does not spend provider quota while offline.
+            state.put("last_thought", System.currentTimeMillis())
+            FileManager.write(root, "memory/L4_state.json", state.toString(2))
+            return
+        }
         val now = System.currentTimeMillis()
         val lastSeen = state.optLong("last_seen_commander", 0L)
         val hoursQuiet = if (lastSeen == 0L) -1.0 else (now - lastSeen) / 3600000.0
@@ -87,7 +94,11 @@ object Thinker {
         RouteCapabilityProbe.refreshIfDue(root, config)
         val prompt = buildPrompt(ctx, root, state, reason, initiative)
         val current = config.optInt("current", 0)
-        val order = FreeModelRouter.orderedIndices(models, current, requireNsfw = initiative)
+        val task = if (initiative) Task.WARMTH else Task.REASON
+        val requireNsfw = initiative && RouteSelector.nsfwWindow(root)
+        val order = FreeModelRouter.orderedIndices(
+            root, models, current, requireNsfw = requireNsfw, task = task
+        )
         if (order.isEmpty()) {
             state.put("last_thought", now)
             FileManager.write(root, "memory/L4_state.json", state.toString(2))
@@ -98,17 +109,25 @@ object Thinker {
         for (index in order) {
             val model = models.optJSONObject(index) ?: continue
             if (model.optString("api_key").isBlank() && !model.optBoolean("allow_anonymous", false)) continue
+            val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
+            runCatching { RouteMeta.recordAttempt(root, routeId) }
             reply = requestModel(model, prompt)
             if (!reply.isNullOrBlank() && initiative &&
                 RouteCapabilityProbe.looksLikeRefusalOrDisclaimer(reply)) {
                 RouteCapabilityProbe.markNotCapable(root, config, index, "initiative_refusal_or_disclaimer")
+                runCatching { RouteMeta.recordFailure(root, routeId, "refusal", task) }
                 appendEvent(root, "model_route_rejected", JSONObject()
                     .put("model", model.optString("id"))
                     .put("reason", "initiative_refusal_or_disclaimer"))
                 reply = null
                 continue
             }
-            if (!reply.isNullOrBlank()) { successfulIndex = index; break }
+            if (!reply.isNullOrBlank()) {
+                runCatching { RouteMeta.recordSuccess(root, routeId, task) }
+                successfulIndex = index
+                break
+            }
+            runCatching { RouteMeta.recordFailure(root, routeId, "other", task) }
             appendEvent(root, "model_error", JSONObject().put("model", model.optString("name", "unknown")))
         }
 
