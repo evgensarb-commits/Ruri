@@ -397,7 +397,7 @@ object ChatEngine {
 
     internal fun parseAction(reply: String): JSONObject? {
         val trimmed = reply.trim()
-        val fenced = Regex("(?is)^```(?:json)?\\s*(\\{.*})\\s*```$").find(trimmed)
+        val fenced = Regex("(?is)^```(?:json)?\\s*(\\{.*\\})\\s*```$").find(trimmed)
         val jsonText = fenced?.groupValues?.get(1) ?: trimmed.takeIf { it.startsWith("{") && it.endsWith("}") }
             ?: return null
         val action = runCatching { JSONObject(jsonText) }.getOrNull() ?: return null
