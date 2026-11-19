@@ -14,11 +14,15 @@ class DiagnosticsTest {
         try {
             FileManager.write(root, "memory/L4_state.json", JSONObject().put("pending_reply", true).toString())
             FileManager.write(root, "memory/L0_raw.jsonl", "{\"type\":\"message\"}\n")
+            val now = System.currentTimeMillis()
+            val utcDay = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.format(java.util.Date(now))
             FileManager.write(root, RouteMeta.PATH, JSONObject().put(
                 "routeway", JSONObject()
                     .put("reachable", false)
                     .put("needs_vpn", true)
-                    .put("day_key", "2026-11-19")
+                    .put("day_key", utcDay)
                     .put("day_count", 12)
                     .put("caps", JSONObject().put("nsfw", true))
                     .put("scores", JSONObject().put("CHAT", 0.9))
@@ -36,7 +40,7 @@ class DiagnosticsTest {
                     .put("nsfw_probe_status", "passed")
             )).toString()
 
-            val output = Diagnostics.collect(root, config, online = false, vpn = true, now = 1_795_000_000_000L)
+            val output = Diagnostics.collect(root, config, online = false, vpn = true, now = now)
             val snapshot = JSONObject(output)
             val route = snapshot.getJSONObject("routes").getJSONObject("routeway")
 
