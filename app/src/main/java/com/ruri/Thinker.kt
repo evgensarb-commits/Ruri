@@ -116,7 +116,14 @@ object Thinker {
             if (model.optString("api_key").isBlank()) continue
             val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
             runCatching { RouteMeta.recordAttempt(root, routeId) }
-            reply = requestModel(model, prompt)
+            val messages = JSONArray()
+                .put(JSONObject().put("role", "system").put("content", prompt))
+                .put(JSONObject().put("role", "user").put("content",
+                    if (initiative) "Напиши сообщение Командиру обычной прозой." else "Напиши внутреннюю мысль для дневника обычной прозой."))
+            val initial = requestModel(model, messages)
+            reply = if (initial.isNullOrBlank()) null else ToolLoop.unwrapDiaryReply(root, initial, messages) { next ->
+                requestModel(model, next)
+            }
             if (!reply.isNullOrBlank() && initiative &&
                 RouteCapabilityProbe.looksLikeRefusalOrDisclaimer(reply)) {
                 RouteCapabilityProbe.markNotCapable(root, config, index, "initiative_refusal_or_disclaimer")
@@ -146,6 +153,11 @@ object Thinker {
             SecretStore.saveRuntimeConfig(root, config.toString(2))
         }
         val safeReply = SecretRedactor.redactText(reply.trim())
+        if (safeReply.isBlank() || safeReply.startsWith("{") || runCatching { JSONObject(safeReply).has("action") }.getOrDefault(false)) {
+            state.put("last_thought", now)
+            FileManager.write(root, "memory/L4_state.json", state.toString(2))
+            return
+        }
 
         val diary = readJson(root, "memory/L2_diary.json")
         val entries = diary.optJSONArray("entries") ?: JSONArray()
@@ -278,7 +290,7 @@ object Thinker {
         return SecretRedactor.redactText(prompt)
     }
 
-    private fun requestModel(model: JSONObject, prompt: String): String? {
+    private fun requestModel(model: JSONObject, messages: JSONArray): String? {
         var connection: HttpURLConnection? = null
         return try {
             val baseUrl = model.optString("base_url").trimEnd('/')
@@ -294,7 +306,7 @@ object Thinker {
             }
             val body = JSONObject()
                 .put("model", model.optString("model"))
-                .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt)))
+                .put("messages", messages)
                 .put("temperature", 0.85)
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
