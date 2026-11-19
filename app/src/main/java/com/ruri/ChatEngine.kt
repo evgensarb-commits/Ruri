@@ -61,6 +61,17 @@ object ChatEngine {
                     event.optString("text")
             } catch (_: Exception) { null }
         }.take(10).asReversed().joinToString("\n")
+        val bodyEventContext = FileManager.readLastLines(
+            root, "memory/L0_raw.jsonl", maxLines = 1200, maxBytes = 1024 * 1024
+        ).asReversed().mapNotNull { line ->
+            runCatching {
+                val event = JSONObject(line)
+                val type = event.optString("type")
+                if (type.isBlank() || type == "message" || type == "phone_notification" ||
+                    type == "tool_call" || type == "tool_result") null
+                else "- $type: " + (event.optString("text").ifBlank { event.optString("reason") }).take(260)
+            }.getOrNull()
+        }.take(12).asReversed().joinToString("\n")
         val bannedPhrases = character.optJSONArray("banned_phrases") ?: JSONArray()
         val system = "Имя: ${character.optString("name")}; обозначение: ${character.optString("designation")}. " +
             "Личность: ${character.optString("persona")}. " +
@@ -81,7 +92,7 @@ object ChatEngine {
             "ТВОЯ АВТОБИОГРАФИЯ (L3):\n${summary}\n" +
             "ТВОИ ФАКТЫ (L1):\n${factContext}\n" +
             "ТВОЙ ДНЕВНИК (L2):\n${diaryContext}\n" +
-            "ПОСЛЕДНИЕ СОБЫТИЯ ТВОЕГО ТЕЛА (L0):\n${notificationContext}"
+            "ПОСЛЕДНИЕ СОБЫТИЯ ТВОЕГО ТЕЛА (L0):\n${bodyEventContext}\n${notificationContext}"
 
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", system))
         val lines = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 4000)
