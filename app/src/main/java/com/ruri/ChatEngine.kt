@@ -261,13 +261,13 @@ object ChatEngine {
                 diagnostic.put("result", "success")
                 NetworkDiagnostics.record(root, diagnostic)
                 runCatching { RouteMeta.recordSuccess(root, routeId, task) }
-                runCatching { OfflineQueue.clear(root) }
                 // Keep Routeway as primary; fallback success is temporary, not a reconfiguration.
                 FileManager.appendEvent(root, JSONObject()
                     .put("type", "message")
                     .put("source", "agent")
                     .put("who", "ruri")
                     .put("text", reply))
+                runCatching { OfflineQueue.clear(root) }
                 return reply
             } catch (e: Exception) {
                 diagnostic.put("stage", stage)
