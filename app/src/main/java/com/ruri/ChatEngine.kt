@@ -321,7 +321,7 @@ object ChatEngine {
                 NetworkDiagnostics.record(root, diagnostic)
                 runCatching { RouteMeta.recordSuccess(root, routeId, task) }
                 // Keep Routeway as primary; fallback success is temporary, not a reconfiguration.
-                appendFinalReply(root, reply)
+                appendFinalReply(root, reply, model.optString("name", model.optString("id", "маршрут")) )
                 runCatching { BackupPolicy.checkpointState(root) }
                 runCatching { OfflineQueue.clear(root) }
                 return reply
@@ -516,9 +516,17 @@ object ChatEngine {
         }
     }
 
-    internal fun appendFinalReply(root: File, reply: String) {
-        FileManager.appendEvent(root, JSONObject()
-            .put("type", "message").put("source", "agent").put("who", "ruri").put("text", reply))
+    internal fun appendFinalReply(root: File, reply: String, routeName: String = "маршрут") {
+        val saved = JSONObject(FileManager.appendEvent(root, JSONObject()
+            .put("type", "message").put("source", "agent").put("who", "ruri").put("text", reply)))
+        val badge = JSONObject()
+            .put("ts", saved.optLong("ts"))
+            .put("route", routeName)
+            .put("memory", "полная память")
+        val existing = FileManager.read(root, "memory/route_badges.jsonl")
+            .lineSequence().filter { it.isNotBlank() }.toMutableList()
+        existing.add(badge.toString())
+        FileManager.write(root, "memory/route_badges.jsonl", existing.takeLast(5000).joinToString("\n", postfix = "\n"))
     }
 
     private fun readJson(root: File, path: String): JSONObject =
