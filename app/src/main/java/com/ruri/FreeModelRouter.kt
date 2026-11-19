@@ -12,8 +12,7 @@ internal object FreeModelRouter {
     fun isFullMemoryRoute(model: org.json.JSONObject): Boolean =
         !isDisallowedMemoryRoute(model) &&
             model.optBoolean("free_tier", false) &&
-            model.optBoolean("enabled", true) &&
-            model.optString("api_key").isNotBlank()
+            model.optBoolean("enabled", true)
 
     fun orderedIndices(
         models: JSONArray,

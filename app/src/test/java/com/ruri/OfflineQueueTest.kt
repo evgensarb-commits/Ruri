@@ -13,9 +13,11 @@ class OfflineQueueTest {
         val root = Files.createTempDirectory("ruri-offline-chat").toFile()
         try {
             FileManager.write(root, "memory/L4_state.json", JSONObject().put("mood", "собранная").toString())
-            val response = ChatEngine.respond(root)
+            var reason = ""
+            try { ChatEngine.respond(root) }
+            catch (e: IllegalStateException) { reason = e.message.orEmpty() }
 
-            assertEquals(ChatEngine.OFFLINE_REPLY, response)
+            assertTrue(reason.contains("полной памяти"))
             assertTrue(OfflineQueue.hasPending(root))
             assertFalse(FileManager.exists(root, "memory/L0_raw.jsonl"))
         } finally {

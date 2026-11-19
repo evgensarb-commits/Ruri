@@ -487,7 +487,7 @@ object ChatEngine {
     }
 
     internal fun providerMessagesForRoute(messages: JSONArray, model: JSONObject): JSONArray {
-        require(FreeModelRouter.isFullMemoryRoute(model)) {
+        require(FreeModelRouter.isFullMemoryRoute(model) && model.optString("api_key").isNotBlank()) {
             "Маршрут без полной памяти запрещён"
         }
         val safe = JSONArray()

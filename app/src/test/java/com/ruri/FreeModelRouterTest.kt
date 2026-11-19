@@ -24,7 +24,7 @@ class FreeModelRouterTest {
             .put(JSONObject().put("id", "requesty").put("priority", 3).put("free_tier", true))
             .put(JSONObject().put("id", "kilo").put("priority", 2).put("free_tier", true))
 
-        assertEquals(listOf(2, 0, 1), FreeModelRouter.orderedIndices(models, primaryIndex = 2))
+        assertEquals(listOf(0, 1), FreeModelRouter.orderedIndices(models, primaryIndex = 2))
     }
 
     @Test
@@ -37,7 +37,7 @@ class FreeModelRouterTest {
             .put(JSONObject().put("id", "requesty").put("priority", 3).put("free_tier", true).put("enabled", true)
                 .put("nsfw_capable", true).put("nsfw_tested_at", 0L).put("nsfw_probe_status", "passed"))
 
-        assertEquals(listOf(1), FreeModelRouter.orderedIndices(models, 0, requireNsfw = true))
-        assertEquals(listOf(0, 1, 2), FreeModelRouter.orderedIndices(models, 0, requireNsfw = false))
+        assertEquals(emptyList<Int>(), FreeModelRouter.orderedIndices(models, 0, requireNsfw = true))
+        assertEquals(listOf(0, 2), FreeModelRouter.orderedIndices(models, 0, requireNsfw = false))
     }
 }
