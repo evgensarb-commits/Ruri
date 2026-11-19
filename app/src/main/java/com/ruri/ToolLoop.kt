@@ -26,10 +26,12 @@ object ToolLoop {
     ): String {
         var reply = initialReply
         var checks = 0
+        var toolLoopRun = false
         while (checks < 3) {
             val json = parseJsonAction(reply) ?: return reply.trim()
             val action = json.optString("action")
-            if (action in allowed && ChatEngine.parseAction(reply) != null) {
+            if (action in allowed && ChatEngine.parseAction(reply) != null && !toolLoopRun) {
+                toolLoopRun = true
                 reply = runToolLoop(root, reply, messages, requestNext)
             } else if (json.has("text") && json.opt("text") is String) {
                 return SecretRedactor.redactText(json.optString("text").trim())
