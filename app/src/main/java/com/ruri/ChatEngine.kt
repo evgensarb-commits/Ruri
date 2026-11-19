@@ -183,8 +183,7 @@ object ChatEngine {
             if (attempt > 1) Thread.sleep(if (attempt == 2) 2000L else 5000L)
             val model = models.optJSONObject(index) ?: continue
             val key = model.optString("api_key")
-            val anonymousAllowed = model.optBoolean("allow_anonymous", false)
-            if (key.isBlank() && !anonymousAllowed) {
+            if (key.isBlank()) {
                 lastError = "${model.optString("name", model.optString("id"))}: требуется бесплатный API-ключ"
                 continue
             }
@@ -196,17 +195,10 @@ object ChatEngine {
                 (!NetState.vpn && !routeMeta.optBoolean("ru_reachable", true))) {
                 continue
             }
-            val providerMessages = if (model.optBoolean("minimal_context", false)) {
-                // Kilo Auto Free may route through trial endpoints that log prompts.
-                // Send only the current turn and a short persona; never send memory/history/notifications.
-                JSONArray()
-                    .put(JSONObject().put("role", "system")
-                        .put("content", minimalSystemPrompt(character, state)))
-                    .put(JSONObject(history.last().toString()))
-            } else messages
+            // Every provider receives the same complete memory/history context.
             val safeProviderMessages = JSONArray()
-            for (messageIndex in 0 until providerMessages.length()) {
-                val message = providerMessages.optJSONObject(messageIndex) ?: continue
+            for (messageIndex in 0 until messages.length()) {
+                val message = messages.optJSONObject(messageIndex) ?: continue
                 safeProviderMessages.put(SecretRedactor.redactEvent(message))
             }
             hadNetworkAttempt = true
@@ -304,10 +296,8 @@ object ChatEngine {
                     allFailuresNetwork = false
                     continue
                 }
-                val reply = if (model.optBoolean("minimal_context", false)) initialReply else {
-                    runToolLoop(root, initialReply, messages, minimalContext = false) { nextMessages ->
-                        requestToolFollowup(model, nextMessages)
-                    }
+                val reply = runToolLoop(root, initialReply, messages) { nextMessages ->
+                    requestToolFollowup(model, nextMessages)
                 }
                 if (RouteCapabilityProbe.isAdultTopic(history.last().optString("content")) &&
                     RouteCapabilityProbe.looksLikeRefusalOrDisclaimer(reply)) {
@@ -358,21 +348,6 @@ object ChatEngine {
     }
 
 
-    internal fun minimalContextInstruction(): String = "Инструменты на этом маршруте отключены."
-
-    internal fun minimalSystemPrompt(character: JSONObject, state: JSONObject): String =
-        "Имя: ${character.optString("name")}; designation: ${character.optString("designation")}. " +
-            "Личность: ${character.optString("persona")}. " +
-            "Непрерывность: ${character.optString("continuity_rules")}. " +
-            "Правила речи: ${character.optString("speech_rules")}. " +
-            "Длина ответа: ${character.optString("length_policy")}. " +
-            "Эмоции: ${character.optString("emotions")}. " +
-            "Регуляторы: ${character.optJSONArray("regulators") ?: JSONArray()}. " +
-            "Запрещённые фразы: ${character.optJSONArray("banned_phrases") ?: JSONArray()}. " +
-            "Не выдавай несуществующие воспоминания за реальные. " +
-            "Текущее настроение: ${state.optString("mood", "собранная")}. " +
-            minimalContextInstruction()
-
     internal fun parseAction(reply: String): JSONObject? {
         val trimmed = reply.trim()
         val fenced = Regex("(?is)^```(?:json)?\\s*(\\{.*})\\s*```$").find(trimmed)
@@ -401,10 +376,8 @@ object ChatEngine {
         root: File,
         initialReply: String,
         messages: JSONArray,
-        minimalContext: Boolean = false,
         requestNext: (JSONArray) -> String?
     ): String {
-        if (minimalContext) return initialReply
         var reply = initialReply
         var hops = 0
         while (true) {
