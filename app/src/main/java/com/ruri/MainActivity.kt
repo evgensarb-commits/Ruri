@@ -28,6 +28,7 @@ import java.util.concurrent.Executors
 class MainActivity : AppCompatActivity() {
     private lateinit var web: WebView
     private val chatExecutor = Executors.newSingleThreadExecutor()
+    private val routeExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var importFileCallback: ValueCallback<Array<Uri>>? = null
     private val importFileRequestCode = 2002
@@ -45,7 +46,12 @@ class MainActivity : AppCompatActivity() {
         web.settings.allowFileAccess = true
         web.settings.allowContentAccess = true
         web.settings.allowUniversalAccessFromFileURLs = false
-        web.webViewClient = WebViewClient()
+        web.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                web.evaluateJavascript("window.startOnboarding && window.startOnboarding()", null)
+            }
+        }
         web.webChromeClient = object : WebChromeClient() {
             override fun onShowFileChooser(
                 view: WebView?,
@@ -78,7 +84,17 @@ class MainActivity : AppCompatActivity() {
         }
         web.addJavascriptInterface(Bridge(), "Ruri")
 
-        requestNotificationPermission()
+        NetState.refresh(this)
+        val onboardingDone = runCatching {
+            JSONObject(FileManager.read(filesDir, "memory/L4_state.json")).optBoolean("onboarding_done", false)
+        }.getOrDefault(false)
+        if (!onboardingDone) requestNotificationPermission()
+        routeExecutor.execute {
+            runCatching {
+                val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
+                Probe.refreshReachability(filesDir, config.optJSONArray("models") ?: org.json.JSONArray(), topOnly = false, force = true)
+            }.onFailure { android.util.Log.w("Ruri", "Activity startup route refresh failed", it) }
+        }
         try { LifeScheduler.ensurePeriodic(this) }
         catch (e: Exception) { android.util.Log.e("Ruri", "Could not schedule periodic life", e) }
         startRuriService()
@@ -107,6 +123,7 @@ class MainActivity : AppCompatActivity() {
         }
         if (::web.isInitialized) {
             try { Bridge().markCommanderSeen() } catch (_: Exception) {}
+            web.evaluateJavascript("window.refreshOnboarding && window.refreshOnboarding()", null)
         }
     }
 
@@ -135,6 +152,35 @@ class MainActivity : AppCompatActivity() {
     inner class Bridge {
         @JavascriptInterface
         fun getDiagnostics(): String = Diagnostics.run(this@MainActivity)
+
+        @JavascriptInterface
+        fun forceRefreshRoutes(): String {
+            routeExecutor.execute {
+                runCatching {
+                    NetState.refresh(applicationContext)
+                    val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
+                    val models = config.optJSONArray("models") ?: org.json.JSONArray()
+                    Probe.refreshReachability(filesDir, models, topOnly = false, force = true)
+                    RouteCapabilityProbe.refreshIfDue(filesDir, config, force = true)
+                    mainHandler.post { if (::web.isInitialized) web.evaluateJavascript("window.refreshRouteCards && window.refreshRouteCards()", null) }
+                }.onFailure { android.util.Log.w("Ruri", "Manual route refresh failed", it) }
+            }
+            return "OK"
+        }
+
+        @JavascriptInterface
+        fun hasPostNotificationsPermission(): Boolean = Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+        @JavascriptInterface
+        fun requestPostNotificationsPermission(): String {
+            return try { requestNotificationPermission(); "OK" }
+            catch (e: Exception) { "ERROR: " + (e.message ?: "permission request failed") }
+        }
+
+        @JavascriptInterface
+        fun hasNotificationAccess(): Boolean =
+            (Settings.Secure.getString(contentResolver, "enabled_notification_listeners") ?: "").contains(packageName)
 
         @JavascriptInterface
         fun saveShelfFile(name: String, base64: String): String {

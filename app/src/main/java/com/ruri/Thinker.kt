@@ -112,15 +112,11 @@ object Thinker {
         var successfulIndex = -1
         for (index in order) {
             val model = models.optJSONObject(index) ?: continue
-            // Never send private memory, notifications or shelf context to minimal-context routes.
-            if (shouldSkipMinimalContextRoute(model)) continue
-            if (model.optString("api_key").isBlank() && !model.optBoolean("allow_anonymous", false)) continue
+            // All cognition routes must carry the full memory context.
+            if (model.optString("api_key").isBlank()) continue
             val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
             runCatching { RouteMeta.recordAttempt(root, routeId) }
-            val providerPrompt = if (model.optBoolean("minimal_context", false)) {
-                buildMinimalPrompt(root, state, initiative)
-            } else prompt
-            reply = requestModel(model, providerPrompt)
+            reply = requestModel(model, prompt)
             if (!reply.isNullOrBlank() && initiative &&
                 RouteCapabilityProbe.looksLikeRefusalOrDisclaimer(reply)) {
                 RouteCapabilityProbe.markNotCapable(root, config, index, "initiative_refusal_or_disclaimer")
@@ -180,8 +176,6 @@ object Thinker {
         FileManager.write(root, "memory/L4_state.json", state.toString(2))
         Notifier.thought(ctx, safeReply)
     }
-
-    internal fun shouldSkipMinimalContextRoute(model: JSONObject): Boolean = model.optBoolean("minimal_context", false)
 
     private fun buildPrompt(ctx: Context, root: File, state: JSONObject, reason: String, initiative: Boolean): String {
         val character = readJson(root, "core/character.json")
@@ -282,27 +276,6 @@ object Thinker {
         else common +
             "\nНапиши запись в дневник от первого лица, по-русски. Это внутренняя мысль, наблюдение или вывод, а не обращение к Командиру. Объём выбери по length_policy. Не выдумывай события."
         return SecretRedactor.redactText(prompt)
-    }
-
-    /** Kilo's anonymous/minimal route receives the same character profile, never private memory. */
-    private fun buildMinimalPrompt(root: File, state: JSONObject, initiative: Boolean): String {
-        val character = readJson(root, "core/character.json")
-        val common = "Имя: " + character.optString("name") +
-            ". Обозначение: " + character.optString("designation") +
-            ". Личность: " + character.optString("persona") +
-            ". Непрерывность: " + character.optString("continuity_rules") +
-            ". Правила речи: " + character.optString("speech_rules") +
-            ". Длина ответа: " + character.optString("length_policy") +
-            ". Эмоции: " + character.optString("emotions") +
-            ". Регуляторы: " + (character.optJSONArray("regulators")?.toString() ?: "[]") +
-            ". Запрещённые фразы: " + (character.optJSONArray("banned_phrases")?.toString() ?: "[]") +
-            ". Текущее настроение: " + state.optString("mood", "собранная") + ".\n"
-        val instruction = if (initiative) {
-            "Напиши Командиру личное сообщение после долгой тишины. Объём выбери по length_policy и настроению."
-        } else {
-            "Напиши внутреннюю запись в дневник от первого лица. Объём выбери по length_policy. Не выдумывай события."
-        }
-        return SecretRedactor.redactText(common + instruction)
     }
 
     private fun requestModel(model: JSONObject, prompt: String): String? {

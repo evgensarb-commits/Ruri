@@ -10,6 +10,7 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -70,19 +71,57 @@ object SecretStore {
         Unit
     }
 
+    internal fun legacyKeys(config: JSONObject): JSONObject {
+        val imported = JSONObject()
+        val models = config.optJSONArray("models") ?: JSONArray()
+        for (i in 0 until models.length()) {
+            val model = models.optJSONObject(i) ?: continue
+            val key = model.optString("api_key")
+            if (key.isNotBlank()) imported.put(modelId(model, i), key)
+        }
+        val topLevelKey = config.optString("api_key")
+        if (topLevelKey.isNotBlank()) {
+            val current = config.optInt("current", -1)
+            val currentModel = models.optJSONObject(current)
+            val targetId = currentModel?.let { modelId(it, current) } ?: "routeway"
+            if (!imported.has(targetId)) imported.put(targetId, topLevelKey)
+        }
+        return imported
+    }
+
+    internal fun mergeSecretMaps(existing: JSONObject, imported: JSONObject): JSONObject {
+        val merged = JSONObject(existing.toString())
+        val keys = imported.keys()
+        while (keys.hasNext()) {
+            val id = keys.next()
+            if (merged.optString(id).isBlank() && imported.optString(id).isNotBlank()) {
+                merged.put(id, imported.getString(id))
+            }
+        }
+        return merged
+    }
+
     fun migrateLegacyApiKeys(root: File) = synchronized(lock) {
         val raw = FileManager.read(root, CONFIG_FILE)
         if (raw.isBlank()) return@synchronized
         try {
             val config = JSONObject(raw)
-            val models = config.optJSONArray("models") ?: return@synchronized
-            val hasPlaintextKey = (0 until models.length()).any { index ->
-                models.optJSONObject(index)?.optString("api_key")?.isNotBlank() == true
+            val models = config.optJSONArray("models") ?: JSONArray()
+            val imported = legacyKeys(config)
+            val secretFile = File(root, SECRET_FILE)
+            val existing = readSecrets(root)
+            val merged = mergeSecretMaps(existing, imported)
+            if (merged.toString() != existing.toString() || (!secretFile.isFile && merged.length() > 0)) {
+                Log.i(TAG, "Migrating legacy provider keys to Android Keystore")
+                writeSecrets(root, merged)
             }
-            if (hasPlaintextKey) {
-                Log.i(TAG, "Migrating existing provider keys to Android Keystore")
-                saveRuntimeConfig(root, raw)
+            var changed = config.has("api_key")
+            config.remove("api_key")
+            for (i in 0 until models.length()) {
+                val model = models.optJSONObject(i) ?: continue
+                if (model.has("api_key")) { model.remove("api_key"); changed = true }
             }
+            if (changed) FileManager.write(root, CONFIG_FILE, config.toString(2))
         } catch (e: Exception) {
             Log.e(TAG, "Could not migrate legacy provider configuration; original file was preserved", e)
         }

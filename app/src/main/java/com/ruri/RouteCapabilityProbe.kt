@@ -23,8 +23,8 @@ internal object RouteCapabilityProbe {
     data class ProbeResult(val capable: Boolean, val status: String)
 
     @Synchronized
-    fun refreshIfDue(root: File, config: JSONObject, now: Long = System.currentTimeMillis()) {
-        if (!NetState.online) return
+    fun refreshIfDue(root: File, config: JSONObject, now: Long = System.currentTimeMillis(), force: Boolean = false) {
+        if (!NetState.online && !force) return
         val models = config.optJSONArray("models") ?: return
         var changed = false
         for (index in 0 until models.length()) {
@@ -37,7 +37,7 @@ internal object RouteCapabilityProbe {
                 status.startsWith("http_4") -> 12L * 60L * 60L * 1000L
                 else -> RETEST_AFTER_MS
             }
-            if (testedAt > 0L && now - testedAt < retryAfter) continue
+            if (!force && testedAt > 0L && now - testedAt < retryAfter) continue
 
             val id = model.optString("id").ifBlank { model.optString("name", "route_$index") }
             val routeMeta = RouteMeta.route(root, id)
@@ -61,7 +61,7 @@ internal object RouteCapabilityProbe {
                 changed = true
                 continue
             }
-            if (!RouteMeta.claimFullProbe(root, id, now)) continue
+            if (!RouteMeta.claimFullProbe(root, id, now, force = force)) continue
             RouteMeta.recordAttempt(root, id)
             val result = probe(model, key)
             model.put("nsfw_capable", result.capable)

@@ -14,15 +14,24 @@ import android.os.SystemClock
 object ChatEngine {
     const val OFFLINE_REPLY = "Связи нет. Отвечу, когда она вернётся."
 
-    fun respond(root: File): String {
-        if (!NetState.online) {
+    fun respond(root: File): String = respondInternal(root, allowRecovery = true)
+
+    private fun respondInternal(root: File, allowRecovery: Boolean, assumeReachable: Boolean = false): String {
+        val config = JSONObject(SecretStore.readRuntimeConfig(root))
+        val models = config.optJSONArray("models") ?: JSONArray()
+        val current = config.optInt("current", -1)
+        if (!NetState.online && !assumeReachable) {
+            if (allowRecovery && Probe.claimRecoveryRefresh()) {
+                Probe.refreshReachability(root, models, topOnly = false, force = true)
+            }
+            val reachableOrder = RouteSelector.ordered(
+                root, models, current, Task.CHAT, needNsfw = false, online = true, vpn = NetState.vpn
+            )
+            if (reachableOrder.isNotEmpty()) return respondInternal(root, allowRecovery = false, assumeReachable = true)
             OfflineQueue.markPending(root)
             return OFFLINE_REPLY
         }
-        val config = JSONObject(SecretStore.readRuntimeConfig(root))
-        val models = config.optJSONArray("models") ?: JSONArray()
         if (models.length() == 0) throw IllegalStateException("Список моделей пуст")
-        val current = config.optInt("current", -1)
         // Capability probes run at most once per day per free route; do not NSFW-gate ordinary chat.
         RouteCapabilityProbe.refreshIfDue(root, config)
         // Retry transient failures only. HTTP 429 hands off immediately to the next free route.
@@ -114,14 +123,42 @@ object ChatEngine {
         }
         val task = RouteSelector.detectTask(history.last().optString("content"))
         val requireNsfw = RouteSelector.nsfwWindow(root)
-        val order = FreeModelRouter.orderedIndices(
-            root, models, current, requireNsfw = requireNsfw, task = task
+        val exclusiveRoute = config.optBoolean("exclusive_route", false)
+        fun selectOrder(online: Boolean): List<Int> = RouteRecovery.applyExclusive(
+            RouteSelector.ordered(root, models, current, task, requireNsfw, online, NetState.vpn),
+            current, exclusiveRoute
         )
+        var order = selectOrder(NetState.online || assumeReachable)
+        if (order.isEmpty() && allowRecovery && Probe.claimRecoveryRefresh()) {
+            Probe.refreshReachability(root, models, topOnly = false, force = true)
+            order = selectOrder(online = true)
+            if (order.isNotEmpty()) return respondInternal(root, allowRecovery = false, assumeReachable = true)
+        }
         if (order.isEmpty()) {
-            val reason = if (requireNsfw) {
-                "Нет доступного бесплатного маршрута для взрослой темы: проверь VPN, квоту и результаты NSFW-проб."
-            } else {
-                "Нет доступного бесплатного маршрута: проверь подключение, VPN, дневную квоту и ключи."
+            if (!NetState.online) OfflineQueue.markPending(root)
+            val selected = models.optJSONObject(current)
+            val selectedName = selected?.optString("name")?.takeIf { it.isNotBlank() } ?: "маршрут №${current + 1}"
+            val selectedId = selected?.optString("id")?.ifBlank { "route_$current" } ?: "route_$current"
+            val selectedMeta = RouteMeta.route(root, selectedId)
+            val specificReason = when {
+                selected != null && selected.optString("api_key").isBlank() ->
+                    "Маршрут $selectedName: API-ключ не задан"
+                selectedMeta.optBoolean("needs_vpn", selected?.optBoolean("needs_vpn", false) ?: false) && !NetState.vpn ->
+                    "Маршрут $selectedName: требуется VPN"
+                selected != null && !RouteMeta.quotaLeft(root, selectedId, selected.optInt("rpd", 200)) ->
+                    "Маршрут $selectedName: дневная квота исчерпана"
+                selectedMeta.optLong("cooldown_until", 0L) > System.currentTimeMillis() ->
+                    "Маршрут $selectedName: временный cooldown"
+                !selectedMeta.optBoolean("reachable", true) ->
+                    "Маршрут $selectedName: последняя проверка сети не прошла (DNS/доступность)"
+                else -> ""
+            }
+            val reason = when {
+                exclusiveRoute && specificReason.isNotBlank() -> "$specificReason. Автоматический переход отключён."
+                exclusiveRoute -> "Выбранный маршрут $selectedName недоступен. Автоматический переход отключён."
+                specificReason.isNotBlank() -> specificReason
+                requireNsfw -> "Нет доступного бесплатного маршрута для взрослой темы: проверь VPN, квоту и результаты NSFW-проб."
+                else -> "Нет доступного бесплатного маршрута: проверь подключение, VPN, дневную квоту и ключи."
             }
             throw IllegalStateException(reason)
         }
@@ -137,6 +174,8 @@ object ChatEngine {
         history.forEach { messages.put(it) }
 
         var lastError = "Все настроенные модели недоступны"
+        var hadNetworkAttempt = false
+        var allFailuresNetwork = true
         for (index in requestOrder) {
             val attempt = (attemptsByModel[index] ?: 0) + 1
             attemptsByModel[index] = attempt
@@ -144,8 +183,7 @@ object ChatEngine {
             if (attempt > 1) Thread.sleep(if (attempt == 2) 2000L else 5000L)
             val model = models.optJSONObject(index) ?: continue
             val key = model.optString("api_key")
-            val anonymousAllowed = model.optBoolean("allow_anonymous", false)
-            if (key.isBlank() && !anonymousAllowed) {
+            if (key.isBlank()) {
                 lastError = "${model.optString("name", model.optString("id"))}: требуется бесплатный API-ключ"
                 continue
             }
@@ -157,19 +195,13 @@ object ChatEngine {
                 (!NetState.vpn && !routeMeta.optBoolean("ru_reachable", true))) {
                 continue
             }
-            val providerMessages = if (model.optBoolean("minimal_context", false)) {
-                // Kilo Auto Free may route through trial endpoints that log prompts.
-                // Send only the current turn and a short persona; never send memory/history/notifications.
-                JSONArray()
-                    .put(JSONObject().put("role", "system")
-                        .put("content", minimalSystemPrompt(character, state)))
-                    .put(JSONObject(history.last().toString()))
-            } else messages
+            // Every provider receives the same complete memory/history context.
             val safeProviderMessages = JSONArray()
-            for (messageIndex in 0 until providerMessages.length()) {
-                val message = providerMessages.optJSONObject(messageIndex) ?: continue
+            for (messageIndex in 0 until messages.length()) {
+                val message = messages.optJSONObject(messageIndex) ?: continue
                 safeProviderMessages.put(SecretRedactor.redactEvent(message))
             }
+            hadNetworkAttempt = true
             runCatching { RouteMeta.recordAttempt(root, routeId) }
             var connection: HttpURLConnection? = null
             val diagnostic = JSONObject()
@@ -240,10 +272,12 @@ object ChatEngine {
                 if (code !in 200..299) {
                     diagnostic.put("stage", "HTTP")
                     diagnostic.put("result", "http_error")
-                    NetworkDiagnostics.record(root, diagnostic)
                     val failureKind = RouteSelector.classify(code, null, responseText)
                     runCatching { RouteMeta.recordFailure(root, routeId, failureKind, task) }
-                    lastError = "Модель ${model.optString("name", model.optString("id"))}: HTTP $code"
+                    lastError = RouteRecovery.describeHttpError(model.optString("name", model.optString("id")), code, failureKind)
+                    diagnostic.put("failure_message", lastError)
+                    NetworkDiagnostics.record(root, diagnostic)
+                    if (!RouteRecovery.isNetworkFailure(failureKind)) allFailuresNetwork = false
                     if (code == 500 || code == 502 || code == 503 || code == 504) {
                         retryableModels.add(index)
                     } else {
@@ -259,12 +293,11 @@ object ChatEngine {
                     diagnostic.put("result", "empty_reply")
                     NetworkDiagnostics.record(root, diagnostic)
                     lastError = "Модель вернула пустой ответ"
+                    allFailuresNetwork = false
                     continue
                 }
-                val reply = if (model.optBoolean("minimal_context", false)) initialReply else {
-                    runToolLoop(root, initialReply, messages, minimalContext = false) { nextMessages ->
-                        requestToolFollowup(model, nextMessages)
-                    }
+                val reply = runToolLoop(root, initialReply, messages) { nextMessages ->
+                    requestToolFollowup(model, nextMessages)
                 }
                 if (RouteCapabilityProbe.isAdultTopic(history.last().optString("content")) &&
                     RouteCapabilityProbe.looksLikeRefusalOrDisclaimer(reply)) {
@@ -273,6 +306,7 @@ object ChatEngine {
                     RouteCapabilityProbe.markNotCapable(root, config, index, "runtime_refusal_or_disclaimer")
                     runCatching { RouteMeta.recordFailure(root, routeId, "refusal", task) }
                     lastError = "Маршрут ${model.optString("name", model.optString("id"))} отклонил взрослую тему"
+                    allFailuresNetwork = false
                     continue
                 }
                 diagnostic.put("stage", "COMPLETE")
@@ -281,6 +315,7 @@ object ChatEngine {
                 runCatching { RouteMeta.recordSuccess(root, routeId, task) }
                 // Keep Routeway as primary; fallback success is temporary, not a reconfiguration.
                 appendFinalReply(root, reply)
+                runCatching { BackupPolicy.checkpointState(root) }
                 runCatching { OfflineQueue.clear(root) }
                 return reply
             } catch (e: Exception) {
@@ -292,13 +327,12 @@ object ChatEngine {
                 diagnostic.put("error_type", e.javaClass.simpleName)
                 if (e is UnknownHostException) diagnostic.put("dns_status", "failed")
                 if (e is SocketTimeoutException) diagnostic.put("timeout_stage", stage)
+                val failureKind = RouteSelector.classify(null, e)
+                runCatching { RouteMeta.recordFailure(root, routeId, failureKind, task) }
+                if (!RouteRecovery.isNetworkFailure(failureKind)) allFailuresNetwork = false
+                lastError = RouteRecovery.describeException(model.optString("name", model.optString("id")), stage, e, failureKind)
+                diagnostic.put("failure_message", lastError)
                 NetworkDiagnostics.record(root, diagnostic)
-                runCatching { RouteMeta.recordFailure(root, routeId, RouteSelector.classify(null, e), task) }
-                lastError = when {
-                    e is UnknownHostException -> "DNS: не удалось разрешить адрес сервера"
-                    e is SocketTimeoutException -> "Тайм-аут на этапе $stage"
-                    else -> e.message ?: "Ошибка запроса к модели"
-                }
                 if (e is SocketTimeoutException) retryableModels.add(index)
                 else retryableModels.remove(index)
                 android.util.Log.w("Ruri", "Chat model failed at $stage: ${e.javaClass.simpleName}")
@@ -306,24 +340,13 @@ object ChatEngine {
                 connection?.disconnect()
             }
         }
+        if (hadNetworkAttempt && allFailuresNetwork && allowRecovery && Probe.claimRecoveryRefresh()) {
+            Probe.refreshReachability(root, models, topOnly = false, force = true)
+            return respondInternal(root, allowRecovery = false, assumeReachable = true)
+        }
         throw IllegalStateException(lastError)
     }
 
-
-    internal fun minimalContextInstruction(): String = "Инструменты на этом маршруте отключены."
-
-    internal fun minimalSystemPrompt(character: JSONObject, state: JSONObject): String =
-        "Имя: ${character.optString("name")}; designation: ${character.optString("designation")}. " +
-            "Личность: ${character.optString("persona")}. " +
-            "Непрерывность: ${character.optString("continuity_rules")}. " +
-            "Правила речи: ${character.optString("speech_rules")}. " +
-            "Длина ответа: ${character.optString("length_policy")}. " +
-            "Эмоции: ${character.optString("emotions")}. " +
-            "Регуляторы: ${character.optJSONArray("regulators") ?: JSONArray()}. " +
-            "Запрещённые фразы: ${character.optJSONArray("banned_phrases") ?: JSONArray()}. " +
-            "Не выдавай несуществующие воспоминания за реальные. " +
-            "Текущее настроение: ${state.optString("mood", "собранная")}. " +
-            minimalContextInstruction()
 
     internal fun parseAction(reply: String): JSONObject? {
         val trimmed = reply.trim()
@@ -353,10 +376,8 @@ object ChatEngine {
         root: File,
         initialReply: String,
         messages: JSONArray,
-        minimalContext: Boolean = false,
         requestNext: (JSONArray) -> String?
     ): String {
-        if (minimalContext) return initialReply
         var reply = initialReply
         var hops = 0
         while (true) {
