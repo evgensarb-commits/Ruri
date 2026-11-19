@@ -26,7 +26,12 @@ class NoRawJsonInDiaryTest {
             """{"action":"invented_action","text":"Я спокойно размышляю."}""",
             JSONArray()) { "обычная проза" }
         assertEquals("Я спокойно размышляю.", result)
-        assertFalse(result.startsWith("{"))
+        val diary = JSONObject().put("entries", JSONArray().put(JSONObject().put("text", result)))
+        FileManager.write(root, "memory/L2_diary.json", diary.toString())
+        val saved = JSONObject(FileManager.read(root, "memory/L2_diary.json"))
+            .getJSONArray("entries").getJSONObject(0).getString("text")
+        assertEquals("Я спокойно размышляю.", saved)
+        assertFalse(saved.startsWith("{"))
     }
 }
 
