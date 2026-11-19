@@ -8,6 +8,7 @@ import android.net.Uri
 import android.provider.Settings
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Base64
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -242,7 +243,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
-        fun searchWeb(query: String): String = WebSearch.search(query)
+        fun searchWeb(query: String): String = WebSearch.search(filesDir, query)
 
         @JavascriptInterface
         fun openNotificationAccessSettings(): String {
