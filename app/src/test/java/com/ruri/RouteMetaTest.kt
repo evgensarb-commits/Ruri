@@ -40,6 +40,35 @@ class RouteMetaTest {
     }
 
     @Test
+    fun secondConsecutiveSuccessPromotesThatTaskScore() {
+        val root = Files.createTempDirectory("ruri-route-promotion").toFile()
+        try {
+            RouteMeta.recordSuccess(root, "route-test", Task.REASON)
+            val afterOne = RouteSelector.score(RouteMeta.route(root, "route-test"), Task.REASON)
+            RouteMeta.recordSuccess(root, "route-test", Task.REASON)
+            val afterTwo = RouteSelector.score(RouteMeta.route(root, "route-test"), Task.REASON)
+
+            assertTrue(afterTwo >= 0.75)
+            assertTrue(afterTwo > afterOne)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun fullProbeCanBeClaimedOnlyOncePerTwentyFourHours() {
+        val root = Files.createTempDirectory("ruri-probe-claim").toFile()
+        try {
+            val first = 1_000_000L
+            assertTrue(RouteMeta.claimFullProbe(root, "route-test", first))
+            assertFalse(RouteMeta.claimFullProbe(root, "route-test", first + 23L * 60L * 60L * 1000L))
+            assertTrue(RouteMeta.claimFullProbe(root, "route-test", first + Probe.FULL_PROBE_MS + 1L))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun twoOrdinaryFailuresApplyCooldownAndQuotaFailureBlocksUntilUtcMidnight() {
         val root = Files.createTempDirectory("ruri-route-cooldown").toFile()
         try {
