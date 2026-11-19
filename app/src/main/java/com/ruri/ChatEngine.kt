@@ -141,7 +141,7 @@ object ChatEngine {
             val selectedId = selected?.optString("id")?.ifBlank { "route_$current" } ?: "route_$current"
             val selectedMeta = RouteMeta.route(root, selectedId)
             val specificReason = when {
-                selected != null && selected.optString("api_key").isBlank() && !selected.optBoolean("allow_anonymous", false) ->
+                selected != null && selected.optString("api_key").isBlank() ->
                     "Маршрут $selectedName: API-ключ не задан"
                 selectedMeta.optBoolean("needs_vpn", selected?.optBoolean("needs_vpn", false) ?: false) && !NetState.vpn ->
                     "Маршрут $selectedName: требуется VPN"
