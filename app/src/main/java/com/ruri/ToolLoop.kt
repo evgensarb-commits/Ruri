@@ -49,6 +49,7 @@ object ToolLoop {
         messages: JSONArray,
         requestNext: (JSONArray) -> String?
     ): String {
+        ChatEngine.clearSourceUrls()
         var reply = initialReply
         var checks = 0
         var toolLoopRun = false
