@@ -108,6 +108,8 @@ object Thinker {
         var successfulIndex = -1
         for (index in order) {
             val model = models.optJSONObject(index) ?: continue
+            // Never send private memory, notifications or shelf context to minimal-context routes.
+            if (model.optBoolean("minimal_context", false)) continue
             if (model.optString("api_key").isBlank() && !model.optBoolean("allow_anonymous", false)) continue
             val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
             runCatching { RouteMeta.recordAttempt(root, routeId) }
@@ -226,6 +228,14 @@ object Thinker {
                 "- $source: $title — $body"
             } catch (_: Exception) { null }
         }.take(20).asReversed().joinToString("\n")
+        val researchText = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 1200, maxBytes = 1024 * 1024)
+            .asReversed().mapNotNull { line ->
+                runCatching {
+                    val event = JSONObject(line)
+                    if (event.optString("type") != "web_research_result") null
+                    else "Запрос: " + event.optString("query") + "\\n" + event.optString("text").take(5000)
+                }.getOrNull()
+            }.take(4).asReversed().joinToString("\\n\\n")
         val summary = readJson(root, "memory/L3_summary.json").optString("summary")
         val quiet = hoursSince(state.optLong("last_seen_commander"), System.currentTimeMillis())
         val common = "Имя: " + character.optString("name") +
