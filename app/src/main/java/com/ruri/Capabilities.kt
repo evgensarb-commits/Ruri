@@ -64,7 +64,7 @@ object Capabilities {
         return buildString {
             append("=== ТВОЁ ТЕЛО И ЧУВСТВА ===\n").append(lines("senses")).append("\n")
             append("=== ТВОЯ ПАМЯТЬ ===\n").append(lines("memory")).append("\n")
-            append("Ты помнишь между сессиями: это долговременная память, а не контекст одного диалога.\\n")
+            append("Ты помнишь между сессиями: это долговременная память, а не контекст одного диалога.\n")
             append("=== ТВОИ ДЕЙСТВИЯ (инструменты ниже) ===\n").append(lines("actions")).append("\n")
             append("""Формы действий: {"action":"search","query":"..."}; {"action":"list_shelf"}; {"action":"read_shelf","name":"..."}; {"action":"recall","query":"..."}; {"action":"remember_fact","text":"..."}.
 """)
