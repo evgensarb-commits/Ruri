@@ -387,11 +387,12 @@ object ChatEngine {
         if (messages.length() < 2) return false
         val system = messages.optJSONObject(0)?.optString("content").orEmpty()
         val hasMemoryLayers = listOf("L0", "L1", "L2", "L3").all(system::contains)
+        val hasRecallTool = system.contains("recall", ignoreCase = true)
         val hasConversation = (1 until messages.length()).any {
             val role = messages.optJSONObject(it)?.optString("role")
             role == "user" || role == "assistant"
         }
-        return hasMemoryLayers && hasConversation
+        return hasMemoryLayers && hasRecallTool && hasConversation
     }
 
     internal fun parseAction(reply: String): JSONObject? {
