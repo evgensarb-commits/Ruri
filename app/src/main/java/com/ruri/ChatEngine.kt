@@ -421,38 +421,8 @@ object ChatEngine {
         return action
     }
 
-    internal fun runToolLoop(
-        root: File,
-        initialReply: String,
-        messages: JSONArray,
-        requestNext: (JSONArray) -> String?
-    ): String {
-        var reply = initialReply
-        var hops = 0
-        while (true) {
-            val action = parseAction(reply) ?: return reply
-            if (hops >= 3) return reply
-            val actionName = action.optString("action")
-            val params = JSONObject(action.toString()).apply { remove("action") }
-            FileManager.appendEvent(root, SecretRedactor.redactEvent(
-                JSONObject().put("type", "tool_call").put("action", actionName).put("params", params)
-            ))
-            val result = executeTool(root, actionName, action)
-            if (actionName == "search") lastSearchSourceUrls = extractSourceUrls(result.second)
-            val safeText = SecretRedactor.redactText(result.second).take(4000)
-            FileManager.appendEvent(root, SecretRedactor.redactEvent(
-                JSONObject().put("type", "tool_result").put("action", actionName)
-                    .put("ok", result.first).put("text", safeText)
-            ))
-            messages.put(JSONObject().put("role", "user")
-                .put("content", "[ИНСТРУМЕНТ ${actionName}]: ${safeText}"))
-            hops++
-            if (hops == 3) {
-                messages.put(JSONObject().put("role", "system")
-                    .put("content", "Лимит инструментов исчерпан — ответь prose"))
-            }
-            reply = requestNext(messages) ?: return "Не удалось получить ответ после выполнения инструмента."
-        }
+    internal fun captureSearchUrls(raw: String) {
+        lastSearchSourceUrls = extractSourceUrls(raw)
     }
 
     internal fun executeTool(root: File, action: String, params: JSONObject): Pair<Boolean, String> {
