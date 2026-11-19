@@ -121,6 +121,11 @@ object ChatEngine {
         if (history.isEmpty() || history.last().optString("role") != "user") {
             throw IllegalStateException("Не найдено последнее сообщение командира")
         }
+        history.forEach { messages.put(it) }
+        if (!hasFullMemoryContext(messages)) {
+            OfflineQueue.markPending(root)
+            throw IllegalStateException("Полная память не собрана; запрос к модели не отправлен")
+        }
         val task = RouteSelector.detectTask(history.last().optString("content"))
         val requireNsfw = RouteSelector.nsfwWindow(root)
         val exclusiveRoute = config.optBoolean("exclusive_route", false)
@@ -135,7 +140,7 @@ object ChatEngine {
             if (order.isNotEmpty()) return respondInternal(root, allowRecovery = false, assumeReachable = true)
         }
         if (order.isEmpty()) {
-            if (!NetState.online) OfflineQueue.markPending(root)
+            OfflineQueue.markPending(root)
             val selected = models.optJSONObject(current)
             val selectedName = selected?.optString("name")?.takeIf { it.isNotBlank() } ?: "маршрут №${current + 1}"
             val selectedId = selected?.optString("id")?.ifBlank { "route_$current" } ?: "route_$current"
@@ -347,6 +352,17 @@ object ChatEngine {
         throw IllegalStateException(lastError)
     }
 
+
+    internal fun hasFullMemoryContext(messages: JSONArray): Boolean {
+        if (messages.length() < 2) return false
+        val system = messages.optJSONObject(0)?.optString("content").orEmpty()
+        val hasMemoryLayers = listOf("L0", "L1", "L2", "L3").all(system::contains)
+        val hasConversation = (1 until messages.length()).any {
+            val role = messages.optJSONObject(it)?.optString("role")
+            role == "user" || role == "assistant"
+        }
+        return hasMemoryLayers && hasConversation
+    }
 
     internal fun parseAction(reply: String): JSONObject? {
         val trimmed = reply.trim()
