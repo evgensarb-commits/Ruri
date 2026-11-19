@@ -72,7 +72,7 @@ object Diagnostics {
                 .put("cooldown_until", meta.optLong("cooldown_until", 0L))
                 .put("requests_today", dayCount)
                 .put("requests_per_day", model.optInt("rpd", 200))
-                .put("chat_score", RouteSelector.score(meta, RouteSelector.Task.CHAT))
+                .put("chat_score", RouteSelector.score(meta, Task.CHAT))
                 .put("last_attempt", meta.optLong("last_attempt", 0L))
                 .put("last_success", meta.optLong("last_ok", 0L))
             routes.put(id, route)
