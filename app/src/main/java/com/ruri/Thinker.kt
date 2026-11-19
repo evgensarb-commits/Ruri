@@ -18,6 +18,10 @@ object Thinker {
      */
     fun wake(ctx: Context, reason: String) {
         try {
+            if (reason.startsWith("capability_gap:") || reason.startsWith("unknown_term:")) {
+                LifeScheduler.enqueueEvent(ctx.applicationContext, "research_task:" + reason.substringAfter(':').take(280))
+                return
+            }
             LifeScheduler.enqueueEvent(ctx.applicationContext, reason)
         } catch (e: Exception) {
             Log.e("Ruri", "Could not enqueue cognition wake", e)
