@@ -14,7 +14,7 @@ main{flex:1;min-height:0;display:flex;flex-direction:column}.pane{display:none;f
 #chat{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:12px}
 .msg{max-width:94%;display:grid;gap:4px}.msg.her{align-self:flex-start}.msg.me{align-self:flex-end;justify-items:end}
 .meta{font:9px monospace;color:#7f91ad;letter-spacing:.08em}
-.bub{white-space:pre-wrap;overflow-wrap:anywhere;padding:10px 13px;border-radius:4px;line-height:1.65}
+.bub{white-space:pre-wrap;overflow-wrap:anywhere;padding:10px 13px;border-radius:4px;line-height:1.65}.sources{font:11px/1.6 monospace;color:#91a8c9;padding:4px 8px;border-left:2px solid #f4c94f}.sources a{display:block;color:#7bdce8;overflow-wrap:anywhere;text-decoration:underline}
 .her .bub{background:#15213a;border:1px solid #31476e;border-left:2px solid #f4c94f}.me .bub{background:#182b4c;border:1px solid #34558d;border-right:2px solid #36d7e9}
 .composer{padding:10px 12px 14px;background:#070a10;border-top:1px solid #273653}.inrow{display:flex;gap:8px;align-items:flex-end}
 textarea,input,select{background:#060a12;border:1px solid #354a70;color:#e0e8f5;padding:11px;border-radius:4px;font:14px system-ui;width:100%}
@@ -55,6 +55,14 @@ button.secondary{background:transparent;color:#f4c94f}
 <button class="action" id="run-diag" style="margin-bottom:12px">ОБНОВИТЬ ДАННЫЕ</button>
 <button class="action secondary" id="forceRefreshRoutes" style="margin-bottom:12px">ПЕРЕПРОВЕРИТЬ МАРШРУТЫ СЕЙЧАС</button>
 <pre id="diag-out" style="background:#050810;border:1px solid #32456d;color:#dde3ec;padding:12px;font:12px/1.5 monospace;border-radius:4px;white-space:pre-wrap;overflow-wrap:anywhere">Нажми «ОБНОВИТЬ ДАННЫЕ»</pre>
+<div class="card" id="l0Journal">
+<b>ЖУРНАЛ L0</b>
+<div class="field"><label for="l0Filter">ТИП ЗАПИСИ</label><select id="l0Filter">
+<option value="all">Все</option><option value="message">message</option><option value="tool_call">tool_call</option><option value="tool_result">tool_result</option><option value="wake">wake</option><option value="phone_notification">phone_notification</option><option value="shelf_file_ingested">shelf_file_ingested</option><option value="recall_deep_used">recall_deep_used</option>
+</select></div>
+<button class="action secondary" id="loadL0">ЗАГРУЗИТЬ ПОСЛЕДНИЕ 100</button>
+<div id="l0List" style="margin-top:10px"></div>
+</div>
 <div class="small">Секретные API-ключи не отображаются. Диагностика читает локальное состояние приложения.</div>
 </div>
 </section>
@@ -69,15 +77,21 @@ function read(p){return Ruri.read(p)||'';}
 function write(p,v){var r=Ruri.write(p,v);if(typeof r==='string'&&r.indexOf('ERROR:')===0)throw new Error(r);return r;}
 function appendLog(obj){var result=Ruri.appendEvent(JSON.stringify(obj));if(typeof result==='string'&&result.indexOf('ERROR:')===0)throw new Error(result);}
 function routeBadges(){var map={};try{read('memory/route_badges.jsonl').split('\n').forEach(function(line){if(!line.trim())return;var b=JSON.parse(line);map[String(b.ts)]=b;});}catch(_){}return map;}
-function messageNode(who,text,ts,route){
+function messageNode(who,text,ts,route,sourceUrls){
 var d=document.createElement('div');d.className='msg '+(who==='ruri'?'her':'me');
 var badge=who==='ruri'&&route?' · '+esc(route)+' · ПОЛНАЯ ПАМЯТЬ':'';
-d.innerHTML='<div class="meta">'+(who==='ruri'?'РУРИ':'КОМАНДИР')+' · '+new Date(ts||Date.now()).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+badge+'</div><div class="bub">'+esc(text)+'</div>';return d;
+d.innerHTML='<div class="meta">'+(who==='ruri'?'РУРИ':'КОМАНДИР')+' · '+new Date(ts||Date.now()).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+badge+'</div><div class="bub">'+esc(text)+'</div>';
+if(who==='ruri'&&Array.isArray(sourceUrls)&&sourceUrls.length){
+var block=document.createElement('div');block.className='sources';block.appendChild(document.createTextNode('Источники:'));
+sourceUrls.forEach(function(url){if(typeof url!=='string'||!/^https?:\/\//i.test(url))return;var a=document.createElement('a');a.href='#';a.textContent=url;a.addEventListener('click',function(e){e.preventDefault();Ruri.openUrl(url);});block.appendChild(a);});
+if(block.children.length>1)d.appendChild(block);
+}
+return d;
 }
 function loadChat(){
 var box=$('#chat');box.innerHTML='';var badges=routeBadges();
 read('memory/L0_raw.jsonl').split('\n').forEach(function(line){
-try{var e=JSON.parse(line);if(e.type==='message'&&e.who){var b=badges[String(e.ts||e.timestamp)];box.appendChild(messageNode(e.who,e.text,e.ts,b&&b.route));}}catch(_){}
+try{var e=JSON.parse(line);if(e.type==='message'&&e.who){var b=badges[String(e.ts||e.timestamp)];box.appendChild(messageNode(e.who,e.text,e.ts,b&&b.route,e.source_urls));}}catch(_){}
 });
 box.scrollTop=box.scrollHeight;
 }
@@ -113,7 +127,7 @@ catch(e){busy=false;$('#send').disabled=false;status('ОШИБКА ПАМЯТИ'
 var typing=document.createElement('div');typing.className='msg her';typing.id='typing';typing.innerHTML='<div class="typing">Рури обдумывает ответ…</div>';$('#chat').appendChild(typing);$('#chat').scrollTop=$('#chat').scrollHeight;
 callModel(text).then(function(reply){
 var t=$('#typing');if(t)t.remove();
-var badges=routeBadges(),keys=Object.keys(badges),last=keys.length?badges[keys[keys.length-1]]:null;var answer={ts:Date.now()};$('#chat').appendChild(messageNode('ruri',reply,answer.ts,last&&last.route));status('НА СВЯЗИ'+(last?' · '+last.route+' · ПОЛНАЯ ПАМЯТЬ':''));
+var badges=routeBadges(),keys=Object.keys(badges),last=keys.length?badges[keys[keys.length-1]]:null;var answer={ts:Date.now()},events=read('memory/L0_raw.jsonl').split('\\n');var saved=null;for(var i=events.length-1;i>=0;i--){try{var ev=JSON.parse(events[i]);if(ev.type==='message'&&ev.who==='ruri'&&ev.text===reply){saved=ev;break;}}catch(_){}}$('#chat').appendChild(messageNode('ruri',reply,answer.ts,last&&last.route,saved&&saved.source_urls));status('НА СВЯЗИ'+(last?' · '+last.route+' · ПОЛНАЯ ПАМЯТЬ':''));
 }).catch(function(e){var t=$('#typing');if(t)t.remove();var d=document.createElement('div');d.className='msg her';d.innerHTML='<div class="bub error">Ответ не получен: '+esc(e.message)+'. Сообщение сохранено в памяти.</div>';$('#chat').appendChild(d);status('ОШИБКА: '+e.message);})
 .then(function(){busy=false;$('#send').disabled=false;$('#chat').scrollTop=$('#chat').scrollHeight;});
 }
@@ -133,6 +147,14 @@ document.querySelectorAll('nav button').forEach(function(x){x.classList.remove('
 document.querySelectorAll('.pane').forEach(function(p){p.classList.remove('on');});$('#pane-'+b.dataset.pane).classList.add('on');
 if(b.dataset.pane==='diary')loadDiary();
 });});
+function loadL0Journal(){
+var box=$('#l0List');box.textContent='Загрузка…';
+try{var events=JSON.parse(Ruri.readLastEvents($('#l0Filter').value,100)||'[]');box.innerHTML='';
+events.forEach(function(e){var row=document.createElement('div');row.style.cssText='border-top:1px solid #273653;padding:8px 0;font:11px/1.5 monospace;overflow-wrap:anywhere';var when=e.ts?new Date(e.ts).toLocaleString('ru-RU'):'—';row.textContent=when+' · '+e.type+(e.action?' · '+e.action:'')+(e.content?' — '+e.content:'');box.appendChild(row);});
+if(!events.length)box.textContent='Записей нет.';
+}catch(e){box.textContent='Ошибка чтения L0: '+e.message;}
+}
+$('#loadL0').addEventListener('click',loadL0Journal);
 $('#run-diag').addEventListener('click',function(){
   var out=$('#diag-out');out.textContent='Сбор данных…';
   try{
