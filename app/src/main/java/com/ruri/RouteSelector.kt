@@ -48,10 +48,10 @@ object RouteSelector {
         val candidates = mutableListOf<Pair<Int, Double>>()
         for (index in 0 until models.length()) {
             val model = models.optJSONObject(index) ?: continue
-            if (!model.optBoolean("free_tier", false) || !model.optBoolean("enabled", true)) continue
+            if (!FreeModelRouter.isFullMemoryRoute(model)) continue
             val id = model.optString("id").ifBlank { model.optString("name").ifBlank { "route_$index" } }
             val keyAvailable = model.optString("api_key").isNotBlank() ||
-                model.optBoolean("allow_anonymous", false)
+                false
             if (!keyAvailable) continue
 
             val meta = RouteMeta.route(root, id)

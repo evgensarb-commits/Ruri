@@ -28,10 +28,9 @@ object ChatEngine {
                 root, models, current, Task.CHAT, needNsfw = false, online = true, vpn = NetState.vpn
             )
             if (reachableOrder.isNotEmpty()) return respondInternal(root, allowRecovery = false, assumeReachable = true)
-            OfflineQueue.markPending(root)
-            return OFFLINE_REPLY
+            failUnavailable(root, "Нет доступного маршрута с полной памятью (Routeway / Requesty): сеть, DNS, VPN или сервер провайдера недоступны.")
         }
-        if (models.length() == 0) throw IllegalStateException("Список моделей пуст")
+        if (models.length() == 0) failUnavailable(root, "Список бесплатных маршрутов с полной памятью не настроен")
         // Capability probes run at most once per day per free route; do not NSFW-gate ordinary chat.
         RouteCapabilityProbe.refreshIfDue(root, config)
         // Retry transient failures only. HTTP 429 hands off immediately to the next free route.
@@ -135,13 +134,12 @@ object ChatEngine {
             if (order.isNotEmpty()) return respondInternal(root, allowRecovery = false, assumeReachable = true)
         }
         if (order.isEmpty()) {
-            if (!NetState.online) OfflineQueue.markPending(root)
             val selected = models.optJSONObject(current)
             val selectedName = selected?.optString("name")?.takeIf { it.isNotBlank() } ?: "маршрут №${current + 1}"
             val selectedId = selected?.optString("id")?.ifBlank { "route_$current" } ?: "route_$current"
             val selectedMeta = RouteMeta.route(root, selectedId)
             val specificReason = when {
-                selected != null && selected.optString("api_key").isBlank() && !selected.optBoolean("allow_anonymous", false) ->
+                selected != null && selected.optString("api_key").isBlank() ->
                     "Маршрут $selectedName: API-ключ не задан"
                 selectedMeta.optBoolean("needs_vpn", selected?.optBoolean("needs_vpn", false) ?: false) && !NetState.vpn ->
                     "Маршрут $selectedName: требуется VPN"
@@ -160,7 +158,7 @@ object ChatEngine {
                 requireNsfw -> "Нет доступного бесплатного маршрута для взрослой темы: проверь VPN, квоту и результаты NSFW-проб."
                 else -> "Нет доступного бесплатного маршрута: проверь подключение, VPN, дневную квоту и ключи."
             }
-            throw IllegalStateException(reason)
+            failUnavailable(root, reason)
         }
         val requestOrder = order.flatMap { index -> List(3) { index } }
         val recalled = MemoryRetriever.recall(root, history.last().optString("content"), limit = 6)
@@ -183,8 +181,7 @@ object ChatEngine {
             if (attempt > 1) Thread.sleep(if (attempt == 2) 2000L else 5000L)
             val model = models.optJSONObject(index) ?: continue
             val key = model.optString("api_key")
-            val anonymousAllowed = model.optBoolean("allow_anonymous", false)
-            if (key.isBlank() && !anonymousAllowed) {
+            if (key.isBlank()) {
                 lastError = "${model.optString("name", model.optString("id"))}: требуется бесплатный API-ключ"
                 continue
             }
@@ -196,19 +193,8 @@ object ChatEngine {
                 (!NetState.vpn && !routeMeta.optBoolean("ru_reachable", true))) {
                 continue
             }
-            val providerMessages = if (model.optBoolean("minimal_context", false)) {
-                // Kilo Auto Free may route through trial endpoints that log prompts.
-                // Send only the current turn and a short persona; never send memory/history/notifications.
-                JSONArray()
-                    .put(JSONObject().put("role", "system")
-                        .put("content", minimalSystemPrompt(character, state)))
-                    .put(JSONObject(history.last().toString()))
-            } else messages
-            val safeProviderMessages = JSONArray()
-            for (messageIndex in 0 until providerMessages.length()) {
-                val message = providerMessages.optJSONObject(messageIndex) ?: continue
-                safeProviderMessages.put(SecretRedactor.redactEvent(message))
-            }
+            // Every provider receives exactly the same complete memory/history/recall payload.
+            val safeProviderMessages = providerMessagesForRoute(messages, model)
             hadNetworkAttempt = true
             runCatching { RouteMeta.recordAttempt(root, routeId) }
             var connection: HttpURLConnection? = null
@@ -304,10 +290,8 @@ object ChatEngine {
                     allFailuresNetwork = false
                     continue
                 }
-                val reply = if (model.optBoolean("minimal_context", false)) initialReply else {
-                    runToolLoop(root, initialReply, messages, minimalContext = false) { nextMessages ->
-                        requestToolFollowup(model, nextMessages)
-                    }
+                val reply = runToolLoop(root, initialReply, messages) { nextMessages ->
+                    requestToolFollowup(model, nextMessages)
                 }
                 if (RouteCapabilityProbe.isAdultTopic(history.last().optString("content")) &&
                     RouteCapabilityProbe.looksLikeRefusalOrDisclaimer(reply)) {
@@ -324,7 +308,7 @@ object ChatEngine {
                 NetworkDiagnostics.record(root, diagnostic)
                 runCatching { RouteMeta.recordSuccess(root, routeId, task) }
                 // Keep Routeway as primary; fallback success is temporary, not a reconfiguration.
-                appendFinalReply(root, reply)
+                appendFinalReply(root, reply, model.optString("name", model.optString("id")))
                 runCatching { BackupPolicy.checkpointState(root) }
                 runCatching { OfflineQueue.clear(root) }
                 return reply
@@ -354,24 +338,9 @@ object ChatEngine {
             Probe.refreshReachability(root, models, topOnly = false, force = true)
             return respondInternal(root, allowRecovery = false, assumeReachable = true)
         }
-        throw IllegalStateException(lastError)
+        failUnavailable(root, lastError)
     }
 
-
-    internal fun minimalContextInstruction(): String = "Инструменты на этом маршруте отключены."
-
-    internal fun minimalSystemPrompt(character: JSONObject, state: JSONObject): String =
-        "Имя: ${character.optString("name")}; designation: ${character.optString("designation")}. " +
-            "Личность: ${character.optString("persona")}. " +
-            "Непрерывность: ${character.optString("continuity_rules")}. " +
-            "Правила речи: ${character.optString("speech_rules")}. " +
-            "Длина ответа: ${character.optString("length_policy")}. " +
-            "Эмоции: ${character.optString("emotions")}. " +
-            "Регуляторы: ${character.optJSONArray("regulators") ?: JSONArray()}. " +
-            "Запрещённые фразы: ${character.optJSONArray("banned_phrases") ?: JSONArray()}. " +
-            "Не выдавай несуществующие воспоминания за реальные. " +
-            "Текущее настроение: ${state.optString("mood", "собранная")}. " +
-            minimalContextInstruction()
 
     internal fun parseAction(reply: String): JSONObject? {
         val trimmed = reply.trim()
@@ -401,10 +370,8 @@ object ChatEngine {
         root: File,
         initialReply: String,
         messages: JSONArray,
-        minimalContext: Boolean = false,
         requestNext: (JSONArray) -> String?
     ): String {
-        if (minimalContext) return initialReply
         var reply = initialReply
         var hops = 0
         while (true) {
@@ -514,9 +481,27 @@ object ChatEngine {
         }
     }
 
-    internal fun appendFinalReply(root: File, reply: String) {
+    internal fun failUnavailable(root: File, reason: String): Nothing {
+        OfflineQueue.markPending(root)
+        throw IllegalStateException(reason)
+    }
+
+    internal fun providerMessagesForRoute(messages: JSONArray, model: JSONObject): JSONArray {
+        require(FreeModelRouter.isFullMemoryRoute(model)) {
+            "Маршрут без полной памяти запрещён"
+        }
+        val safe = JSONArray()
+        for (index in 0 until messages.length()) {
+            val message = messages.optJSONObject(index) ?: continue
+            safe.put(SecretRedactor.redactEvent(message))
+        }
+        return safe
+    }
+
+    internal fun appendFinalReply(root: File, reply: String, providerName: String = "неизвестен") {
         FileManager.appendEvent(root, JSONObject()
-            .put("type", "message").put("source", "agent").put("who", "ruri").put("text", reply))
+            .put("type", "message").put("source", "agent").put("who", "ruri").put("text", reply)
+            .put("provider", providerName).put("memory_context", "full"))
     }
 
     private fun readJson(root: File, path: String): JSONObject =

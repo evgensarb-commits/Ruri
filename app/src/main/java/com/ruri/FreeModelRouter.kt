@@ -4,6 +4,17 @@ import org.json.JSONArray
 
 /** Keeps provider selection strictly inside explicitly enabled free routes. */
 internal object FreeModelRouter {
+    fun isDisallowedMemoryRoute(model: org.json.JSONObject): Boolean =
+        model.optString("id").equals("kilo", true) ||
+            model.optBoolean("minimal_context", false) ||
+            model.optBoolean("allow_anonymous", false)
+
+    fun isFullMemoryRoute(model: org.json.JSONObject): Boolean =
+        !isDisallowedMemoryRoute(model) &&
+            model.optBoolean("free_tier", false) &&
+            model.optBoolean("enabled", true) &&
+            model.optString("api_key").isNotBlank()
+
     fun orderedIndices(
         models: JSONArray,
         primaryIndex: Int,
@@ -12,7 +23,7 @@ internal object FreeModelRouter {
         val eligible = (0 until models.length()).filter { index ->
             val model = models.optJSONObject(index)
             model != null &&
-                model.optBoolean("free_tier", false) &&
+                isFullMemoryRoute(model) &&
                 model.optBoolean("enabled", true) &&
                 (!requireNsfw || (
                     model.optBoolean("nsfw_capable", false) &&

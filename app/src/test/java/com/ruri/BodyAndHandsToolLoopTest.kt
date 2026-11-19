@@ -99,23 +99,38 @@ class ToolHopLimitTest : BodyHandsTestBase() {
     }
 }
 
-class MinimalContextNoToolsTest : BodyHandsTestBase() {
-    @Test fun minimalRouteDoesNotExecuteActionsOrExposeToolList() {
-        val messages = JSONArray()
-        var reasks = 0
-        val action = """{"action":"list_shelf"}"""
-        val reply = ChatEngine.runToolLoop(root, action, messages, minimalContext = true) {
-            reasks++
-            "unexpected"
+class KiloRemovedTest : BodyHandsTestBase() {
+    @Test fun routerExcludesKiloAnonymousAndMinimalContextRoutes() {
+        val models = JSONArray()
+            .put(JSONObject().put("id", "routeway").put("free_tier", true).put("enabled", true).put("api_key", "rw"))
+            .put(JSONObject().put("id", "kilo").put("free_tier", true).put("enabled", true).put("allow_anonymous", true).put("minimal_context", true))
+            .put(JSONObject().put("id", "requesty").put("free_tier", true).put("enabled", true).put("api_key", "rq"))
+            .put(JSONObject().put("id", "unsafe").put("free_tier", true).put("enabled", true).put("api_key", "x").put("minimal_context", true))
+        assertTrue(FreeModelRouter.isDisallowedMemoryRoute(models.getJSONObject(1)))
+        assertTrue(FreeModelRouter.isDisallowedMemoryRoute(models.getJSONObject(3)))
+        assertEquals(listOf(0, 2), FreeModelRouter.orderedIndices(models, 0))
+    }
+
+    @Test fun noAnonymousOrMinimalPayloadCanBeSent() {
+        val messages = JSONArray().put(JSONObject().put("role", "system").put("content", "full memory"))
+        val anonymous = JSONObject().put("free_tier", true).put("enabled", true).put("allow_anonymous", true)
+        val minimal = JSONObject().put("free_tier", true).put("enabled", true).put("api_key", "x").put("minimal_context", true)
+        listOf(anonymous, minimal).forEach { model ->
+            var rejected = false
+            try { ChatEngine.providerMessagesForRoute(messages, model) }
+            catch (_: IllegalArgumentException) { rejected = true }
+            assertTrue(rejected)
         }
-        assertEquals(action, reply)
-        assertEquals(0, reasks)
-        assertTrue(events("tool_call").isEmpty())
-        val prompt = ChatEngine.minimalSystemPrompt(JSONObject(), JSONObject())
-        assertTrue(prompt.contains("Инструменты на этом маршруте отключены"))
-        assertFalse(prompt.contains("search"))
-        assertFalse(prompt.contains("read_shelf"))
-        assertFalse(prompt.contains("remember_fact"))
+    }
+
+    @Test fun unavailableRoutesSetPendingReplyAndReturnSpecificCause() {
+        FileManager.init(root)
+        var reason = ""
+        try { ChatEngine.failUnavailable(root, "Routeway: DNS недоступен") }
+        catch (e: IllegalStateException) { reason = e.message.orEmpty() }
+        assertTrue(reason.contains("Routeway"))
+        assertTrue(reason.contains("DNS"))
+        assertTrue(OfflineQueue.hasPending(root))
     }
 }
 
@@ -147,5 +162,30 @@ class RememberFactGuardTest : BodyHandsTestBase() {
         val fact = facts.getJSONObject(0)
         assertEquals("self_reported", fact.optString("origin"))
         assertTrue(fact.optDouble("confidence", 1.0) <= 0.6)
+    }
+}
+
+
+class FullMemoryEveryRouteTest : BodyHandsTestBase() {
+    @Test fun everyFreeRouteGetsL0HistoryL1L2L3AndRecall() {
+        val messages = JSONArray()
+            .put(JSONObject().put("role", "system").put("content", "L1_FACTS\nL2_DIARY\nL3_SUMMARY"))
+            .put(JSONObject().put("role", "system").put("content", "RECALL_RESULT"))
+            .put(JSONObject().put("role", "user").put("content", "L0_HISTORY"))
+        val models = listOf(
+            JSONObject().put("id", "routeway").put("free_tier", true).put("enabled", true).put("api_key", "rw"),
+            JSONObject().put("id", "requesty").put("free_tier", true).put("enabled", true).put("api_key", "rq")
+        )
+        models.forEach { model ->
+            val payload = ChatEngine.providerMessagesForRoute(messages, model)
+            val content = (0 until payload.length()).joinToString("\n") {
+                payload.getJSONObject(it).optString("content")
+            }
+            assertTrue(content.contains("L0_HISTORY"))
+            assertTrue(content.contains("L1_FACTS"))
+            assertTrue(content.contains("L2_DIARY"))
+            assertTrue(content.contains("L3_SUMMARY"))
+            assertTrue(content.contains("RECALL_RESULT"))
+        }
     }
 }
