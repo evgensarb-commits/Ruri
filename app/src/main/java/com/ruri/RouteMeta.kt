@@ -3,7 +3,6 @@ package com.ruri
 import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
-import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
@@ -16,16 +15,6 @@ object RouteMeta {
         SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")
         }.format(Date())
-
-    private fun nextUtcMidnight(): Long {
-        val c = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
-        c.add(Calendar.DAY_OF_YEAR, 1)
-        c.set(Calendar.HOUR_OF_DAY, 0)
-        c.set(Calendar.MINUTE, 0)
-        c.set(Calendar.SECOND, 0)
-        c.set(Calendar.MILLISECOND, 0)
-        return c.timeInMillis
-    }
 
     @Synchronized
     fun load(root: File): JSONObject = try {
@@ -47,7 +36,6 @@ object RouteMeta {
         return JSONObject()
             .put("fail_streak", 0)
             .put("success_streak", 0)
-            .put("cooldown_until", 0L)
             .put("day_count", 0)
             .put("day_key", utcDay())
             .put("last_ok", 0L)
@@ -132,8 +120,7 @@ object RouteMeta {
 
     fun available(root: File, id: String, now: Long = System.currentTimeMillis()): Boolean {
         val route = route(root, id)
-        return route.optLong("cooldown_until", 0L) <= now &&
-            route.optBoolean("reachable", true)
+        return route.optBoolean("reachable", true)
     }
 
     /** Counts every outbound provider request, including probes and unsuccessful attempts. */
@@ -152,7 +139,6 @@ object RouteMeta {
         val streak = it.optInt("success_streak", 0) + 1
         it.put("success_streak", streak)
         it.put("last_ok", System.currentTimeMillis())
-        if (streak >= 2) it.put("cooldown_until", 0L)
         updateTaskScore(it, task, true)
     }
 
@@ -160,7 +146,7 @@ object RouteMeta {
         it.put("success_streak", 0)
         updateTaskScore(it, task, false)
         when (kind) {
-            "quota" -> it.put("cooldown_until", nextUtcMidnight())
+            "quota" -> Unit // No cooldowns: quota limits are enforced by quotaLeft().
             "network", "timeout" -> {
                 it.put("reachable", false)
                 if (!NetState.vpn) it.put("ru_reachable", false)
@@ -174,9 +160,6 @@ object RouteMeta {
             else -> {
                 val streak = it.optInt("fail_streak", 0) + 1
                 it.put("fail_streak", streak)
-                if (streak >= 2) {
-                    it.put("cooldown_until", System.currentTimeMillis() + 10L * 60L * 1000L)
-                }
             }
         }
     }

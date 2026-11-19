@@ -89,15 +89,17 @@ class RouteMetaTest {
     }
 
     @Test
-    fun twoOrdinaryFailuresApplyCooldownAndQuotaFailureBlocksUntilUtcMidnight() {
+    fun repeatedFailuresAndLegacyCooldownNeverBlockRoute() {
         val root = Files.createTempDirectory("ruri-route-cooldown").toFile()
         try {
             RouteMeta.recordFailure(root, "route-test", "server")
             assertTrue(RouteMeta.available(root, "route-test"))
             RouteMeta.recordFailure(root, "route-test", "server")
-            assertFalse(RouteMeta.available(root, "route-test"))
+            assertTrue(RouteMeta.available(root, "route-test"))
             RouteMeta.recordFailure(root, "quota-route", "quota")
-            assertFalse(RouteMeta.available(root, "quota-route"))
+            assertTrue(RouteMeta.available(root, "quota-route"))
+            RouteMeta.update(root, "legacy-route") { it.put("cooldown_until", Long.MAX_VALUE) }
+            assertTrue(RouteMeta.available(root, "legacy-route"))
         } finally {
             root.deleteRecursively()
         }

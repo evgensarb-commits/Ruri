@@ -40,8 +40,6 @@ object ChatEngine {
                     "Маршрут $name: требуется VPN"
                 !RouteMeta.quotaLeft(root, id, selected.optInt("rpd", 200)) ->
                     "Маршрут $name: дневная квота исчерпана"
-                meta.optLong("cooldown_until", 0L) > System.currentTimeMillis() ->
-                    "Маршрут $name: временный cooldown"
                 !meta.optBoolean("reachable", true) ->
                     "Маршрут $name: DNS или сервер недоступен при последней проверке"
                 else -> "Маршрут $name: Android сообщает, что сетевого подключения нет"
@@ -167,8 +165,6 @@ object ChatEngine {
                     "Маршрут $selectedName: требуется VPN"
                 selected != null && !RouteMeta.quotaLeft(root, selectedId, selected.optInt("rpd", 200)) ->
                     "Маршрут $selectedName: дневная квота исчерпана"
-                selectedMeta.optLong("cooldown_until", 0L) > System.currentTimeMillis() ->
-                    "Маршрут $selectedName: временный cooldown"
                 !selectedMeta.optBoolean("reachable", true) ->
                     "Маршрут $selectedName: последняя проверка сети не прошла (DNS/доступность)"
                 else -> ""
