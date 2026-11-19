@@ -56,6 +56,7 @@ class RuriLifeWorker(
         val root = appContext.filesDir
         return try {
             FileManager.init(root)
+            NetState.refresh(appContext)
             try { LocalBackupManager.createIfDue(root) }
             catch (backupError: Exception) { Log.e("Ruri", "Automatic local backup failed; life cycle will continue", backupError) }
             val pending = EventQueue.snapshot(root)
@@ -69,10 +70,41 @@ class RuriLifeWorker(
                     .take(300)
             }
 
+            // Cheap reachability probes are rate-limited locally and never consume model quota.
+            if (NetState.online) {
+                val routeConfig = try { JSONObject(SecretStore.readRuntimeConfig(root)) } catch (_: Exception) { JSONObject() }
+                if (reason.contains("net_change")) {
+                    Probe.refreshReachability(
+                        root, routeConfig.optJSONArray("models") ?: org.json.JSONArray(),
+                        topOnly = false, force = true
+                    )
+                }
+                Probe.heartbeat(root, routeConfig)
+                Probe.fullProbeIfDue(root, routeConfig)
+            }
+
             // Do useful local work first; it does not require an API key or network.
             LifeStateEngine.process(appContext, reason)
             FactExtractor.extractIfDue(appContext)
             MemoryConsolidator.consolidateIfDue(appContext)
+
+            // A queued Commander turn is answered once connectivity returns. The transient
+            // offline notice is never appended to L0; ChatEngine records only a real reply.
+            if (NetState.online && OfflineQueue.hasPending(root)) {
+                try {
+                    val reply = ChatEngine.respond(root)
+                    if (reply != ChatEngine.OFFLINE_REPLY) Notifier.thought(appContext, reply)
+                } catch (drainError: Exception) {
+                    Log.w("Ruri", "Offline reply remains queued until a route is available", drainError)
+                }
+            }
+
+            try {
+                BackupPolicy.checkpointState(root)
+                BackupPolicy.maybeRolling(appContext, "maintenance")
+            } catch (backupError: Exception) {
+                Log.e("Ruri", "Rolling backup checkpoint failed; life cycle will continue", backupError)
+            }
 
             // Avoid spending tokens on every 30-minute maintenance wake-up.
             if (shouldRunRemoteCognition(appContext, reason)) {
@@ -114,11 +146,17 @@ class RuriLifeWorker(
         if (BatteryLevel.get(context) <= 12 && !initiativeDue) return false
 
         val config = try { JSONObject(SecretStore.readRuntimeConfig(root)) } catch (_: Exception) { return false }
+        if (!NetState.online) return false
         val models = config.optJSONArray("models") ?: return false
-        return (0 until models.length()).any { index ->
-            val model = models.optJSONObject(index)
-            model != null && model.optString("api_key").isNotBlank() &&
-                model.optString("base_url").isNotBlank() && model.optString("model").isNotBlank()
+        val task = when {
+            initiativeDue -> Task.WARMTH
+            explicitSelfTask -> Task.TOOLS
+            else -> Task.REASON
         }
+        val needsNsfw = initiativeDue && RouteSelector.nsfwWindow(root)
+        return FreeModelRouter.orderedIndices(
+            root, models, config.optInt("current", 0),
+            requireNsfw = needsNsfw, task = task
+        ).isNotEmpty()
     }
 }
