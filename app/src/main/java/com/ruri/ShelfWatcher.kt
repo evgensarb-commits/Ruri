@@ -93,8 +93,8 @@ object ShelfWatcher {
         val printable = decoded.count { it == '\n' || it == '\r' || it == '\t' || !it.isISOControl() }
         if (decoded.isNotBlank() && printable >= decoded.length * 0.85) return decoded
         // Recover readable strings from partially textual binary formats (e.g. PDF metadata/content streams).
-        return Regex("[\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}\\\\p{P}\\\\p{Zs}]{5,}")
+        return Regex("[\\p{L}\\p{N}][\\p{L}\\p{N}\\p{P}\\p{Zs}]{5,}")
             .findAll(decoded).map { it.value.trim() }.filter { it.length >= 6 }
-            .take(120).joinToString("\\n").take(12000)
+            .take(120).joinToString("\n").take(12000)
     }
 }
