@@ -22,12 +22,12 @@ object LifeScheduler {
     private const val EVENT_NAME = "ru-r1-event-cognition"
 
     fun ensurePeriodic(context: Context) {
-        val request = PeriodicWorkRequestBuilder<RuriLifeWorker>(30, TimeUnit.MINUTES)
+        val request = PeriodicWorkRequestBuilder<RuriLifeWorker>(15, TimeUnit.MINUTES)
             .addTag(PERIODIC_NAME)
             .build()
 
         WorkManager.getInstance(context.applicationContext)
-            .enqueueUniquePeriodicWork(PERIODIC_NAME, ExistingPeriodicWorkPolicy.KEEP, request)
+            .enqueueUniquePeriodicWork(PERIODIC_NAME, ExistingPeriodicWorkPolicy.UPDATE, request)
     }
 
     fun enqueueEvent(context: Context, reason: String) {
