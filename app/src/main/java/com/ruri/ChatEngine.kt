@@ -31,7 +31,10 @@ object ChatEngine {
             OfflineQueue.markPending(root)
             return OFFLINE_REPLY
         }
-        if (models.length() == 0) throw IllegalStateException("Список моделей пуст")
+        if (models.length() == 0) {
+            OfflineQueue.markPending(root)
+            throw IllegalStateException("Нет настроенных бесплатных маршрутов с полной памятью")
+        }
         // Capability probes run at most once per day per free route; do not NSFW-gate ordinary chat.
         RouteCapabilityProbe.refreshIfDue(root, config)
         // Retry transient failures only. HTTP 429 hands off immediately to the next free route.
@@ -121,11 +124,6 @@ object ChatEngine {
         if (history.isEmpty() || history.last().optString("role") != "user") {
             throw IllegalStateException("Не найдено последнее сообщение командира")
         }
-        history.forEach { messages.put(it) }
-        if (!hasFullMemoryContext(messages)) {
-            OfflineQueue.markPending(root)
-            throw IllegalStateException("Полная память не собрана; запрос к модели не отправлен")
-        }
         val task = RouteSelector.detectTask(history.last().optString("content"))
         val requireNsfw = RouteSelector.nsfwWindow(root)
         val exclusiveRoute = config.optBoolean("exclusive_route", false)
@@ -177,6 +175,10 @@ object ChatEngine {
             )
         }
         history.forEach { messages.put(it) }
+        if (!hasFullMemoryContext(messages)) {
+            OfflineQueue.markPending(root)
+            throw IllegalStateException("Полная память не собрана; запрос к модели не отправлен")
+        }
 
         var lastError = "Все настроенные модели недоступны"
         var hadNetworkAttempt = false
@@ -201,11 +203,11 @@ object ChatEngine {
                 continue
             }
             // Every provider receives the same complete memory/history context.
-            val safeProviderMessages = JSONArray()
-            for (messageIndex in 0 until messages.length()) {
-                val message = messages.optJSONObject(messageIndex) ?: continue
-                safeProviderMessages.put(SecretRedactor.redactEvent(message))
-            }
+            val safeProviderMessages = providerMessagesWithFullMemory(messages)
+                ?: run {
+                    OfflineQueue.markPending(root)
+                    throw IllegalStateException("Полная память не прошла проверку; запрос к маршруту не отправлен")
+                }
             hadNetworkAttempt = true
             runCatching { RouteMeta.recordAttempt(root, routeId) }
             var connection: HttpURLConnection? = null
@@ -349,9 +351,20 @@ object ChatEngine {
             Probe.refreshReachability(root, models, topOnly = false, force = true)
             return respondInternal(root, allowRecovery = false, assumeReachable = true)
         }
+        OfflineQueue.markPending(root)
         throw IllegalStateException(lastError)
     }
 
+
+    internal fun providerMessagesWithFullMemory(messages: JSONArray): JSONArray? {
+        if (!hasFullMemoryContext(messages)) return null
+        val safe = JSONArray()
+        for (i in 0 until messages.length()) {
+            val message = messages.optJSONObject(i) ?: continue
+            safe.put(SecretRedactor.redactEvent(message))
+        }
+        return safe
+    }
 
     internal fun hasFullMemoryContext(messages: JSONArray): Boolean {
         if (messages.length() < 2) return false
