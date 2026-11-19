@@ -161,19 +161,8 @@ object ChatEngine {
                 // Kilo Auto Free may route through trial endpoints that log prompts.
                 // Send only the current turn and a short persona; never send memory/history/notifications.
                 JSONArray()
-                    .put(JSONObject().put("role", "system").put(
-                        "content",
-                        "Имя: ${character.optString("name")}; designation: ${character.optString("designation")}. " +
-                            "Личность: ${character.optString("persona")}. " +
-                            "Непрерывность: ${character.optString("continuity_rules")}. " +
-                            "Правила речи: ${character.optString("speech_rules")}. " +
-                            "Длина ответа: ${character.optString("length_policy")}. " +
-                            "Эмоции: ${character.optString("emotions")}. " +
-                            "Регуляторы: ${character.optJSONArray("regulators") ?: JSONArray()}. " +
-                            "Запрещённые фразы: ${character.optJSONArray("banned_phrases") ?: JSONArray()}. " +
-                            "Не выдавай несуществующие воспоминания за реальные. " +
-                            minimalContextInstruction()
-                    ))
+                    .put(JSONObject().put("role", "system")
+                        .put("content", minimalSystemPrompt(character, state)))
                     .put(JSONObject(history.last().toString()))
             } else messages
             val safeProviderMessages = JSONArray()
@@ -322,6 +311,19 @@ object ChatEngine {
 
 
     internal fun minimalContextInstruction(): String = "Инструменты на этом маршруте отключены."
+
+    internal fun minimalSystemPrompt(character: JSONObject, state: JSONObject): String =
+        "Имя: ${character.optString("name")}; designation: ${character.optString("designation")}. " +
+            "Личность: ${character.optString("persona")}. " +
+            "Непрерывность: ${character.optString("continuity_rules")}. " +
+            "Правила речи: ${character.optString("speech_rules")}. " +
+            "Длина ответа: ${character.optString("length_policy")}. " +
+            "Эмоции: ${character.optString("emotions")}. " +
+            "Регуляторы: ${character.optJSONArray("regulators") ?: JSONArray()}. " +
+            "Запрещённые фразы: ${character.optJSONArray("banned_phrases") ?: JSONArray()}. " +
+            "Не выдавай несуществующие воспоминания за реальные. " +
+            "Текущее настроение: ${state.optString("mood", "собранная")}. " +
+            minimalContextInstruction()
 
     internal fun parseAction(reply: String): JSONObject? {
         val trimmed = reply.trim()
