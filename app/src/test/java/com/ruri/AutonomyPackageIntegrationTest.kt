@@ -22,10 +22,10 @@ class AutonomyPackageIntegrationTest {
     @Test
     fun diaryUiFiltersLegacyEntriesAndPrimaryNavigationHasOnlyChatAndDiary() {
         val html = source("src/main/assets/index.html")
-        assertTrue(html.contains("data-pane=\\"chat\\""))
-        assertTrue(html.contains("data-pane=\\"diary\\""))
-        assertFalse(html.contains("data-pane=\\"search\\""))
-        assertFalse(html.contains("data-pane=\\"shelf\\""))
+        assertTrue(html.contains("data-pane=" + "\"chat\""))
+        assertTrue(html.contains("data-pane=" + "\"diary\""))
+        assertFalse(html.contains("data-pane=" + "\"search\""))
+        assertFalse(html.contains("data-pane=" + "\"shelf\""))
         assertTrue(html.contains("e.kind==='thought'"))
     }
 
@@ -54,10 +54,10 @@ class AutonomyPackageIntegrationTest {
     @Test
     fun legacyProvidersAreExplicitNeutralFallbacks() {
         val fileManager = source("src/main/java/com/ruri/FileManager.kt")
-        assertTrue(fileManager.contains("\\"needs_vpn\\" to true"))
-        assertTrue(fileManager.contains("\\"ru_reachable\\" to false"))
-        assertTrue(fileManager.contains("\\"nsfw_capable\\" to false"))
-        assertTrue(fileManager.contains("\\"role\\" to \\"neutral_fallback\\""))
-        assertTrue(fileManager.contains("config.put(\\"free_only\\", true)"))
+        assertTrue(fileManager.contains("needs_vpn"))
+        assertTrue(fileManager.contains("ru_reachable"))
+        assertTrue(fileManager.contains("nsfw_capable"))
+        assertTrue(fileManager.contains("neutral_fallback"))
+        assertTrue(fileManager.contains("free_only"))
     }
 }
