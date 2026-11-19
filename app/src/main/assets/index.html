@@ -68,7 +68,7 @@ function status(s){$('#status').textContent='● '+s;}
 function read(p){return Ruri.read(p)||'';}
 function write(p,v){var r=Ruri.write(p,v);if(typeof r==='string'&&r.indexOf('ERROR:')===0)throw new Error(r);return r;}
 function appendLog(obj){var result=Ruri.appendEvent(JSON.stringify(obj));if(typeof result==='string'&&result.indexOf('ERROR:')===0)throw new Error(result);}
-function routeBadges(){var map={};try{read('memory/route_badges.jsonl').split('\\n').forEach(function(line){if(!line.trim())return;var b=JSON.parse(line);map[String(b.ts)]=b;});}catch(_){}return map;}
+function routeBadges(){var map={};try{read('memory/route_badges.jsonl').split('\n').forEach(function(line){if(!line.trim())return;var b=JSON.parse(line);map[String(b.ts)]=b;});}catch(_){}return map;}
 function messageNode(who,text,ts,route){
 var d=document.createElement('div');d.className='msg '+(who==='ruri'?'her':'me');
 var badge=who==='ruri'&&route?' · '+esc(route)+' · ПОЛНАЯ ПАМЯТЬ':'';
@@ -76,7 +76,7 @@ d.innerHTML='<div class="meta">'+(who==='ruri'?'РУРИ':'КОМАНДИР')+' 
 }
 function loadChat(){
 var box=$('#chat');box.innerHTML='';var badges=routeBadges();
-read('memory/L0_raw.jsonl').split('\\n').forEach(function(line){
+read('memory/L0_raw.jsonl').split('\n').forEach(function(line){
 try{var e=JSON.parse(line);if(e.type==='message'&&e.who){var b=badges[String(e.ts||e.timestamp)];box.appendChild(messageNode(e.who,e.text,e.ts,b&&b.route));}}catch(_){}
 });
 box.scrollTop=box.scrollHeight;
