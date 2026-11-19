@@ -111,7 +111,11 @@ class MinimalContextNoToolsTest : BodyHandsTestBase() {
         assertEquals(action, reply)
         assertEquals(0, reasks)
         assertTrue(events("tool_call").isEmpty())
-        assertTrue(ChatEngine.minimalContextInstruction().contains("отключены"))
+        val prompt = ChatEngine.minimalSystemPrompt(JSONObject(), JSONObject())
+        assertTrue(prompt.contains("Инструменты на этом маршруте отключены"))
+        assertFalse(prompt.contains("search"))
+        assertFalse(prompt.contains("read_shelf"))
+        assertFalse(prompt.contains("remember_fact"))
     }
 }
 
