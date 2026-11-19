@@ -113,7 +113,7 @@ object Thinker {
         for (index in order) {
             val model = models.optJSONObject(index) ?: continue
             // Never send private memory, notifications or shelf context to minimal-context routes.
-            if (model.optBoolean("minimal_context", false)) continue
+            if (shouldSkipMinimalContextRoute(model)) continue
             if (model.optString("api_key").isBlank() && !model.optBoolean("allow_anonymous", false)) continue
             val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
             runCatching { RouteMeta.recordAttempt(root, routeId) }
@@ -180,6 +180,8 @@ object Thinker {
         FileManager.write(root, "memory/L4_state.json", state.toString(2))
         Notifier.thought(ctx, safeReply)
     }
+
+    internal fun shouldSkipMinimalContextRoute(model: JSONObject): Boolean = model.optBoolean("minimal_context", false)
 
     private fun buildPrompt(ctx: Context, root: File, state: JSONObject, reason: String, initiative: Boolean): String {
         val character = readJson(root, "core/character.json")
