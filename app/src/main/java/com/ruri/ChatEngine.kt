@@ -318,7 +318,7 @@ object ChatEngine {
                     continue
                 }
                 lastSearchSourceUrls = JSONArray()
-                val reply = ToolLoop.runToolLoop(root, initialReply, messages) { nextMessages ->
+                val reply = ToolLoop.unwrapDiaryReply(root, initialReply, messages) { nextMessages ->
                     requestToolFollowup(model, nextMessages)
                 }
                 if (RouteCapabilityProbe.isAdultTopic(history.last().optString("content")) &&
