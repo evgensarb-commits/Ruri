@@ -515,11 +515,7 @@ object ChatEngine {
                 val key = model.optString("api_key")
                 if (key.isNotBlank()) setRequestProperty("Authorization", "Bearer " + key)
             }
-            val safeMessages = JSONArray()
-            for (i in 0 until messages.length()) {
-                val message = messages.optJSONObject(i) ?: continue
-                safeMessages.put(SecretRedactor.redactEvent(message))
-            }
+            val safeMessages = providerMessagesWithFullMemory(messages) ?: return null
             val body = JSONObject().put("model", model.optString("model"))
                 .put("messages", safeMessages).put("temperature", 0.85)
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
