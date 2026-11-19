@@ -428,6 +428,21 @@ object FileManager {
         return event.toString()
     }
 
+    /** Appends auxiliary metadata without changing the immutable L0 event schema. */
+    fun appendAuxiliaryJsonl(root: File, path: String, input: JSONObject) {
+        val target = safe(root, path) ?: throw IllegalArgumentException("Invalid auxiliary path")
+        val event = SecretRedactor.redactEvent(input)
+        val bytes = (event.toString() + "\n").toByteArray(Charsets.UTF_8)
+        synchronized(lockFor(target)) {
+            target.parentFile?.mkdirs()
+            FileOutputStream(target, true).use { output ->
+                output.write(bytes)
+                output.flush()
+                output.fd.sync()
+            }
+        }
+    }
+
     fun replaceL0FromArchive(root: File, content: String) {
         val normalized = StringBuilder()
         val ids = HashSet<String>()

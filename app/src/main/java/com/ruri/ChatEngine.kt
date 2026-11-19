@@ -499,9 +499,16 @@ object ChatEngine {
     }
 
     internal fun appendFinalReply(root: File, reply: String, providerName: String = "неизвестен") {
+        val ts = System.currentTimeMillis()
+        val messageId = "evt-" + java.util.UUID.randomUUID().toString()
         FileManager.appendEvent(root, JSONObject()
-            .put("type", "message").put("source", "agent").put("who", "ruri").put("text", reply)
-            .put("provider", providerName).put("memory_context", "full"))
+            .put("id", messageId).put("ts", ts)
+            .put("type", "message").put("source", "agent").put("who", "ruri").put("text", reply))
+        runCatching {
+            FileManager.appendAuxiliaryJsonl(root, "memory/provider_meta.jsonl", JSONObject()
+                .put("message_id", messageId).put("ts", ts)
+                .put("provider", providerName).put("memory_context", "full"))
+        }
     }
 
     private fun readJson(root: File, path: String): JSONObject =

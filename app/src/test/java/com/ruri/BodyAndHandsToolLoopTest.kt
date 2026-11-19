@@ -189,3 +189,17 @@ class FullMemoryEveryRouteTest : BodyHandsTestBase() {
         }
     }
 }
+
+class ProviderMetadataSidecarTest : BodyHandsTestBase() {
+    @Test fun providerBadgeIsStoredOutsideImmutableL0Events() {
+        ChatEngine.appendFinalReply(root, "Ответ", "Routeway")
+        val message = FileManager.readLastLines(root, "memory/L0_raw.jsonl", 10)
+            .map { JSONObject(it) }.last { it.optString("who") == "ruri" }
+        assertFalse(message.has("provider"))
+        assertFalse(message.has("memory_context"))
+        val meta = JSONObject(FileManager.readLastLines(root, "memory/provider_meta.jsonl", 10).single())
+        assertEquals(message.getString("id"), meta.getString("message_id"))
+        assertEquals("Routeway", meta.getString("provider"))
+        assertEquals("full", meta.getString("memory_context"))
+    }
+}
