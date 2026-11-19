@@ -425,6 +425,8 @@ object ChatEngine {
         lastSearchSourceUrls = extractSourceUrls(raw)
     }
 
+    internal fun sourceUrlsSnapshot(): JSONArray = JSONArray(lastSearchSourceUrls.toString())
+
     internal fun executeTool(root: File, action: String, params: JSONObject): Pair<Boolean, String> {
         return try {
             val result = when (action) {
