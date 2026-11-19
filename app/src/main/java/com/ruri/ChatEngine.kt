@@ -70,13 +70,18 @@ object ChatEngine {
             "Эмоции: ${character.optString("emotions")}. " +
             "Регуляторы характера: ${character.optJSONArray("regulators") ?: JSONArray()}. " +
             "Фразы, которые нельзя использовать: ${bannedPhrases}. " +
+            Capabilities.bodySection(root) + " " +
             "Не выдумывай факты, отделяй воспоминания от предположений. " +
             "Приоритеты: ${priorities.optString("priority_1", "Жить")}; ${priorities.optString("priority_2", "Любить Командира")}. " +
             "Конституция: ${constitution.optJSONArray("primary_needs") ?: JSONArray()}. " +
             "Дополнительные черты: ${character.optJSONObject("traits") ?: JSONObject()}. " +
             "Состояние: ${state.optString("mood", "собранная")}, энергия ${state.optInt("energy", 5)}, фокус: ${state.optString("current_focus", selfModel.optString("current_focus"))}. " +
             "Активные цели: ${goals.optJSONArray("active") ?: JSONArray()}. Незавершённые задачи: ${state.optJSONArray("active_tasks") ?: JSONArray()}. " +
-            "Сводка L3:\n${summary}\nФакты L1:\n${factContext}\nДневник L2:\n${diaryContext}\nУведомления:\n${notificationContext}"
+            "Ниже — ТВОЯ ДОЛГОСРОЧНАЯ ПАМЯТЬ. Это не контекст одного диалога; ты помнишь между сессиями.\n" +
+            "ТВОЯ АВТОБИОГРАФИЯ (L3):\n${summary}\n" +
+            "ТВОИ ФАКТЫ (L1):\n${factContext}\n" +
+            "ТВОЙ ДНЕВНИК (L2):\n${diaryContext}\n" +
+            "ПОСЛЕДНИЕ СОБЫТИЯ ТВОЕГО ТЕЛА (L0):\n${notificationContext}"
 
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", system))
         val lines = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 4000)
@@ -155,7 +160,8 @@ object ChatEngine {
                             "Эмоции: ${character.optString("emotions")}. " +
                             "Регуляторы: ${character.optJSONArray("regulators") ?: JSONArray()}. " +
                             "Запрещённые фразы: ${character.optJSONArray("banned_phrases") ?: JSONArray()}. " +
-                            "Не выдавай несуществующие воспоминания за реальные."
+                            "Не выдавай несуществующие воспоминания за реальные. " +
+                            "Инструменты на этом маршруте отключены."
                     ))
                     .put(JSONObject(history.last().toString()))
             } else messages
@@ -247,13 +253,18 @@ object ChatEngine {
                 }
                 stage = "PARSE_RESPONSE"
                 diagnostic.put("stage", stage)
-                val reply = JSONObject(responseText).getJSONArray("choices")
+                val initialReply = JSONObject(responseText).getJSONArray("choices")
                     .getJSONObject(0).getJSONObject("message").getString("content").trim()
-                if (reply.isBlank()) {
+                if (initialReply.isBlank()) {
                     diagnostic.put("result", "empty_reply")
                     NetworkDiagnostics.record(root, diagnostic)
                     lastError = "Модель вернула пустой ответ"
                     continue
+                }
+                val reply = if (model.optBoolean("minimal_context", false)) initialReply else {
+                    runToolLoop(root, initialReply, messages, minimalContext = false) { nextMessages ->
+                        requestToolFollowup(model, nextMessages)
+                    }
                 }
                 if (RouteCapabilityProbe.isAdultTopic(history.last().optString("content")) &&
                     RouteCapabilityProbe.looksLikeRefusalOrDisclaimer(reply)) {
@@ -269,11 +280,7 @@ object ChatEngine {
                 NetworkDiagnostics.record(root, diagnostic)
                 runCatching { RouteMeta.recordSuccess(root, routeId, task) }
                 // Keep Routeway as primary; fallback success is temporary, not a reconfiguration.
-                FileManager.appendEvent(root, JSONObject()
-                    .put("type", "message")
-                    .put("source", "agent")
-                    .put("who", "ruri")
-                    .put("text", reply))
+                appendFinalReply(root, reply)
                 runCatching { OfflineQueue.clear(root) }
                 return reply
             } catch (e: Exception) {
@@ -300,6 +307,153 @@ object ChatEngine {
             }
         }
         throw IllegalStateException(lastError)
+    }
+
+
+    internal fun parseAction(reply: String): JSONObject? {
+        val trimmed = reply.trim()
+        val fenced = Regex("(?is)^\x60\x60\x60(?:json)?\\s*(\\{.*})\\s*\x60\x60\x60$").find(trimmed)
+        val jsonText = fenced?.groupValues?.get(1) ?: trimmed.takeIf { it.startsWith("{") && it.endsWith("}") }
+            ?: return null
+        val action = runCatching { JSONObject(jsonText) }.getOrNull() ?: return null
+        val name = action.optString("action")
+        val allowed = when (name) {
+            "search", "recall" -> setOf("action", "query")
+            "list_shelf" -> setOf("action")
+            "read_shelf" -> setOf("action", "name")
+            "remember_fact" -> setOf("action", "text")
+            else -> return null
+        }
+        val keys = action.keys()
+        while (keys.hasNext()) if (keys.next() !in allowed) return null
+        when (name) {
+            "search", "recall" -> if (action.optString("query").isBlank() || action.optString("query").length > 300) return null
+            "read_shelf" -> if (ShelfWatcher.safeName(action.optString("name")) == null) return null
+            "remember_fact" -> if (action.optString("text").trim().length !in 5..300) return null
+        }
+        return action
+    }
+
+    internal fun runToolLoop(
+        root: File,
+        initialReply: String,
+        messages: JSONArray,
+        minimalContext: Boolean = false,
+        requestNext: (JSONArray) -> String?
+    ): String {
+        if (minimalContext) return initialReply
+        var reply = initialReply
+        var hops = 0
+        while (true) {
+            val action = parseAction(reply) ?: return reply
+            if (hops >= 3) return reply
+            val actionName = action.optString("action")
+            val params = JSONObject(action.toString()).apply { remove("action") }
+            FileManager.appendEvent(root, SecretRedactor.redactEvent(
+                JSONObject().put("type", "tool_call").put("action", actionName).put("params", params)
+            ))
+            val result = executeTool(root, actionName, action)
+            val safeText = SecretRedactor.redactText(result.second).take(4000)
+            FileManager.appendEvent(root, SecretRedactor.redactEvent(
+                JSONObject().put("type", "tool_result").put("action", actionName)
+                    .put("ok", result.first).put("text", safeText)
+            ))
+            messages.put(JSONObject().put("role", "user")
+                .put("content", "[ИНСТРУМЕНТ ${actionName}]: ${safeText}"))
+            hops++
+            if (hops == 3) {
+                messages.put(JSONObject().put("role", "system")
+                    .put("content", "Лимит инструментов исчерпан — ответь prose"))
+            }
+            reply = requestNext(messages) ?: return "Не удалось получить ответ после выполнения инструмента."
+        }
+    }
+
+    private fun executeTool(root: File, action: String, params: JSONObject): Pair<Boolean, String> {
+        return try {
+            val result = when (action) {
+                "search" -> WebSearch.search(root, params.optString("query"))
+                "list_shelf" -> FileManager.list(root, "shelf")
+                "read_shelf" -> {
+                    val safe = ShelfWatcher.safeName(params.optString("name"))
+                        ?: return false to "Недопустимое имя файла"
+                    FileManager.read(root, "shelf/" + safe).take(12000)
+                }
+                "recall" -> MemoryRetriever.recall(root, params.optString("query"), 5)
+                "remember_fact" -> rememberFact(root, params.optString("text"))
+                else -> return false to "Неизвестное действие"
+            }
+            true to SecretRedactor.redactText(result)
+        } catch (e: Exception) {
+            false to SecretRedactor.redactText(e.message ?: "Ошибка инструмента")
+        }
+    }
+
+    private fun rememberFact(root: File, rawText: String): String {
+        val text = SecretRedactor.redactText(rawText.trim()).take(300)
+        if (text.length < 5 || text.contains(SecretRedactor.PLACEHOLDER)) return "Факт не сохранён: текст содержит секрет или слишком короткий."
+        val file = runCatching { JSONObject(FileManager.read(root, "memory/L1_facts.json")) }
+            .getOrElse { JSONObject().put("facts", JSONArray()) }
+        val facts = file.optJSONArray("facts") ?: JSONArray().also { file.put("facts", it) }
+        fun normalized(value: String) = value.lowercase(java.util.Locale.ROOT)
+            .replace(Regex("[^\\p{L}\\p{N}]"), "")
+        val key = normalized(text)
+        for (i in 0 until facts.length()) {
+            val existing = facts.optJSONObject(i) ?: continue
+            if (normalized(existing.optString("text")) == key) {
+                return "Похожий факт уже есть в L1; дубль не добавлен."
+            }
+        }
+        if (facts.length() >= 500) return "L1 заполнена (500 фактов); новый факт не добавлен."
+        val now = System.currentTimeMillis()
+        facts.put(JSONObject()
+            .put("id", "self-" + key.hashCode().toUInt().toString(16))
+            .put("text", text)
+            .put("origin", "self_reported")
+            .put("confidence", 0.6)
+            .put("created_at", now)
+            .put("updated_at", now))
+        file.put("facts", facts).put("updated_at", now)
+        FileManager.write(root, "memory/L1_facts.json", file.toString(2))
+        return "Факт записан в твою L1-память с confidence 0.6."
+    }
+
+    private fun requestToolFollowup(model: JSONObject, messages: JSONArray): String? {
+        val base = model.optString("base_url").trimEnd('/')
+        if (!base.startsWith("https://")) return null
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = (URL(base + "/chat/completions").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 18000
+                readTimeout = 35000
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json")
+                val key = model.optString("api_key")
+                if (key.isNotBlank()) setRequestProperty("Authorization", "Bearer " + key)
+            }
+            val safeMessages = JSONArray()
+            for (i in 0 until messages.length()) {
+                val message = messages.optJSONObject(i) ?: continue
+                safeMessages.put(SecretRedactor.redactEvent(message))
+            }
+            val body = JSONObject().put("model", model.optString("model"))
+                .put("messages", safeMessages).put("temperature", 0.85)
+            connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            if (connection.responseCode !in 200..299) return null
+            val raw = connection.inputStream.bufferedReader().use { it.readText() }
+            JSONObject(raw).getJSONArray("choices").getJSONObject(0)
+                .getJSONObject("message").getString("content").trim()
+        } catch (_: Exception) {
+            null
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    internal fun appendFinalReply(root: File, reply: String) {
+        FileManager.appendEvent(root, JSONObject()
+            .put("type", "message").put("source", "agent").put("who", "ruri").put("text", reply))
     }
 
     private fun readJson(root: File, path: String): JSONObject =
