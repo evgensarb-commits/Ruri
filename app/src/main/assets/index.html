@@ -10,7 +10,7 @@ header strong{font-size:15px;letter-spacing:.08em;color:#f2e9d5;flex:1}#status{f
 nav{display:flex;background:#070a10;border-bottom:1px solid #273653;overflow:auto}
 nav button{flex:1;min-width:65px;padding:12px 4px;background:none;border:0;border-bottom:2px solid transparent;color:#7f91ad;font:700 10px monospace}
 nav button.on{color:#f4c94f;border-bottom-color:#f4c94f}
-main{flex:1;min-height:0;display:flex;flex-direction:column}.pane{display:none;flex:1;min-height:0;flex-direction:column}.pane.on{display:flex}
+main{flex:1;min-height:0;display:flex;flex-direction:column}.pane{display:none;flex:1;min-height:0;flex-direction:column}.pane.on{display:flex}.gear{margin-left:12px;border:1px solid #354a70;background:transparent;color:#f4c94f;border-radius:4px;padding:6px 10px;font-size:18px}.overlay-pane{position:fixed;inset:0;z-index:20;background:#090d14;display:none;overflow:auto}.overlay-pane.on{display:flex}.overlay-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.overlay-head button{background:transparent;border:1px solid #354a70;color:#f4c94f;padding:6px 10px}
 #chat{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:12px}
 .msg{max-width:94%;display:grid;gap:4px}.msg.her{align-self:flex-start}.msg.me{align-self:flex-end;justify-items:end}
 .meta{font:9px monospace;color:#7f91ad;letter-spacing:.08em}
@@ -30,20 +30,17 @@ button.secondary{background:transparent;color:#f4c94f}
 </style>
 </head>
 <body>
-<header><strong>RU-R1 · Рури</strong><span id="status">● ЗАГРУЗКА</span></header>
-<nav>
-<button class="on" data-pane="chat">ЧАТ</button><button data-pane="diary">ДНЕВНИК</button><button data-pane="brain">МОЗГ</button><button data-pane="shelf">ПОЛКА</button><button data-pane="search">ПОИСК</button><button data-pane="diag">ДИАГНОСТИКА</button>
-</nav>
+<header><strong>RU-R1 · Рури</strong><span id="status">● ЗАГРУЗКА</span><button id="settingsToggle" class="gear" aria-label="Настройки">⚙</button></header>
+<nav><button class="on" data-pane="chat">ЧАТ</button><button data-pane="diary">ДНЕВНИК</button></nav>
 <main>
 <section class="pane on" id="pane-chat">
 <div id="chat"></div>
-<div class="composer"><div class="inrow"><textarea id="input" rows="1" placeholder="Написать Рури…"></textarea><button class="action" id="send">➤</button></div><div class="small" id="inputHelp">Enter — отправить · Shift+Enter — новая строка</div></div>
+<div class="composer"><div class="inrow"><button class="action secondary" id="attach" title="Добавить файл">📎</button><input id="attachFile" type="file" hidden><textarea id="input" rows="1" placeholder="Написать Рури…"></textarea><button class="action" id="send">➤</button></div><div class="small" id="inputHelp">Enter — отправить · Shift+Enter — новая строка</div></div>
 </section>
 <section class="pane" id="pane-diary"><div class="scroll"><h2 class="section">ДНЕВНИК <span>Рури</span></h2><div id="diary"></div></div></section>
-<section class="pane" id="pane-brain"><div class="scroll">
-<h2 class="section">МОЗГ <span>и личность</span></h2>
-<div class="card"><b>БЕСПЛАТНЫЕ МАРШРУТЫ — БЕЗ ПЛАТНЫХ ЗАПРОСОВ</b><p>Основной: Routeway · Gemma 4 MeroMero Free (до 200 запросов/сутки). Резерв: Kilo Auto Free (до 200 запросов/час по IP, ключ не нужен). Третий: Requesty · Google Gemma 4 Free (до 200 запросов/сутки). Рури вызывает только модели, отмеченные как бесплатные. Старые Gemini и Groq остаются в зашифрованной конфигурации, но в бесплатном режиме не используются.</p><p>Добавь ключи Routeway и Requesty ниже. Ключи хранятся в Android Keystore. Kilo работает анонимно: его Auto Free может передавать запросы провайдерам, которые логируют prompt, поэтому Рури отправляет туда только текущую реплику без истории, дневника и уведомлений.</p><p><a href="#" onclick="Ruri.openUrl('https://routeway.ai/');return false">Routeway — получить ключ</a> · <a href="#" onclick="Ruri.openUrl('https://www.requesty.ai/model/google/gemma-4-31b-it');return false">Requesty — получить ключ</a></p></div>
-<div class="card" style="margin-bottom:14px"><b>ДИАГНОСТИКА СОЕДИНЕНИЯ</b><p style="margin:6px 0 10px;color:#9cafcb;font-size:13px">Локальная проверка DNS, TLS-соединения, времени ожидания и HTTP-ответа. Ключи и переписка в журнал не записываются.</p><button class="action secondary" id="refreshNetworkDiagnostics">ПОСЛЕДНЯЯ ПОПЫТКА</button><pre id="networkDiagnostics" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere;margin-top:10px">Попыток соединения пока нет.</pre></div><div class="card" style="margin:12px 0"><b>АВТОМАТИЧЕСКИЕ КОПИИ НА ТЕЛЕФОНЕ</b><p style="margin:6px 0 10px;color:#9cafcb;font-size:13px">Рури хранит до 14 последних ежедневных снимков памяти. Архивы проверяются по SHA-256; API-ключи и Android Keystore в них не входят.</p><div id="backupStatus" class="small">Проверяю локальные копии…</div><div class="actions"><button class="action secondary" id="refreshBackups">ОБНОВИТЬ</button><button class="action secondary" id="createBackup">СОЗДАТЬ КОПИЮ СЕЙЧАС</button></div><div class="field"><label>КОПИЯ ДЛЯ ПРОВЕРКИ ИЛИ ВОССТАНОВЛЕНИЯ</label><select id="backupSelect"></select></div><div class="actions"><button class="action secondary" id="verifyBackup">ПРОВЕРИТЬ</button><button class="action secondary" id="restoreBackup">ВОССТАНОВИТЬ</button></div></div><div class="field"><label>ПРОВАЙДЕР ДЛЯ СОХРАНЕНИЯ КЛЮЧА</label><select id="model"><option value="routeway">Routeway · основной</option><option value="requesty">Requesty · третий резерв</option></select></div>
+<section class="pane overlay-pane" id="pane-brain"><div class="scroll"><div class="overlay-head"><h2 class="section">МОЗГ <span>и личность</span></h2><button id="closeSettings">✕</button></div>
+<div class="card"><b>БЕСПЛАТНЫЕ МАРШРУТЫ — БЕЗ ПЛАТНЫХ ЗАПРОСОВ</b><p>Основной: Routeway · Gemma 4 MeroMero Free. Резерв: Kilo Auto Free (анонимный маршрут с минимальным контекстом). Третий: Requesty · Google Gemma 4 Free. Вызываются только явно бесплатные маршруты; free-tier guard не отключается. Gemini и Groq — legacy neutral_fallback: выключены, требуют VPN, ru_reachable=false, nsfw_capable=false. Для любого маршрута NSFW-возможность считается false до успешного live-зонда.</p><p>Добавь ключи Routeway и Requesty ниже. Ключи хранятся в Android Keystore. Kilo работает анонимно: его Auto Free может передавать запросы провайдерам, которые логируют prompt, поэтому Рури отправляет туда только текущую реплику без истории, дневника и уведомлений.</p><p><a href="#" onclick="Ruri.openUrl('https://routeway.ai/');return false">Routeway — получить ключ</a> · <a href="#" onclick="Ruri.openUrl('https://www.requesty.ai/model/google/gemma-4-31b-it');return false">Requesty — получить ключ</a></p></div>
+<div class="actions"><button class="action secondary" id="showDiagnostics">ОТКРЫТЬ ДИАГНОСТИКУ</button></div><div class="card" style="margin-bottom:14px"><b>ДИАГНОСТИКА СОЕДИНЕНИЯ</b><p style="margin:6px 0 10px;color:#9cafcb;font-size:13px">Локальная проверка DNS, TLS-соединения, времени ожидания и HTTP-ответа. Ключи и переписка в журнал не записываются.</p><button class="action secondary" id="refreshNetworkDiagnostics">ПОСЛЕДНЯЯ ПОПЫТКА</button><pre id="networkDiagnostics" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere;margin-top:10px">Попыток соединения пока нет.</pre></div><div class="card" style="margin:12px 0"><b>АВТОМАТИЧЕСКИЕ КОПИИ НА ТЕЛЕФОНЕ</b><p style="margin:6px 0 10px;color:#9cafcb;font-size:13px">Рури хранит до 14 последних ежедневных снимков памяти. Архивы проверяются по SHA-256; API-ключи и Android Keystore в них не входят.</p><div id="backupStatus" class="small">Проверяю локальные копии…</div><div class="actions"><button class="action secondary" id="refreshBackups">ОБНОВИТЬ</button><button class="action secondary" id="createBackup">СОЗДАТЬ КОПИЮ СЕЙЧАС</button></div><div class="field"><label>КОПИЯ ДЛЯ ПРОВЕРКИ ИЛИ ВОССТАНОВЛЕНИЯ</label><select id="backupSelect"></select></div><div class="actions"><button class="action secondary" id="verifyBackup">ПРОВЕРИТЬ</button><button class="action secondary" id="restoreBackup">ВОССТАНОВИТЬ</button></div></div><div class="field"><label>ПРОВАЙДЕР ДЛЯ СОХРАНЕНИЯ КЛЮЧА</label><select id="model"><option value="routeway">Routeway · основной</option><option value="requesty">Requesty · третий резерв</option></select></div>
 <div class="field"><label>API KEY</label><input id="key" type="password" autocomplete="off" placeholder="Вставь ключ модели"></div>
 <button class="action" id="saveKey">СОХРАНИТЬ КЛЮЧ</button>
 <div class="field"><label>ИМЯ И ХАРАКТЕР</label><input id="charName" placeholder="Имя"></div>
@@ -51,24 +48,9 @@ button.secondary{background:transparent;color:#f4c94f}
 <button class="action secondary" id="saveCharacter">СОХРАНИТЬ ХАРАКТЕР</button><div class="card" style="margin-top:14px"><p>Мониторинг уведомлений телефона работает только после твоего разрешения Android. Полное содержимое сохраняется в локальный L0 и может включаться в запросы выбранной модели, без автоматического скрытия паролей и других строк.</p><button class="action secondary" id="notificationAccess" style="margin-top:10px">НАСТРОИТЬ ДОСТУП К УВЕДОМЛЕНИЯМ</button></div><div class="card" style="margin-top:10px"><p>Доступ к статистике использования приложений позволяет Рури локально определять название активного приложения. Текст экрана и вводимые данные этим разрешением не читаются.</p><div class="small" id="usageAccessStatus">Доступ к статистике приложений не проверен.</div><button class="action secondary" id="usageAccess" style="margin-top:10px">НАСТРОИТЬ ДОСТУП К ПРИЛОЖЕНИЯМ</button></div>
 <div class="field"><label>ФАКТ ДЛЯ ДОЛГОЙ ПАМЯТИ L1</label><input id="factInput" placeholder="Например: предпочитает короткие ответы"></div><button class="action secondary" id="saveFact">ЗАПОМНИТЬ ФАКТ</button><div class="actions"><button class="action secondary" id="exp">ЭКСПОРТ ПАМЯТИ</button><button class="action secondary" id="imp">ИМПОРТ ПАМЯТИ</button><input id="file" type="file" accept=".json,application/json" hidden></div>
 </div></section>
-<section class="pane" id="pane-shelf"><div class="scroll">
-<h2 class="section">ПОЛКА <span>файлов</span></h2>
-<div class="card"><p>Локальные заметки и материалы, которые Рури может учитывать в следующих циклах мышления. Файлы остаются на телефоне.</p></div>
-<div class="field"><label>ИМЯ ФАЙЛА</label><input id="shelfName" placeholder="например: заметка.txt"></div>
-<div class="field"><label>СОДЕРЖИМОЕ</label><textarea id="shelfText" rows="4" placeholder="Текст заметки"></textarea></div>
-<button class="action" id="saveShelf">СОХРАНИТЬ НА ПОЛКУ</button>
-<div id="shelfList" style="margin-top:16px"></div>
-</div></section>
-<section class="pane" id="pane-search"><div class="scroll">
-<h2 class="section">ПОИСК <span>в сети</span></h2>
-<div class="card"><p>Рури ищет открытые веб-страницы через DuckDuckGo. Нажми на результат, чтобы открыть страницу в браузере телефона.</p></div>
-<div class="field"><label>ПОИСКОВЫЙ ЗАПРОС</label><input id="searchQuery" placeholder="Что найти в интернете?"></div>
-<button class="action" id="searchButton">ИСКАТЬ В СЕТИ</button>
-<div id="searchStatus" class="small" style="margin:12px 0"></div><div id="searchResults"></div>
-</div></section>
-<section class="pane" id="pane-diag">
-<div class="scroll">
-<h2 class="section">СОСТОЯНИЕ <span>системы</span></h2>
+
+<section class="pane overlay-pane" id="pane-diag">
+<div class="scroll"><div class="overlay-head"><h2 class="section">СОСТОЯНИЕ <span>системы</span></h2><button id="closeDiagnostics">✕</button></div>
 <button class="action" id="run-diag" style="margin-bottom:12px">ОБНОВИТЬ ДАННЫЕ</button>
 <pre id="diag-out" style="background:#050810;border:1px solid #32456d;color:#dde3ec;padding:12px;font:12px/1.5 monospace;border-radius:4px;white-space:pre-wrap;overflow-wrap:anywhere">Нажми «ОБНОВИТЬ ДАННЫЕ»</pre>
 <div class="small">Секретные API-ключи не отображаются. Диагностика читает локальное состояние приложения.</div>
@@ -97,7 +79,7 @@ box.scrollTop=box.scrollHeight;
 function loadDiary(){
 try{var entries=JSON.parse(read('memory/L2_diary.json')||'{"entries":[]}').entries||[];
 var box=$('#diary');box.innerHTML='';
-entries.slice(-100).reverse().forEach(function(e){var d=messageNode('ruri',e.text,e.ts);d.querySelector('.meta').textContent='МЫСЛЬ · '+new Date(e.ts).toLocaleString('ru-RU');box.appendChild(d);});
+entries.filter(function(e){return !e.kind||e.kind==='thought';}).slice(-100).reverse().forEach(function(e){var d=messageNode('ruri',e.text,e.ts);d.querySelector('.meta').textContent='МЫСЛЬ · '+new Date(e.ts).toLocaleString('ru-RU');box.appendChild(d);});
 }catch(e){$('#diary').textContent='Ошибка чтения дневника: '+e.message;}
 }
 function historyForModel(){
@@ -144,8 +126,7 @@ e.preventDefault();var v=this.value;this.value='';this.style.height='46px';sendM
 document.querySelectorAll('nav button').forEach(function(b){b.addEventListener('click',function(){
 document.querySelectorAll('nav button').forEach(function(x){x.classList.remove('on');});b.classList.add('on');
 document.querySelectorAll('.pane').forEach(function(p){p.classList.remove('on');});$('#pane-'+b.dataset.pane).classList.add('on');
-if(b.dataset.pane==='diary')loadDiary();if(b.dataset.pane==='shelf')loadShelf();if(b.dataset.pane==='brain'){loadCharacter();loadAutomaticBackups();}
-if(b.dataset.pane==='diag')$('#run-diag').click();
+if(b.dataset.pane==='diary')loadDiary();
 });});
 $('#run-diag').addEventListener('click',function(){
   var out=$('#diag-out');out.textContent='Сбор данных…';
@@ -174,16 +155,21 @@ var paths=['memory/network_diagnostics.jsonl','core/priorities.json','core/const
 $('#exp').addEventListener('click',function(){try{var a={};paths.forEach(function(p){a[p]=read(p);});['shelf','research','skills','proposals'].forEach(function(dir){try{JSON.parse(Ruri.list(dir)||'[]').forEach(function(name){a[dir+'/'+name]=read(dir+'/'+name);});}catch(_){}});var r=Ruri.exportArchive(JSON.stringify(a,null,2));if(String(r).indexOf('ERROR:')===0)throw new Error(r);}catch(e){alert('Экспорт: '+e.message);}});
 $('#imp').addEventListener('click',function(){$('#file').click();});
 $('#file').addEventListener('change',function(e){var f=e.target.files&&e.target.files[0];if(!f)return;var rd=new FileReader();rd.onload=function(ev){try{var r=Ruri.importArchive(String(ev.target.result));if(String(r).indexOf('ERROR:')===0)throw new Error(r);alert('Архив восстановлен.');location.reload();}catch(err){alert('Импорт: '+err.message);}};rd.readAsText(f);e.target.value='';});
-function loadShelf(){try{var names=JSON.parse(Ruri.list('shelf')||'[]'),box=$('#shelfList');box.innerHTML='';if(!names.length){box.textContent='Полка пока пуста.';return;}names.forEach(function(name){var d=document.createElement('div');d.className='card';d.innerHTML='<b>'+esc(name)+'</b><div class="small" id="shelf-'+esc(name).replace(/[^a-zA-Z0-9_-]/g,'_')+'"></div><button class="action secondary" data-file="'+esc(name)+'">ПРОЧИТАТЬ</button>';box.appendChild(d);});box.querySelectorAll('button[data-file]').forEach(function(b){b.addEventListener('click',function(){var text=read('shelf/'+b.dataset.file);alert(text.slice(0,3500)||'(пустой файл)');});});}catch(e){$('#shelfList').textContent='Ошибка: '+e.message;}}
-$('#saveShelf').addEventListener('click',function(){try{var name=$('#shelfName').value.trim().replace(/[\\/\\\\]/g,'_');if(!name)throw new Error('Укажи имя файла');write('shelf/'+name,$('#shelfText').value);$('#shelfText').value='';loadShelf();alert('Файл сохранён на полке.');}catch(e){alert(e.message);}});
-$('#searchButton').addEventListener('click',function(){
-var q=$('#searchQuery').value.trim();if(!q)return;$('#searchStatus').textContent='Ищу в сети…';$('#searchResults').innerHTML='';
-try{var data=JSON.parse(Ruri.searchWeb(q));if(data.error)throw new Error(data.error);var results=data.results||[];$('#searchStatus').textContent='Найдено результатов: '+results.length;
-results.forEach(function(r){var d=document.createElement('div');d.className='result';d.innerHTML='<a href="#" class="open">'+esc(r.title)+'</a><p>'+esc(r.snippet)+'</p><div class="small">'+esc(r.url)+'</div>';d.querySelector('a').addEventListener('click',function(e){e.preventDefault();Ruri.openUrl(r.url);});$('#searchResults').appendChild(d);});
-if(!results.length)$('#searchStatus').textContent='Результаты не получены. Попробуй другой запрос.';
-}catch(e){$('#searchStatus').textContent=e.message;$('#searchStatus').className='small error';}
+
+$('#settingsToggle').addEventListener('click',function(){document.querySelectorAll('.pane').forEach(function(p){p.classList.remove('on');});$('#pane-brain').classList.add('on');loadCharacter();loadAutomaticBackups();});
+$('#closeSettings').addEventListener('click',function(){$('#pane-brain').classList.remove('on');$('#pane-chat').classList.add('on');document.querySelectorAll('nav button').forEach(function(b){b.classList.toggle('on',b.dataset.pane==='chat');});});
+$('#showDiagnostics').addEventListener('click',function(){$('#pane-brain').classList.remove('on');$('#pane-diag').classList.add('on');$('#run-diag').click();});
+$('#closeDiagnostics').addEventListener('click',function(){$('#pane-diag').classList.remove('on');$('#pane-brain').classList.add('on');});
+$('#attach').addEventListener('click',function(){$('#attachFile').click();});
+$('#attachFile').addEventListener('change',function(e){
+var f=e.target.files&&e.target.files[0];if(!f)return;
+if(f.size>8*1024*1024){alert('Файл больше 8 МБ.');e.target.value='';return;}
+var reader=new FileReader();
+reader.onload=function(ev){try{var data=String(ev.target.result).split(',')[1]||'';var result=Ruri.saveShelfFile(f.name,data);if(String(result).indexOf('ERROR:')===0)throw new Error(result);status('ФАЙЛ ДОБАВЛЕН НА ПОЛКУ');}catch(err){alert('Не удалось добавить файл: '+err.message);}finally{e.target.value='';}};
+reader.onerror=function(){alert('Не удалось прочитать файл.');e.target.value='';};
+reader.readAsDataURL(f);
 });
-$('#searchQuery').addEventListener('keydown',function(e){if(e.key==='Enter')$('#searchButton').click();});
-try{loadChat();loadCharacter();status('НА СВЯЗИ');}catch(e){status('ОШИБКА ЗАПУСКА');}
+
+try{loadChat();status('НА СВЯЗИ');}catch(e){status('ОШИБКА ЗАПУСКА');}
 </script>
 </body></html>
