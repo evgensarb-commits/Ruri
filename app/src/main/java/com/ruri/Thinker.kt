@@ -177,7 +177,7 @@ object Thinker {
         diary.put("updated_at", now)
         FileManager.write(root, "memory/L2_diary.json", diary.toString(2))
         if (initiative) {
-            appendChatMessage(root, "ruri", safeReply, now)
+            appendChatMessage(root, "ruri", safeReply, now, ChatEngine.sourceUrlsSnapshot())
             state.put("waiting_for_reply", true)
             state.put("initiative_sent_at", now)
             state.put("last_initiative", now)
@@ -346,16 +346,15 @@ object Thinker {
         )
     }
 
-    private fun appendChatMessage(root: File, who: String, text: String, ts: Long) {
-        FileManager.appendEvent(
-            root,
-            JSONObject()
-                .put("ts", ts)
-                .put("type", "message")
-                .put("source", if (who == "ruri") "agent" else "commander")
-                .put("who", who)
-                .put("text", text)
-        )
+    private fun appendChatMessage(root: File, who: String, text: String, ts: Long, sourceUrls: JSONArray = JSONArray()) {
+        val event = JSONObject()
+            .put("ts", ts)
+            .put("type", "message")
+            .put("source", if (who == "ruri") "agent" else "commander")
+            .put("who", who)
+            .put("text", text)
+        if (sourceUrls.length() > 0) event.put("source_urls", sourceUrls)
+        FileManager.appendEvent(root, event)
     }
 
     private fun hoursSince(ts: Long, now: Long): Double = if (ts <= 0L) -1.0 else (now - ts) / 3600000.0
