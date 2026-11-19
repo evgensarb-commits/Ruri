@@ -421,6 +421,13 @@ object ChatEngine {
         return action
     }
 
+    internal fun runToolLoop(
+        root: File,
+        initialReply: String,
+        messages: JSONArray,
+        requestNext: (JSONArray) -> String?
+    ): String = ToolLoop.runToolLoop(root, initialReply, messages, requestNext)
+
     internal fun captureSearchUrls(raw: String) {
         lastSearchSourceUrls = extractSourceUrls(raw)
     }
