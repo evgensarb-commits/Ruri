@@ -74,7 +74,7 @@ object ShelfWatcher {
     private fun readSeen(root: File): JSONObject =
         runCatching { JSONObject(FileManager.read(root, SEEN)) }.getOrDefault(JSONObject())
 
-    private fun safeName(value: String): String? {
+    internal fun safeName(value: String): String? {
         val name = value.substringAfterLast('/').substringAfterLast('\\')
         if (name.isBlank() || name == "." || name == ".." || name.length > 120) return null
         return name
