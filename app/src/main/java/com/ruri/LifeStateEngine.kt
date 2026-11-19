@@ -16,7 +16,6 @@ object LifeStateEngine {
     private const val STATE_PATH = "memory/L4_state.json"
     private const val DRIVES_PATH = "core/drives.json"
     private const val L0_PATH = "memory/L0_raw.jsonl"
-    private const val DIARY_PATH = "memory/L2_diary.json"
     private const val DAY_MS = 24L * 60L * 60L * 1000L
     private const val MAX_EVENTS_PER_CYCLE = 2000
     private const val MAX_BYTES_PER_CYCLE = 4 * 1024 * 1024
@@ -146,7 +145,6 @@ object LifeStateEngine {
             val report = auditMemory(root, now)
             state.put("memory_health", report)
             state.put("last_memory_audit", now)
-            appendMaintenanceDiary(root, report, now)
             FileManager.write(root, STATE_PATH, state.toString(2))
         }
         updateSelfModel(root, state, reason, now)
@@ -231,19 +229,6 @@ object LifeStateEngine {
         val endOffset = outbox.optLong("end_offset", 0L)
 
         updateDrives(root, eventCount, battery, processedAt, batchId)
-        if (eventCount > 0) {
-            appendActivityDiary(
-                root,
-                batchId,
-                eventCount,
-                recordCount,
-                outbox.optInt("malformed_count", 0),
-                types,
-                battery,
-                processedAt
-            )
-        }
-
         state.put("last_processed_event_offset", endOffset)
         val lastId = outbox.optString("last_event_id")
         if (lastId.isNotBlank()) state.put("last_processed_event_id", lastId)
@@ -338,103 +323,6 @@ object LifeStateEngine {
             .put("l0_event_count", eventCount)
             .put("l0_malformed_lines", malformedEvents)
             .put("healthy", invalid.length() == 0 && malformedEvents == 0)
-    }
-
-    private fun appendActivityDiary(
-        root: File,
-        batchId: String,
-        eventCount: Int,
-        recordCount: Int,
-        malformedCount: Int,
-        eventTypes: JSONObject,
-        battery: Int,
-        now: Long
-    ) {
-        val raw = FileManager.read(root, DIARY_PATH)
-        if (raw.isBlank()) {
-            Log.w("Ruri", "Diary is empty; activity summary was not written")
-            return
-        }
-        val diary = try { JSONObject(raw) } catch (e: Exception) {
-            preserveCorruptFile(root, DIARY_PATH, raw)
-            Log.w("Ruri", "Diary is malformed; original file was preserved", e)
-            return
-        }
-        if (diary.optString("last_activity_batch_id") == batchId) return
-        val entries = diary.optJSONArray("entries") ?: JSONArray()
-        val keys = eventTypes.keys()
-        val parts = ArrayList<String>()
-        while (keys.hasNext()) {
-            val key = keys.next()
-            parts.add(key + ": " + eventTypes.optInt(key))
-        }
-        val details = parts.joinToString(", ").take(500)
-        val text = "Обработала $eventCount событий из $recordCount записей L0 ($details). " +
-            "Некорректных строк: $malformedCount. Заряд устройства: $battery%. " +
-            "Исходные события остались в журнале L0."
-        val previous = if (entries.length() > 0) entries.optJSONObject(entries.length() - 1) else null
-        if (previous != null &&
-            previous.optString("kind") == "activity_summary" &&
-            now - previous.optLong("ts", 0L) < 10L * 60L * 1000L
-        ) {
-            previous.put("ts", now)
-            previous.put("text", text)
-            previous.put("event_count", previous.optInt("event_count") + eventCount)
-            previous.put("record_count", previous.optInt("record_count") + recordCount)
-            previous.put("event_types", eventTypes)
-            previous.put("battery_percent", battery)
-            previous.put("batch_id", batchId)
-        } else {
-            val sequence = maxOf(diary.optLong("total_entries", entries.length().toLong()), entries.length().toLong()) + 1L
-            entries.put(
-                JSONObject()
-                    .put("sequence", sequence)
-                    .put("ts", now)
-                    .put("kind", "activity_summary")
-                    .put("text", text)
-                    .put("event_count", eventCount)
-                    .put("record_count", recordCount)
-                    .put("event_types", eventTypes)
-                    .put("battery_percent", battery)
-                    .put("batch_id", batchId)
-            )
-            diary.put("total_entries", sequence)
-        }
-        while (entries.length() > 500) entries.remove(0)
-        diary.put("entries", entries)
-        diary.put("last_activity_batch_id", batchId)
-        diary.put("updated_at", now)
-        FileManager.write(root, DIARY_PATH, diary.toString(2))
-    }
-
-    private fun appendMaintenanceDiary(root: File, report: JSONObject, now: Long) {
-        val raw = FileManager.read(root, DIARY_PATH)
-        if (raw.isBlank()) return
-        val diary = try { JSONObject(raw) } catch (e: Exception) {
-            preserveCorruptFile(root, DIARY_PATH, raw)
-            return
-        }
-        val auditId = "audit:$now"
-        if (diary.optString("last_maintenance_audit_id") == auditId) return
-        val entries = diary.optJSONArray("entries") ?: JSONArray()
-        val checkedCount = report.optJSONArray("checked_json_files")?.length() ?: 0
-        val text = if (report.optBoolean("healthy")) {
-            "Провела плановую локальную проверку памяти: проверены $checkedCount JSON-файлов и " +
-                report.optInt("l0_event_count") + " записей L0; ошибок структуры не обнаружено."
-        } else {
-            "Провела плановую проверку памяти и обнаружила повреждения. Диагностические копии сохранены, исходные файлы не удаляла."
-        }
-        val sequence = maxOf(diary.optLong("total_entries", entries.length().toLong()), entries.length().toLong()) + 1L
-        entries.put(
-            JSONObject().put("sequence", sequence).put("ts", now).put("kind", "maintenance")
-                .put("text", text).put("health", report).put("batch_id", auditId)
-        )
-        while (entries.length() > 500) entries.remove(0)
-        diary.put("entries", entries)
-        diary.put("total_entries", sequence)
-        diary.put("last_maintenance_audit_id", auditId)
-        diary.put("updated_at", now)
-        FileManager.write(root, DIARY_PATH, diary.toString(2))
     }
 
     private fun readStateStrict(root: File): JSONObject {

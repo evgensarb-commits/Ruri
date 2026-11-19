@@ -8,6 +8,7 @@ import android.net.Uri
 import android.provider.Settings
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Base64
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -136,6 +137,22 @@ class MainActivity : AppCompatActivity() {
         fun getDiagnostics(): String = Diagnostics.run(this@MainActivity)
 
         @JavascriptInterface
+        fun saveShelfFile(name: String, base64: String): String {
+            return try {
+                val safe = name.substringAfterLast('/').substringAfterLast('\\')
+                    .replace(Regex("[^A-Za-z0-9._ -]"), "_").take(100)
+                require(safe.isNotBlank() && safe != "." && safe != "..") { "Invalid file name" }
+                require(base64.length <= 12 * 1024 * 1024) { "File is too large" }
+                val bytes = Base64.decode(base64, Base64.DEFAULT)
+                require(bytes.size <= 8 * 1024 * 1024) { "File is too large" }
+                val dir = File(filesDir, "shelf").apply { mkdirs() }
+                File(dir, safe).writeBytes(bytes)
+                ShelfWatcher.markAdded(this@MainActivity, safe)
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "shelf save failed") }
+        }
+
+        @JavascriptInterface
         fun completeChat(callbackId: String): String {
             if (!callbackId.matches(Regex("[A-Za-z0-9_-]{1,80}"))) return "ERROR: invalid callback"
             chatExecutor.execute {
@@ -242,7 +259,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
-        fun searchWeb(query: String): String = WebSearch.search(query)
+        fun searchWeb(query: String): String = WebSearch.search(filesDir, query)
 
         @JavascriptInterface
         fun openNotificationAccessSettings(): String {

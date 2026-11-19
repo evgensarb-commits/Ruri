@@ -127,6 +127,8 @@ object FileManager {
             }
         """.trimIndent())
 
+        put(root, "core/search.json", """{ "cse_key": "", "cse_cx": "" }""")
+
         put(root, "core/character.json", """
             {
               "name": "Рури",
@@ -679,6 +681,37 @@ object FileManager {
                 .put("priority", 3)
                 .put("free_tier", true)
                 .put("enabled", true))
+
+            ensureProvider("gemini", JSONObject()
+                .put("id", "gemini").put("name", "Gemini (legacy, disabled)")
+                .put("base_url", "https://generativelanguage.googleapis.com/v1beta/openai")
+                .put("api_key", "").put("model", "gemini-3.8-flash")
+                .put("priority", 90).put("free_tier", false).put("enabled", false))
+            ensureProvider("groq", JSONObject()
+                .put("id", "groq").put("name", "Groq (legacy, disabled)")
+                .put("base_url", "https://api.groq.com/openai/v1")
+                .put("api_key", "").put("model", "openai/gpt-oss-120b")
+                .put("priority", 91).put("free_tier", false).put("enabled", false))
+
+            for (i in 0 until models.length()) {
+                val model = models.optJSONObject(i) ?: continue
+                if (model.optString("id") == "gemini" || model.optString("id") == "groq") {
+                    val legacyFields = mapOf(
+                        "needs_vpn" to true,
+                        "ru_reachable" to false,
+                        "nsfw_capable" to false,
+                        "role" to "neutral_fallback",
+                        "free_tier" to false,
+                        "enabled" to false
+                    )
+                    legacyFields.forEach { (key, value) ->
+                        if (model.opt(key) != value) {
+                            model.put(key, value)
+                            changed = true
+                        }
+                    }
+                }
+            }
 
             // Legacy paid providers and any unknown models remain stored, but are never sent.
             for (i in 0 until models.length()) {
