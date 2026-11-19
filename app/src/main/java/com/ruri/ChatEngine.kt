@@ -12,21 +12,22 @@ import android.os.SystemClock
 
 /** Native model gateway: WebView never sends provider requests directly. */
 object ChatEngine {
+    const val OFFLINE_REPLY = "Связи нет. Отвечу, когда она вернётся."
+
     fun respond(root: File): String {
+        if (!NetState.online) {
+            OfflineQueue.markPending(root)
+            return OFFLINE_REPLY
+        }
         val config = JSONObject(SecretStore.readRuntimeConfig(root))
         val models = config.optJSONArray("models") ?: JSONArray()
         if (models.length() == 0) throw IllegalStateException("Список моделей пуст")
         val current = config.optInt("current", -1)
-        // A route may handle character chat only after its own live adult-topic probe passes.
+        // Capability probes run at most once per day per free route; do not NSFW-gate ordinary chat.
         RouteCapabilityProbe.refreshIfDue(root, config)
-        val order = FreeModelRouter.orderedIndices(models, current, requireNsfw = true)
-        if (order.isEmpty()) {
-            throw IllegalStateException("Нет бесплатного маршрута, прошедшего живую NSFW-проверку. Проверь ключи и диагностику маршрутов.")
-        }
         // Retry transient failures only. HTTP 429 hands off immediately to the next free route.
         val attemptsByModel = mutableMapOf<Int, Int>()
         val retryableModels = mutableSetOf<Int>()
-        val requestOrder = order.flatMap { index -> List(3) { index } }
 
         val character = readJson(root, "core/character.json")
         val priorities = readJson(root, "core/priorities.json")
@@ -95,6 +96,20 @@ object ChatEngine {
         if (history.isEmpty() || history.last().optString("role") != "user") {
             throw IllegalStateException("Не найдено последнее сообщение командира")
         }
+        val task = RouteSelector.detectTask(history.last().optString("content"))
+        val requireNsfw = RouteSelector.nsfwWindow(root)
+        val order = FreeModelRouter.orderedIndices(
+            root, models, current, requireNsfw = requireNsfw, task = task
+        )
+        if (order.isEmpty()) {
+            val reason = if (requireNsfw) {
+                "Нет доступного бесплатного маршрута для взрослой темы: проверь VPN, квоту и результаты NSFW-проб."
+            } else {
+                "Нет доступного бесплатного маршрута: проверь подключение, VPN, дневную квоту и ключи."
+            }
+            throw IllegalStateException(reason)
+        }
+        val requestOrder = order.flatMap { index -> List(3) { index } }
         val recalled = MemoryRetriever.recall(root, history.last().optString("content"), limit = 6)
         if (recalled.isNotBlank()) {
             messages.put(
@@ -141,6 +156,8 @@ object ChatEngine {
                 val message = providerMessages.optJSONObject(messageIndex) ?: continue
                 safeProviderMessages.put(SecretRedactor.redactEvent(message))
             }
+            val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
+            runCatching { RouteMeta.recordAttempt(root, routeId) }
             var connection: HttpURLConnection? = null
             val diagnostic = JSONObject()
                 .put("timestamp", System.currentTimeMillis())
@@ -211,6 +228,8 @@ object ChatEngine {
                     diagnostic.put("stage", "HTTP")
                     diagnostic.put("result", "http_error")
                     NetworkDiagnostics.record(root, diagnostic)
+                    val failureKind = RouteSelector.classify(code, null, responseText)
+                    runCatching { RouteMeta.recordFailure(root, routeId, failureKind, task) }
                     lastError = "Модель ${model.optString("name", model.optString("id"))}: HTTP $code"
                     if (code == 500 || code == 502 || code == 503 || code == 504) {
                         retryableModels.add(index)
@@ -234,12 +253,15 @@ object ChatEngine {
                     diagnostic.put("result", "nsfw_refusal")
                     NetworkDiagnostics.record(root, diagnostic)
                     RouteCapabilityProbe.markNotCapable(root, config, index, "runtime_refusal_or_disclaimer")
+                    runCatching { RouteMeta.recordFailure(root, routeId, "refusal", task) }
                     lastError = "Маршрут ${model.optString("name", model.optString("id"))} отклонил взрослую тему"
                     continue
                 }
                 diagnostic.put("stage", "COMPLETE")
                 diagnostic.put("result", "success")
                 NetworkDiagnostics.record(root, diagnostic)
+                runCatching { RouteMeta.recordSuccess(root, routeId, task) }
+                runCatching { OfflineQueue.clear(root) }
                 // Keep Routeway as primary; fallback success is temporary, not a reconfiguration.
                 FileManager.appendEvent(root, JSONObject()
                     .put("type", "message")
@@ -257,6 +279,7 @@ object ChatEngine {
                 if (e is UnknownHostException) diagnostic.put("dns_status", "failed")
                 if (e is SocketTimeoutException) diagnostic.put("timeout_stage", stage)
                 NetworkDiagnostics.record(root, diagnostic)
+                runCatching { RouteMeta.recordFailure(root, routeId, RouteSelector.classify(null, e), task) }
                 lastError = when {
                     e is UnknownHostException -> "DNS: не удалось разрешить адрес сервера"
                     e is SocketTimeoutException -> "Тайм-аут на этапе $stage"
