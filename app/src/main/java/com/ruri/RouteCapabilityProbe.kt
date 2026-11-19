@@ -60,6 +60,7 @@ internal object RouteCapabilityProbe {
                 changed = true
                 continue
             }
+            if (!RouteMeta.claimFullProbe(root, id, now)) continue
             RouteMeta.recordAttempt(root, id)
             val result = probe(model, key)
             model.put("nsfw_capable", result.capable)
