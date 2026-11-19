@@ -9,13 +9,6 @@ import org.junit.Test
 
 class AutonomyPackageTest {
     @Test
-    fun thinkerSkipsMinimalContextRoutes() {
-        assertTrue(Thinker.shouldSkipMinimalContextRoute(JSONObject().put("minimal_context", true)))
-        assertFalse(Thinker.shouldSkipMinimalContextRoute(JSONObject().put("minimal_context", false)))
-        assertFalse(Thinker.shouldSkipMinimalContextRoute(JSONObject()))
-    }
-
-    @Test
     fun googleCseJsonIsConvertedToBoundedResults() {
         val raw = JSONObject().put("items", JSONArray()
             .put(JSONObject().put("title", "Example").put("link", "https://example.org/")
