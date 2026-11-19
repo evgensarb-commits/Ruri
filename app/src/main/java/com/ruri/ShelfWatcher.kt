@@ -80,12 +80,21 @@ object ShelfWatcher {
         return name
     }
 
-    private fun decodeText(bytes: ByteArray): String {
+    internal fun decodeText(bytes: ByteArray): String {
         if (bytes.isEmpty()) return ""
         val sample = bytes.take(minOf(bytes.size, 4096))
-        if (sample.any { (it.toInt() and 0xff) == 0 }) return ""
-        val decoded = runCatching { bytes.toString(Charsets.UTF_8) }.getOrDefault("")
+        val oddZeroes = sample.indices.count { it % 2 == 1 && sample[it].toInt() == 0 }
+        val evenZeroes = sample.indices.count { it % 2 == 0 && sample[it].toInt() == 0 }
+        val decoded = when {
+            oddZeroes > sample.size * 0.2 -> runCatching { String(bytes, Charsets.UTF_16LE) }.getOrDefault("")
+            evenZeroes > sample.size * 0.2 -> runCatching { String(bytes, Charsets.UTF_16BE) }.getOrDefault("")
+            else -> runCatching { bytes.toString(Charsets.UTF_8) }.getOrDefault("")
+        }
         val printable = decoded.count { it == '\n' || it == '\r' || it == '\t' || !it.isISOControl() }
-        return if (printable >= decoded.length * 0.85) decoded else ""
+        if (decoded.isNotBlank() && printable >= decoded.length * 0.85) return decoded
+        // Recover readable strings from partially textual binary formats (e.g. PDF metadata/content streams).
+        return Regex("[\\\\p{L}\\\\p{N}][\\\\p{L}\\\\p{N}\\\\p{P}\\\\p{Zs}]{5,}")
+            .findAll(decoded).map { it.value.trim() }.filter { it.length >= 6 }
+            .take(120).joinToString("\\n").take(12000)
     }
 }
