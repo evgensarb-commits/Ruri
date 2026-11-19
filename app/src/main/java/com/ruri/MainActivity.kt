@@ -100,9 +100,19 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        NetState.refresh(this)
+        if (OfflineQueue.hasPending(filesDir) && NetState.online) {
+            LifeScheduler.enqueueEvent(this, "offline_drain")
+        }
         if (::web.isInitialized) {
             try { Bridge().markCommanderSeen() } catch (_: Exception) {}
         }
+    }
+
+    override fun onPause() {
+        try { BackupPolicy.maybeRolling(this, "pause") }
+        catch (e: Exception) { android.util.Log.w("Ruri", "Pause rolling backup failed", e) }
+        super.onPause()
     }
 
     private fun requestNotificationPermission() {
