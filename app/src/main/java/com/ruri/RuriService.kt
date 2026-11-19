@@ -7,6 +7,8 @@ import android.app.Service
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import org.json.JSONArray
+import org.json.JSONObject
 import androidx.core.app.NotificationCompat
 
 /**
@@ -36,6 +38,13 @@ class RuriService : Service() {
         DeviceEventMonitor.register(this)
         NetState.register(this)
         NetState.addListener(networkListener)
+        Thread({
+            runCatching {
+                NetState.refresh(applicationContext)
+                val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
+                Probe.refreshReachability(filesDir, config.optJSONArray("models") ?: JSONArray(), topOnly = false, force = true)
+            }.onFailure { android.util.Log.w("Ruri", "Startup route refresh failed", it) }
+        }, "ruri-service-route-refresh").start()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

@@ -13,6 +13,7 @@ object Probe {
     const val FULL_PROBE_MS = 24L * 60L * 60L * 1000L
     private const val CONNECT_TIMEOUT_MS = 4_000
     private const val READ_TIMEOUT_MS = 4_000
+    @Volatile private var lastRecoveryRefreshAt = 0L
 
     fun cheapReachable(baseUrl: String): Boolean {
         var connection: HttpsURLConnection? = null
@@ -34,7 +35,7 @@ object Probe {
     }
 
     fun refreshReachability(root: File, models: JSONArray, topOnly: Boolean, force: Boolean = false) {
-        if (!NetState.online) return
+        if (!NetState.online && !force) return
         val count = if (topOnly) minOf(models.length(), 3) else models.length()
         val now = System.currentTimeMillis()
         for (index in 0 until count) {
@@ -47,6 +48,15 @@ object Probe {
             RouteMeta.setReachable(root, id, reachable, viaVpn = NetState.vpn)
         }
     }
+
+    @Synchronized
+    fun claimRecoveryRefresh(now: Long = System.currentTimeMillis()): Boolean {
+        if (!recoveryRefreshAllowed(lastRecoveryRefreshAt, now)) return false
+        lastRecoveryRefreshAt = now
+        return true
+    }
+
+    internal fun recoveryRefreshAllowed(last: Long, now: Long): Boolean = RouteRecovery.shouldRefresh(last, now)
 
     fun heartbeat(root: File, config: JSONObject, now: Long = System.currentTimeMillis()) {
         val global = RouteMeta.route(root, "_global")

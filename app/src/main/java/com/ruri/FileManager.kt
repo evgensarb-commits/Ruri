@@ -217,7 +217,8 @@ object FileManager {
               "last_thought": 0,
               "active_goals": [],
               "active_tasks": [],
-              "current_focus": ""
+              "current_focus": "",
+              "onboarding_done": false
             }
         """.trimIndent())
     }
@@ -389,6 +390,14 @@ object FileManager {
         }
         val target = safe(root, normalized) ?: throw IllegalArgumentException("Invalid data path")
         synchronized(lockFor(target)) { atomicWrite(target, content) }
+    }
+
+    fun lastAppendTimestamp(root: File): Long {
+        val line = readLastLines(root, L0_PATH, maxLines = 1).lastOrNull() ?: return 0L
+        return runCatching {
+            val event = JSONObject(line)
+            event.optLong("timestamp", event.optLong("ts", 0L))
+        }.getOrDefault(0L)
     }
 
     fun appendEvent(root: File, input: JSONObject): String {
@@ -606,13 +615,45 @@ object FileManager {
         }
     }
 
+    internal fun mergeModelsById(source: JSONArray): JSONArray {
+        val mergedById = linkedMapOf<String, JSONObject>()
+        for (i in 0 until source.length()) {
+            val original = source.optJSONObject(i) ?: continue
+            val model = JSONObject(original.toString())
+            val explicitId = model.optString("id").trim()
+            val id = explicitId.ifBlank {
+                model.optString("name", "model_$i").lowercase().replace(Regex("[^a-z0-9_-]"), "_").ifBlank { "model_$i" }
+            }
+            model.put("id", id)
+            val existing = mergedById[id]
+            if (existing == null) {
+                mergedById[id] = model
+            } else {
+                val keys = model.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val incoming = model.opt(key)
+                    val current = existing.opt(key)
+                    val currentBlank = current == null || current == JSONObject.NULL || (current is String && current.isBlank())
+                    val incomingUseful = incoming != null && incoming != JSONObject.NULL && !(incoming is String && incoming.isBlank())
+                    if (currentBlank && incomingUseful) existing.put(key, incoming)
+                }
+            }
+        }
+        val result = JSONArray()
+        mergedById.values.forEach { result.put(it) }
+        return result
+    }
+
     private fun migrateModelConfig(root: File) {
         val file = safe(root, CONFIG_PATH) ?: return
         if (!file.exists()) return
         try {
             val config = JSONObject(file.readText(Charsets.UTF_8))
-            val models = config.optJSONArray("models") ?: return
-            var changed = false
+            val sourceModels = config.optJSONArray("models") ?: return
+            val models = mergeModelsById(sourceModels)
+            var changed = models.length() != sourceModels.length()
+            config.put("models", models)
             for (i in 0 until models.length()) {
                 val model = models.optJSONObject(i) ?: continue
                 if (model.optString("model") == "gemini-2.0-flash") {

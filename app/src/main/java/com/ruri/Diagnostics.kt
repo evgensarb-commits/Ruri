@@ -59,8 +59,11 @@ object Diagnostics {
             val dayCount = if (meta.optString("day_key") == utcDay) meta.optInt("day_count", 0) else 0
             val route = JSONObject()
                 .put("name", model.optString("name", id))
+                .put("model", model.optString("model"))
                 .put("enabled", model.optBoolean("enabled", true))
                 .put("free_tier", model.optBoolean("free_tier", false))
+                .put("has_key", model.optString("api_key").isNotBlank())
+                .put("allow_anonymous", model.optBoolean("allow_anonymous", false))
                 .put("api_key_configured", model.optString("api_key").isNotBlank() ||
                     model.optBoolean("allow_anonymous", false))
                 .put("reachable", meta.optBoolean("reachable", true))
@@ -72,12 +75,25 @@ object Diagnostics {
                 .put("cooldown_until", meta.optLong("cooldown_until", 0L))
                 .put("requests_today", dayCount)
                 .put("requests_per_day", model.optInt("rpd", 200))
+                .put("quota_remaining", (model.optInt("rpd", 200) - dayCount).coerceAtLeast(0))
+                .put("last_reachability_at", meta.optLong("last_reachability_at", 0L))
                 .put("chat_score", RouteSelector.score(meta, Task.CHAT))
                 .put("last_attempt", meta.optLong("last_attempt", 0L))
                 .put("last_success", meta.optLong("last_ok", 0L))
             routes.put(id, route)
         }
         result.put("routes", routes)
+        result.put("current_route", config.optInt("current", -1))
+        result.put("exclusive_route", config.optBoolean("exclusive_route", false))
+        val latestNetwork = runCatching { JSONObject(NetworkDiagnostics.latest(root)) }.getOrDefault(JSONObject())
+        result.put("last_error", if (latestNetwork.optBoolean("available", false)) {
+            JSONObject().put("provider", latestNetwork.optString("provider"))
+                .put("message", latestNetwork.optString("failure_message"))
+                .put("stage", latestNetwork.optString("stage"))
+                .put("http_status", latestNetwork.opt("http_status") ?: JSONObject.NULL)
+                .put("error_type", latestNetwork.optString("error_type"))
+                .put("result", latestNetwork.optString("result"))
+        } else JSONObject())
 
         val rollingDir = File(root, "backup/rolling")
         val rollingFiles = rollingDir.listFiles()?.filter { it.isFile && it.name.endsWith(".json") }
@@ -93,13 +109,21 @@ object Diagnostics {
             .put("automatic_count", automaticStatus.optInt("count", 0))
             .put("automatic_maximum", automaticStatus.optInt("maximum", 14))
             .put("automatic_latest_file", automaticStatus.opt("latest_file") ?: JSONObject.NULL)
-            .put("automatic_latest_at", automaticStatus.optLong("latest_at", 0L)))
+            .put("automatic_latest_at", automaticStatus.optLong("latest_at", 0L))
+            .put("latest_copy_at", maxOf(
+                rollingFiles.maxOfOrNull { it.lastModified() } ?: 0L,
+                automaticStatus.optLong("latest_at", 0L)
+            )))
 
         val l0 = File(root, "memory/L0_raw.jsonl")
         val l4 = File(root, "memory/L4_state.json")
         result.put("memory", JSONObject()
             .put("l0_size_bytes", if (l0.isFile) l0.length() else 0L)
             .put("l0_size_kb", if (l0.isFile) l0.length() / 1024L else 0L)
+            .put("l0_last_append_at", FileManager.lastAppendTimestamp(root))
+            .put("l1_facts_count", runCatching {
+                JSONObject(FileManager.read(root, "memory/L1_facts.json")).optJSONArray("facts")?.length() ?: 0
+            }.getOrDefault(0))
             .put("l4_exists", l4.isFile)
             .put("route_meta_exists", File(root, RouteMeta.PATH).isFile))
         return result.toString(2)

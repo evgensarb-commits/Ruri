@@ -117,11 +117,11 @@ object RouteMeta {
     }
 
     /** Claims a full provider capability probe before the network call, so a process crash cannot duplicate it. */
-    fun claimFullProbe(root: File, id: String, now: Long = System.currentTimeMillis()): Boolean {
+    fun claimFullProbe(root: File, id: String, now: Long = System.currentTimeMillis(), force: Boolean = false): Boolean {
         var claimed = false
         update(root, id) {
             val last = it.optLong("last_full_probe_at", 0L)
-            if (now - last >= Probe.FULL_PROBE_MS) {
+            if (force || now - last >= Probe.FULL_PROBE_MS) {
                 it.put("last_full_probe_at", now)
                 claimed = true
             }
@@ -160,7 +160,7 @@ object RouteMeta {
         updateTaskScore(it, task, false)
         when (kind) {
             "quota" -> it.put("cooldown_until", nextUtcMidnight())
-            "network" -> {
+            "network", "timeout" -> {
                 it.put("reachable", false)
                 if (!NetState.vpn) it.put("ru_reachable", false)
             }
