@@ -112,7 +112,7 @@ object Thinker {
         var successfulIndex = -1
         for (index in order) {
             val model = models.optJSONObject(index) ?: continue
-            if (!FreeModelRouter.isFullMemoryRoute(model)) continue
+            if (!FreeModelRouter.isFullMemoryRoute(model) || model.optString("api_key").isBlank()) continue
             val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
             runCatching { RouteMeta.recordAttempt(root, routeId) }
             reply = requestModel(model, prompt)
