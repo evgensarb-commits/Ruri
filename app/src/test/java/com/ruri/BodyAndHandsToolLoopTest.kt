@@ -99,23 +99,44 @@ class ToolHopLimitTest : BodyHandsTestBase() {
     }
 }
 
-class MinimalContextNoToolsTest : BodyHandsTestBase() {
-    @Test fun minimalRouteDoesNotExecuteActionsOrExposeToolList() {
-        val messages = JSONArray()
-        var reasks = 0
-        val action = """{"action":"list_shelf"}"""
-        val reply = ChatEngine.runToolLoop(root, action, messages, minimalContext = true) {
-            reasks++
-            "unexpected"
+class KiloRemovedTest : BodyHandsTestBase() {
+    @Test fun migrationRemovesKiloAndEveryMinimalOrAnonymousRoute() {
+        FileManager.init(root)
+        val config = JSONObject(SecretStore.readRuntimeConfig(root))
+        val models = config.getJSONArray("models")
+        for (i in 0 until models.length()) {
+            val model = models.getJSONObject(i)
+            assertFalse(model.optString("id").equals("kilo", true))
+            assertFalse(model.optBoolean("minimal_context", false))
+            assertFalse(model.optBoolean("allow_anonymous", false))
         }
-        assertEquals(action, reply)
-        assertEquals(0, reasks)
-        assertTrue(events("tool_call").isEmpty())
-        val prompt = ChatEngine.minimalSystemPrompt(JSONObject(), JSONObject())
-        assertTrue(prompt.contains("Инструменты на этом маршруте отключены"))
-        assertFalse(prompt.contains("search"))
-        assertFalse(prompt.contains("read_shelf"))
-        assertFalse(prompt.contains("remember_fact"))
+        assertFalse(config.toString().contains("kilo-auto"))
+        assertTrue(config.optBoolean("free_only"))
+    }
+
+    @Test fun emptyRouteSetQueuesReplyInsteadOfSendingAmnesicRequest() {
+        FileManager.init(root)
+        FileManager.write(root, "core/config.json", JSONObject()
+            .put("models", JSONArray()).put("current", 0).put("free_only", true).toString())
+        FileManager.write(root, "memory/L4_state.json", JSONObject().toString())
+        NetState.online = false
+        val result = ChatEngine.respond(root)
+        assertEquals(ChatEngine.OFFLINE_REPLY, result)
+        assertTrue(OfflineQueue.hasPending(root))
+    }
+}
+
+class FullMemoryEveryRouteTest : BodyHandsTestBase() {
+    @Test fun providerPayloadRequiresL0AndEveryLongTermMemoryLayer() {
+        val full = JSONArray()
+            .put(JSONObject().put("role", "system").put("content",
+                "ТВОЯ ПАМЯТЬ L0 история L1 факты L2 дневник L3 автобиография recall"))
+            .put(JSONObject().put("role", "user").put("content", "Помнишь?"))
+        assertTrue(ChatEngine.hasFullMemoryContext(full))
+        val amnesic = JSONArray()
+            .put(JSONObject().put("role", "system").put("content", "только текущая реплика"))
+            .put(JSONObject().put("role", "user").put("content", "Помнишь?"))
+        assertFalse(ChatEngine.hasFullMemoryContext(amnesic))
     }
 }
 
