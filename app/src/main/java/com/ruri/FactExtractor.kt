@@ -121,8 +121,9 @@ object FactExtractor {
         for (index in order) {
             val model = models.optJSONObject(index) ?: continue
             // Fact extraction requires personal transcript context; never send it to minimal-context routes.
+            if (model.optBoolean("minimal_context", false)) continue
             val key = model.optString("api_key")
-            if (key.isBlank()) continue
+            if (key.isBlank() && !model.optBoolean("allow_anonymous", false)) continue
             val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
             runCatching { RouteMeta.recordAttempt(root, routeId) }
             val response = request(model, prompt)

@@ -270,8 +270,9 @@ object MemoryConsolidator {
         for (index in order) {
             val model = models.optJSONObject(index) ?: continue
             // L1/L2/L3 content is personal memory; minimal-context routes are ineligible here.
+            if (model.optBoolean("minimal_context", false)) continue
             val key = model.optString("api_key")
-            if (key.isBlank()) continue
+            if (key.isBlank() && !model.optBoolean("allow_anonymous", false)) continue
             val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
             runCatching { RouteMeta.recordAttempt(root, routeId) }
             val response = request(model, SecretRedactor.redactText(prompt))
