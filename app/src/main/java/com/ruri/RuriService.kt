@@ -31,6 +31,7 @@ class RuriService : Service() {
     override fun onCreate() {
         super.onCreate()
         FileManager.init(filesDir)
+        ShelfWatcher.start(this)
         createChannel()
         DeviceEventMonitor.register(this)
         NetState.register(this)
@@ -73,6 +74,7 @@ class RuriService : Service() {
         NetState.removeListener(networkListener)
         NetState.unregister()
         DeviceEventMonitor.unregister(this)
+        ShelfWatcher.stop()
         super.onDestroy()
     }
 
