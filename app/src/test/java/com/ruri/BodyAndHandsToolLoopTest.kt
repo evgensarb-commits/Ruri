@@ -66,15 +66,15 @@ class ToolLoopExecutesAndReasksTest : BodyHandsTestBase() {
     @Test fun actionIsExecutedReaskedAndFinalReplyIsAppendedOnce() {
         FileManager.write(root, "shelf/hello.txt", "hello shelf")
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", "system"))
-        var calls = 0
+        var modelCalls = 1
         val reply = ChatEngine.runToolLoop(root, """{"action":"list_shelf"}""", messages) { next ->
-            calls++
+            modelCalls++
             assertTrue(next.getJSONObject(next.length() - 1).optString("content").startsWith("[ИНСТРУМЕНТ list_shelf]:"))
             "Полка проверена."
         }
         ChatEngine.appendFinalReply(root, reply)
         assertEquals("Полка проверена.", reply)
-        assertEquals(1, calls)
+        assertEquals(2, modelCalls)
         assertEquals(1, events("tool_call").size)
         assertEquals(1, events("tool_result").size)
         assertEquals(1, events("message").count { it.optString("who") == "ruri" })
