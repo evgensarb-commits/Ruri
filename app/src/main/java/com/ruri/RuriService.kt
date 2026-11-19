@@ -16,6 +16,13 @@ import androidx.core.app.NotificationCompat
  * an endless timer because Android may stop background processes.
  */
 class RuriService : Service() {
+    private val networkListener: () -> Unit = {
+        LifeScheduler.enqueueEvent(applicationContext, "net_change")
+        if (NetState.online && OfflineQueue.hasPending(filesDir)) {
+            LifeScheduler.enqueueEvent(applicationContext, "offline_drain")
+        }
+    }
+
     companion object {
         const val CHANNEL_ID = "ruri_life"
         const val NOTIFICATION_ID = 1
@@ -23,8 +30,11 @@ class RuriService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        FileManager.init(filesDir)
         createChannel()
         DeviceEventMonitor.register(this)
+        NetState.register(this)
+        NetState.addListener(networkListener)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -60,6 +70,8 @@ class RuriService : Service() {
     }
 
     override fun onDestroy() {
+        NetState.removeListener(networkListener)
+        NetState.unregister()
         DeviceEventMonitor.unregister(this)
         super.onDestroy()
     }
