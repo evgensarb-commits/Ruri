@@ -8,6 +8,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -99,23 +100,51 @@ class ToolHopLimitTest : BodyHandsTestBase() {
     }
 }
 
-class MinimalContextNoToolsTest : BodyHandsTestBase() {
-    @Test fun minimalRouteDoesNotExecuteActionsOrExposeToolList() {
-        val messages = JSONArray()
-        var reasks = 0
-        val action = """{"action":"list_shelf"}"""
-        val reply = ChatEngine.runToolLoop(root, action, messages, minimalContext = true) {
-            reasks++
-            "unexpected"
+class KiloRemovedTest : BodyHandsTestBase() {
+    @Test fun migrationRemovesKiloAndEveryMinimalOrAnonymousRoute() {
+        FileManager.init(root)
+        val config = JSONObject(SecretStore.readRuntimeConfig(root))
+        val models = config.getJSONArray("models")
+        for (i in 0 until models.length()) {
+            val model = models.getJSONObject(i)
+            assertFalse(model.optString("id").equals("kilo", true))
+            assertFalse(model.optBoolean("minimal_context", false))
+            assertFalse(model.optBoolean("allow_anonymous", false))
         }
-        assertEquals(action, reply)
-        assertEquals(0, reasks)
-        assertTrue(events("tool_call").isEmpty())
-        val prompt = ChatEngine.minimalSystemPrompt(JSONObject(), JSONObject())
-        assertTrue(prompt.contains("Инструменты на этом маршруте отключены"))
-        assertFalse(prompt.contains("search"))
-        assertFalse(prompt.contains("read_shelf"))
-        assertFalse(prompt.contains("remember_fact"))
+        assertFalse(config.toString().contains("kilo-auto"))
+        assertTrue(config.optBoolean("free_only"))
+        assertTrue(FreeModelRouter.orderedIndices(models, config.optInt("current", 0))
+            .all { !models.getJSONObject(it).optBoolean("minimal_context", false) })
+    }
+
+    @Test fun emptyRouteSetQueuesReplyInsteadOfSendingAmnesicRequest() {
+        FileManager.init(root)
+        FileManager.write(root, "core/config.json", JSONObject()
+            .put("models", JSONArray()).put("current", 0).put("free_only", true).toString())
+        FileManager.write(root, "memory/L4_state.json", JSONObject().toString())
+        val outcome = runCatching { ChatEngine.respond(root) }
+        assertTrue(outcome.isSuccess || outcome.exceptionOrNull()?.message.orEmpty().contains("маршрутов"))
+        assertTrue(OfflineQueue.hasPending(root))
+    }
+}
+
+class FullMemoryEveryRouteTest : BodyHandsTestBase() {
+    @Test fun providerPayloadRequiresL0AndEveryLongTermMemoryLayer() {
+        val full = JSONArray()
+            .put(JSONObject().put("role", "system").put("content",
+                "ТВОЯ ПАМЯТЬ L0 история L1 факты L2 дневник L3 автобиография recall"))
+            .put(JSONObject().put("role", "user").put("content", "Помнишь?"))
+        assertTrue(ChatEngine.hasFullMemoryContext(full))
+        val providers = listOf("Routeway", "Requesty")
+        providers.forEach { _ ->
+            val payload = ChatEngine.providerMessagesWithFullMemory(full)
+            assertNotNull(payload)
+            assertTrue(ChatEngine.hasFullMemoryContext(payload!!))
+        }
+        val amnesic = JSONArray()
+            .put(JSONObject().put("role", "system").put("content", "только текущая реплика"))
+            .put(JSONObject().put("role", "user").put("content", "Помнишь?"))
+        assertFalse(ChatEngine.hasFullMemoryContext(amnesic))
     }
 }
 

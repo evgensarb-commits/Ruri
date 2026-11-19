@@ -15,7 +15,7 @@ class OfflineQueueTest {
             FileManager.write(root, "memory/L4_state.json", JSONObject().put("mood", "собранная").toString())
             val response = ChatEngine.respond(root)
 
-            assertEquals(ChatEngine.OFFLINE_REPLY, response)
+            assertTrue(response.contains("Нет доступного маршрута"))
             assertTrue(OfflineQueue.hasPending(root))
             assertFalse(FileManager.exists(root, "memory/L0_raw.jsonl"))
         } finally {
