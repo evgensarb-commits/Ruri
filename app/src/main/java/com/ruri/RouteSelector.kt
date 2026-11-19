@@ -50,8 +50,7 @@ object RouteSelector {
             val model = models.optJSONObject(index) ?: continue
             if (!model.optBoolean("free_tier", false) || !model.optBoolean("enabled", true)) continue
             val id = model.optString("id").ifBlank { model.optString("name").ifBlank { "route_$index" } }
-            val keyAvailable = model.optString("api_key").isNotBlank() ||
-                false
+            val keyAvailable = model.optString("api_key").isNotBlank()
             if (!keyAvailable) continue
 
             val meta = RouteMeta.route(root, id)
