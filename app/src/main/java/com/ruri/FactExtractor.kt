@@ -101,6 +101,8 @@ object FactExtractor {
             )
         }
 
+        if (!NetState.online) return 0
+
         val config = try {
             JSONObject(SecretStore.readRuntimeConfig(root))
         } catch (e: Exception) {
@@ -110,7 +112,9 @@ object FactExtractor {
         }
         val models = config.optJSONArray("models") ?: JSONArray()
         val current = config.optInt("current", 0)
-        val order = FreeModelRouter.orderedIndices(models, current, requireNsfw = false)
+        val order = FreeModelRouter.orderedIndices(
+            root, models, current, requireNsfw = false, task = Task.REASON
+        )
         val prompt = buildPrompt(transcriptWindow)
         var parsed: JSONObject? = null
         var usedModel = ""
@@ -118,11 +122,20 @@ object FactExtractor {
             val model = models.optJSONObject(index) ?: continue
             val key = model.optString("api_key")
             if (key.isBlank() && !model.optBoolean("allow_anonymous", false)) continue
-            val response = request(model, prompt) ?: continue
+            val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
+            runCatching { RouteMeta.recordAttempt(root, routeId) }
+            val response = request(model, prompt)
+            if (response.isNullOrBlank()) {
+                runCatching { RouteMeta.recordFailure(root, routeId, "other", Task.REASON) }
+                continue
+            }
             parsed = parseJson(response)
             if (parsed != null) {
+                runCatching { RouteMeta.recordSuccess(root, routeId, Task.REASON) }
                 usedModel = model.optString("name", model.optString("id", "model"))
                 break
+            } else {
+                runCatching { RouteMeta.recordFailure(root, routeId, "other", Task.REASON) }
             }
         }
 
