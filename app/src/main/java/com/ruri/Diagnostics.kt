@@ -63,9 +63,7 @@ object Diagnostics {
                 .put("enabled", model.optBoolean("enabled", true))
                 .put("free_tier", model.optBoolean("free_tier", false))
                 .put("has_key", model.optString("api_key").isNotBlank())
-                .put("allow_anonymous", model.optBoolean("allow_anonymous", false))
-                .put("api_key_configured", model.optString("api_key").isNotBlank() ||
-                    model.optBoolean("allow_anonymous", false))
+                .put("api_key_configured", model.optString("api_key").isNotBlank())
                 .put("reachable", meta.optBoolean("reachable", true))
                 .put("needs_vpn", meta.optBoolean("needs_vpn", model.optBoolean("needs_vpn", false)))
                 .put("nsfw_capable", nsfwCapable)
