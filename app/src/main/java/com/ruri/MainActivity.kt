@@ -133,6 +133,9 @@ class MainActivity : AppCompatActivity() {
 
     inner class Bridge {
         @JavascriptInterface
+        fun getDiagnostics(): String = Diagnostics.run(this@MainActivity)
+
+        @JavascriptInterface
         fun completeChat(callbackId: String): String {
             if (!callbackId.matches(Regex("[A-Za-z0-9_-]{1,80}"))) return "ERROR: invalid callback"
             chatExecutor.execute {
