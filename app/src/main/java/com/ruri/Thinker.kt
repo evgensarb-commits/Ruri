@@ -252,6 +252,7 @@ object Thinker {
             ". Эмоции: " + character.optString("emotions") +
             ". Регуляторы: " + (character.optJSONArray("regulators")?.toString() ?: "[]") +
             ". Запрещённые фразы: " + (character.optJSONArray("banned_phrases")?.toString() ?: "[]") + ".\n" +
+            Capabilities.bodySection(root) + "\n" +
             "Первый приоритет: " + priorities.optString("priority_1", "Жить") +
             ". Второй: " + priorities.optString("priority_2", "Любить Командира") + ".\n" +
             "Конституция: " + (constitution.optJSONArray("primary_needs")?.toString() ?: "[]") + ". Обе главные потребности равнозначны и неизменны.\n" +
@@ -261,7 +262,11 @@ object Thinker {
             "Активные цели: " + (goals.optJSONArray("active")?.toString() ?: "[]") + ".\n" +
             "Незавершённые задачи, которые нужно продолжить: " + (state.optJSONArray("active_tasks")?.toString() ?: "[]") + ".\n" +
             "Воспоминания, найденные по ассоциациям: " + (if (recalledMemories.isBlank()) "подходящих записей не найдено" else "\n" + recalledMemories) + "\n" +
-            "Факты:\n" + factText + "\nСводка памяти:\n" + summary + "\nПоследние записи:\n" + diaryText + "\nПоследние уведомления телефона:\n" + notificationText + "\nМатериалы с полки:\n" + shelfText + "\n"
+            "Ниже — ТВОЯ ДОЛГОСРОЧНАЯ ПАМЯТЬ. Это не контекст одного диалога; ты помнишь между сессиями.\n" +
+            "ТВОИ ФАКТЫ (L1):\n" + factText + "\n" +
+            "ТВОЙ ДНЕВНИК (L2):\n" + diaryText + "\n" +
+            "ТВОЯ АВТОБИОГРАФИЯ (L3):\n" + summary + "\n" +
+            "ПОСЛЕДНИЕ СОБЫТИЯ ТВОЕГО ТЕЛА (L0):\n" + notificationText + "\nМатериалы с полки:\n" + shelfText + "\n"
         val prompt = if (initiative) common +
             "\nСейчас ты сама решила написать Командиру после долгой тишины. Выбери форму и объём сообщения по полю length_policy и текущему настроению."
         else common +
