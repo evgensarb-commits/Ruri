@@ -259,18 +259,32 @@ object MemoryConsolidator {
     }
 
     private fun requestBestModel(root: java.io.File, prompt: String): Pair<JSONObject, String>? {
+        if (!NetState.online) return null
         val config = try { JSONObject(SecretStore.readRuntimeConfig(root)) } catch (_: Exception) { return null }
         val models = config.optJSONArray("models") ?: return null
         if (models.length() == 0) return null
         val current = config.optInt("current", 0)
-        val order = FreeModelRouter.orderedIndices(models, current, requireNsfw = false)
+        val order = FreeModelRouter.orderedIndices(
+            root, models, current, requireNsfw = false, task = Task.REASON
+        )
         for (index in order) {
             val model = models.optJSONObject(index) ?: continue
             val key = model.optString("api_key")
             if (key.isBlank() && !model.optBoolean("allow_anonymous", false)) continue
-            val response = request(model, SecretRedactor.redactText(prompt)) ?: continue
-            val parsed = parseJson(response) ?: continue
+            val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
+            runCatching { RouteMeta.recordAttempt(root, routeId) }
+            val response = request(model, SecretRedactor.redactText(prompt))
+            if (response.isNullOrBlank()) {
+                runCatching { RouteMeta.recordFailure(root, routeId, "other", Task.REASON) }
+                continue
+            }
+            val parsed = parseJson(response)
+            if (parsed == null) {
+                runCatching { RouteMeta.recordFailure(root, routeId, "other", Task.REASON) }
+                continue
+            }
             if (parsed.optString("summary").isNotBlank()) {
+                runCatching { RouteMeta.recordSuccess(root, routeId, Task.REASON) }
                 val name = model.optString("name", model.optString("id", "model"))
                 return parsed to name
             }
