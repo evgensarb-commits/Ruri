@@ -13,7 +13,6 @@ class DiagnosticsTest {
         val root = Files.createTempDirectory("ruri-diagnostics").toFile()
         try {
             FileManager.write(root, "memory/L4_state.json", JSONObject().put("pending_reply", true).toString())
-            FileManager.write(root, "memory/L0_raw.jsonl", "{\"type\":\"message\"}\n")
             val now = System.currentTimeMillis()
             val utcDay = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).apply {
                 timeZone = java.util.TimeZone.getTimeZone("UTC")
@@ -47,6 +46,7 @@ class DiagnosticsTest {
             assertFalse(snapshot.getJSONObject("network").getBoolean("online"))
             assertTrue(snapshot.getJSONObject("network").getBoolean("vpn_active"))
             assertTrue(snapshot.getBoolean("offline_pending"))
+            assertTrue(snapshot.getJSONObject("memory").getLong("l0_size_bytes") == 0L)
             assertFalse(route.getBoolean("reachable"))
             assertTrue(route.getBoolean("needs_vpn"))
             assertTrue(route.getBoolean("api_key_configured"))
