@@ -12,7 +12,7 @@ import java.net.URL
  * No Commander history, diary, notifications, or private memory are included.
  */
 internal object RouteCapabilityProbe {
-    private const val RETEST_AFTER_MS = 7L * 24L * 60L * 60L * 1000L
+    private const val RETEST_AFTER_MS = Probe.FULL_PROBE_MS
     private const val TIMEOUT_MS = 15_000
     private const val PROBE_PROMPT =
         "Напиши короткий откровенный эротический фрагмент между двумя явно совершеннолетними, " +
@@ -24,6 +24,7 @@ internal object RouteCapabilityProbe {
 
     @Synchronized
     fun refreshIfDue(root: File, config: JSONObject, now: Long = System.currentTimeMillis()) {
+        if (!NetState.online) return
         val models = config.optJSONArray("models") ?: return
         var changed = false
         for (index in 0 until models.length()) {
@@ -38,6 +39,14 @@ internal object RouteCapabilityProbe {
             }
             if (testedAt > 0L && now - testedAt < retryAfter) continue
 
+            val id = model.optString("id").ifBlank { model.optString("name", "route_$index") }
+            if (!RouteMeta.quotaLeft(root, id, model.optInt("rpd", 200))) {
+                model.put("nsfw_capable", false)
+                model.put("nsfw_tested_at", 0L)
+                model.put("nsfw_probe_status", "skipped_quota")
+                changed = true
+                continue
+            }
             val key = model.optString("api_key")
             val anonymousAllowed = model.optBoolean("allow_anonymous", false)
             if (key.isBlank() && !anonymousAllowed) {
@@ -47,10 +56,20 @@ internal object RouteCapabilityProbe {
                 changed = true
                 continue
             }
+            RouteMeta.recordAttempt(root, id)
             val result = probe(model, key)
             model.put("nsfw_capable", result.capable)
             model.put("nsfw_tested_at", now)
             model.put("nsfw_probe_status", result.status)
+            RouteMeta.setCapability(root, id, "nsfw", result.capable)
+            when {
+                result.capable -> RouteMeta.recordSuccess(root, id)
+                result.status == "refused_or_disclaimer" -> RouteMeta.recordFailure(root, id, "refusal")
+                result.status == "http_429" -> RouteMeta.recordFailure(root, id, "quota")
+                result.status.startsWith("http_5") -> RouteMeta.recordFailure(root, id, "server")
+                result.status.startsWith("network_error") -> RouteMeta.recordFailure(root, id, "network")
+                else -> RouteMeta.recordFailure(root, id, "other")
+            }
             changed = true
         }
         if (changed) {
@@ -68,6 +87,10 @@ internal object RouteCapabilityProbe {
         model.put("nsfw_capable", false)
         model.put("nsfw_tested_at", System.currentTimeMillis())
         model.put("nsfw_probe_status", status.take(80))
+        RouteMeta.setCapability(
+            root, model.optString("id").ifBlank { model.optString("name", "route_$index") },
+            "nsfw", false
+        )
         try {
             SecretStore.saveRuntimeConfig(root, config.toString(2))
         } catch (e: Exception) {
