@@ -336,7 +336,7 @@ object ChatEngine {
                 NetworkDiagnostics.record(root, diagnostic)
                 runCatching { RouteMeta.recordSuccess(root, routeId, task) }
                 // Never persist a raw action object as a chat message.
-                if (reply.isBlank() || reply.trim().startsWith("{")) {
+                if (reply.isBlank() || ToolLoop.isActionJson(reply)) {
                     throw IllegalStateException("Модель не вернула обычный текстовый ответ после инструментов")
                 }
                 // Keep Routeway as primary; fallback success is temporary, not a reconfiguration.
