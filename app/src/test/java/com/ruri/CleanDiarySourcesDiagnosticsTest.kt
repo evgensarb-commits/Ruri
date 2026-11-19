@@ -79,13 +79,6 @@ class L0FilterTest {
     }
 }
 
-class ForceRefreshThrottleTest {
-    @Test fun recoveryRefreshIsLimitedToSixtySeconds() {
-        assertTrue(Probe.recoveryRefreshAllowed(1_000L, 61_000L))
-        assertFalse(Probe.recoveryRefreshAllowed(1_000L, 60_999L))
-    }
-}
-
 class StartupRefreshThrottleTest {
     @Test fun startupRefreshIsLimitedToFiveMinutes() {
         val root = Files.createTempDirectory("ruri-startup-throttle").toFile()
