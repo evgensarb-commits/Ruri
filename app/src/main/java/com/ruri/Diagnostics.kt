@@ -83,6 +83,7 @@ object Diagnostics {
             routes.put(id, route)
         }
         result.put("routes", routes)
+        result.put("last_provider", latestNetwork.optString("provider"))
         result.put("current_route", config.optInt("current", -1))
         result.put("exclusive_route", config.optBoolean("exclusive_route", false))
         val latestNetwork = runCatching { JSONObject(NetworkDiagnostics.latest(root)) }.getOrDefault(JSONObject())
