@@ -57,9 +57,12 @@ class RuriLifeWorker(
         return try {
             FileManager.init(root)
             NetState.refresh(appContext)
+            ShelfWatcher.scan(appContext)
+            detectResearchTask(appContext)
             try { LocalBackupManager.createIfDue(root) }
             catch (backupError: Exception) { Log.e("Ruri", "Automatic local backup failed; life cycle will continue", backupError) }
             val pending = EventQueue.snapshot(root)
+            runResearchTasks(root, pending)
             val reason = if (pending.isEmpty()) {
                 "проверка_состояния"
             } else {
@@ -85,6 +88,7 @@ class RuriLifeWorker(
 
             // Do useful local work first; it does not require an API key or network.
             LifeStateEngine.process(appContext, reason)
+            ShelfWatcher.ingestPending(appContext, pending)
             FactExtractor.extractIfDue(appContext)
             MemoryConsolidator.consolidateIfDue(appContext)
 
@@ -121,6 +125,77 @@ class RuriLifeWorker(
         } catch (e: Exception) {
             Log.e("Ruri", "Scheduled life cycle failed", e)
             Result.retry()
+        }
+    }
+
+
+    private fun detectResearchTask(context: Context) {
+        val root = context.filesDir
+        val lines = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 120, maxBytes = 256 * 1024)
+        val latest = lines.asReversed().asSequence().mapNotNull {
+            runCatching { JSONObject(it) }.getOrNull()
+        }.firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" } ?: return
+        val id = latest.optString("id").ifBlank { latest.optLong("ts").toString() }
+        val state = runCatching { JSONObject(FileManager.read(root, "memory/L4_state.json")) }.getOrDefault(JSONObject())
+        if (state.optString("last_research_detection_id") == id) return
+        val message = latest.optString("text").trim()
+        val pattern = Regex("(?iu)(?:что такое|кто такой|кто такая|что значит|объясни термин|объясни понятие|расскажи о)\\s+([^?!.\\n]{2,100})")
+        val term = pattern.find(message)?.groupValues?.get(1)?.trim()?.take(100)
+        state.put("last_research_detection_id", id)
+        FileManager.write(root, "memory/L4_state.json", state.toString(2))
+        if (!term.isNullOrBlank()) enqueueEvent(context, "research_task:" + term)
+    }
+
+    private fun runResearchTasks(root: java.io.File, pending: List<JSONObject>) {
+        val queries = pending.mapNotNull { item ->
+            val reason = item.optString("reason")
+            when {
+                reason.startsWith("research_task:") -> reason.removePrefix("research_task:").trim()
+                reason.startsWith("capability_gap:") -> reason.removePrefix("capability_gap:").trim()
+                reason.startsWith("unknown_term:") -> reason.removePrefix("unknown_term:").trim()
+                else -> null
+            }
+        }.filter { it.length >= 2 }.distinct().take(3)
+        for (query in queries) {
+            val response = runCatching { JSONObject(WebSearch.search(root, query)) }
+                .getOrElse { JSONObject().put("error", "Поиск недоступен") }
+            val results = response.optJSONArray("results") ?: org.json.JSONArray()
+            val summary = if (response.has("error")) response.optString("error") else buildString {
+                for (i in 0 until minOf(results.length(), 7)) {
+                    val item = results.optJSONObject(i) ?: continue
+                    append(item.optString("title")).append("\\n")
+                    append(item.optString("snippet")).append("\\n")
+                    append(item.optString("url")).append("\\n\\n")
+                }
+            }.take(10000)
+            val eventId = "research-" + System.currentTimeMillis() + "-" + query.hashCode()
+            FileManager.appendEvent(root, JSONObject()
+                .put("id", eventId).put("ts", System.currentTimeMillis())
+                .put("type", "web_research_result").put("source", "google_search")
+                .put("query", query).put("text", summary).put("result_count", results.length())
+                .put("privacy", "public_web"))
+            if (results.length() > 0) {
+                val factsFile = runCatching { JSONObject(FileManager.read(root, "memory/L1_facts.json")) }
+                    .getOrDefault(JSONObject().put("facts", org.json.JSONArray()))
+                val facts = factsFile.optJSONArray("facts") ?: org.json.JSONArray()
+                for (i in 0 until minOf(results.length(), 7)) {
+                    val item = results.optJSONObject(i) ?: continue
+                    val title = item.optString("title").trim()
+                    val snippet = item.optString("snippet").trim()
+                    if (title.isBlank() || snippet.length < 20) continue
+                    val factText = (title + ": " + snippet).take(400)
+                    val exists = (0 until facts.length()).any { facts.optJSONObject(it)?.optString("text") == factText }
+                    if (!exists && facts.length() < 500) facts.put(JSONObject()
+                        .put("id", eventId + "-" + i).put("text", factText)
+                        .put("category", "web_research").put("confidence", 0.65)
+                        .put("explicit", false).put("sensitivity", "public")
+                        .put("source_url", item.optString("url"))
+                        .put("source_event_ids", org.json.JSONArray().put(eventId))
+                        .put("origin", "google_search").put("created_at", System.currentTimeMillis()))
+                }
+                factsFile.put("facts", facts).put("updated_at", System.currentTimeMillis())
+                FileManager.write(root, "memory/L1_facts.json", factsFile.toString(2))
+            }
         }
     }
 
