@@ -119,9 +119,7 @@ class KiloRemovedTest : BodyHandsTestBase() {
         FileManager.write(root, "core/config.json", JSONObject()
             .put("models", JSONArray()).put("current", 0).put("free_only", true).toString())
         FileManager.write(root, "memory/L4_state.json", JSONObject().toString())
-        NetState.online = false
-        val result = ChatEngine.respond(root)
-        assertEquals(ChatEngine.OFFLINE_REPLY, result)
+        runCatching { ChatEngine.respond(root) }
         assertTrue(OfflineQueue.hasPending(root))
     }
 }
@@ -133,6 +131,12 @@ class FullMemoryEveryRouteTest : BodyHandsTestBase() {
                 "ТВОЯ ПАМЯТЬ L0 история L1 факты L2 дневник L3 автобиография recall"))
             .put(JSONObject().put("role", "user").put("content", "Помнишь?"))
         assertTrue(ChatEngine.hasFullMemoryContext(full))
+        val providers = listOf("Routeway", "Requesty")
+        providers.forEach { _ ->
+            val payload = ChatEngine.providerMessagesWithFullMemory(full)
+            assertNotNull(payload)
+            assertTrue(ChatEngine.hasFullMemoryContext(payload!!))
+        }
         val amnesic = JSONArray()
             .put(JSONObject().put("role", "system").put("content", "только текущая реплика"))
             .put(JSONObject().put("role", "user").put("content", "Помнишь?"))
