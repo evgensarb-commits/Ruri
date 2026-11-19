@@ -32,7 +32,7 @@ button.secondary{background:transparent;color:#f4c94f}
 <body>
 <header><strong>RU-R1 · Рури</strong><span id="status">● ЗАГРУЗКА</span></header>
 <nav>
-<button class="on" data-pane="chat">ЧАТ</button><button data-pane="diary">ДНЕВНИК</button><button data-pane="brain">МОЗГ</button><button data-pane="shelf">ПОЛКА</button><button data-pane="search">ПОИСК</button>
+<button class="on" data-pane="chat">ЧАТ</button><button data-pane="diary">ДНЕВНИК</button><button data-pane="brain">МОЗГ</button><button data-pane="shelf">ПОЛКА</button><button data-pane="search">ПОИСК</button><button data-pane="diag">ДИАГНОСТИКА</button>
 </nav>
 <main>
 <section class="pane on" id="pane-chat">
@@ -66,6 +66,14 @@ button.secondary{background:transparent;color:#f4c94f}
 <button class="action" id="searchButton">ИСКАТЬ В СЕТИ</button>
 <div id="searchStatus" class="small" style="margin:12px 0"></div><div id="searchResults"></div>
 </div></section>
+<section class="pane" id="pane-diag">
+<div class="scroll">
+<h2 class="section">СОСТОЯНИЕ <span>системы</span></h2>
+<button class="action" id="run-diag" style="margin-bottom:12px">ОБНОВИТЬ ДАННЫЕ</button>
+<pre id="diag-out" style="background:#050810;border:1px solid #32456d;color:#dde3ec;padding:12px;font:12px/1.5 monospace;border-radius:4px;white-space:pre-wrap;overflow-wrap:anywhere">Нажми «ОБНОВИТЬ ДАННЫЕ»</pre>
+<div class="small">Секретные API-ключи не отображаются. Диагностика читает локальное состояние приложения.</div>
+</div>
+</section>
 </main>
 <script>
 function $(s){return document.querySelector(s);}
@@ -137,7 +145,15 @@ document.querySelectorAll('nav button').forEach(function(b){b.addEventListener('
 document.querySelectorAll('nav button').forEach(function(x){x.classList.remove('on');});b.classList.add('on');
 document.querySelectorAll('.pane').forEach(function(p){p.classList.remove('on');});$('#pane-'+b.dataset.pane).classList.add('on');
 if(b.dataset.pane==='diary')loadDiary();if(b.dataset.pane==='shelf')loadShelf();if(b.dataset.pane==='brain'){loadCharacter();loadAutomaticBackups();}
+if(b.dataset.pane==='diag')$('#run-diag').click();
 });});
+$('#run-diag').addEventListener('click',function(){
+  var out=$('#diag-out');out.textContent='Сбор данных…';
+  try{
+    var data=JSON.parse(Ruri.getDiagnostics());
+    out.textContent=JSON.stringify(data,null,2);
+  }catch(e){out.textContent='Ошибка диагностики: '+e.message;}
+});
 $('#saveKey').addEventListener('click',function(){try{var c=JSON.parse(Ruri.readRuntimeConfig()||'{}'),id=$('#model').value,k=$('#key').value.trim(),model=(c.models||[]).find(function(item){return item.id===id;});if(!k)throw new Error('Вставь API-ключ');if(!model)throw new Error('Провайдер не найден. Перезапусти приложение для миграции конфигурации.');model.api_key=k;var saved=Ruri.saveRuntimeConfig(JSON.stringify(c));if(String(saved).indexOf('ERROR:')===0)throw new Error(saved);$('#key').value='';alert('Ключ '+model.name+' сохранён в Android Keystore.');}catch(e){alert(e.message);}});
 function loadNetworkDiagnostics(){try{var d=JSON.parse(Ruri.readNetworkDiagnostics()||'{}');if(!d.available){$('#networkDiagnostics').textContent=d.message||'Нет данных';return;}var rows=['Провайдер: '+(d.provider||'—'),'Модель: '+(d.model||'—'),'Сервер: '+(d.base_url||'—'),'DNS: '+(d.dns_status||'—')+' · '+(d.dns_addresses||0)+' адресов · '+(d.dns_ms==null?'—':d.dns_ms+' мс'),'TLS/подключение: '+(d.connect_tls_ms==null?'—':d.connect_tls_ms+' мс'),'Отправка: '+(d.write_ms==null?'—':d.write_ms+' мс'),'Ожидание HTTP: '+(d.response_wait_ms==null?'—':d.response_wait_ms+' мс'),'Чтение ответа: '+(d.response_body_ms==null?'—':d.response_body_ms+' мс'),'HTTP: '+(d.http_status==null?'—':d.http_status),'Этап: '+(d.stage||'—'),'Результат: '+(d.result||'—')];if(d.timeout_stage)rows.push('Тайм-аут: '+d.timeout_stage);if(d.error_type)rows.push('Тип ошибки: '+d.error_type);$('#networkDiagnostics').textContent=rows.join('\\n');}catch(e){$('#networkDiagnostics').textContent='Ошибка чтения диагностики: '+e.message;}}
 $('#refreshNetworkDiagnostics').addEventListener('click',loadNetworkDiagnostics);
