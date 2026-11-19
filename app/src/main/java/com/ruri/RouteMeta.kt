@@ -53,6 +53,8 @@ object RouteMeta {
             .put("last_ok", 0L)
             .put("last_attempt", 0L)
             .put("last_reachability_at", 0L)
+            .put("last_full_probe_at", 0L)
+            .put("task_success_streaks", JSONObject())
             .put("reachable", true)
             .put("needs_vpn", false)
             .put("ru_reachable", true)
@@ -114,6 +116,19 @@ object RouteMeta {
         return current.optInt("day_count", 0) < requestsPerDay.coerceAtLeast(1)
     }
 
+    /** Claims a full provider capability probe before the network call, so a process crash cannot duplicate it. */
+    fun claimFullProbe(root: File, id: String, now: Long = System.currentTimeMillis()): Boolean {
+        var claimed = false
+        update(root, id) {
+            val last = it.optLong("last_full_probe_at", 0L)
+            if (now - last >= Probe.FULL_PROBE_MS) {
+                it.put("last_full_probe_at", now)
+                claimed = true
+            }
+        }
+        return claimed
+    }
+
     fun available(root: File, id: String, now: Long = System.currentTimeMillis()): Boolean {
         val route = route(root, id)
         return route.optLong("cooldown_until", 0L) <= now &&
@@ -168,9 +183,15 @@ object RouteMeta {
     private fun updateTaskScore(route: JSONObject, task: Task?, success: Boolean) {
         if (task == null) return
         val scores = route.optJSONObject("scores") ?: JSONObject()
+        val streaks = route.optJSONObject("task_success_streaks") ?: JSONObject()
         val previous = scores.optDouble(task.name, 0.5).coerceIn(0.0, 1.0)
         val observed = if (success) 1.0 else 0.0
-        scores.put(task.name, (previous * 0.8 + observed * 0.2).coerceIn(0.0, 1.0))
+        val next = (previous * 0.8 + observed * 0.2).coerceIn(0.0, 1.0)
+        val streak = if (success) streaks.optInt(task.name, 0) + 1 else 0
+        streaks.put(task.name, streak)
+        // Two consecutive wins on the same task establish a meaningful promotion signal.
+        scores.put(task.name, if (streak >= 2) maxOf(next, 0.75) else next)
         route.put("scores", scores)
+        route.put("task_success_streaks", streaks)
     }
 }
