@@ -161,7 +161,7 @@ object ChatEngine {
                             "Регуляторы: ${character.optJSONArray("regulators") ?: JSONArray()}. " +
                             "Запрещённые фразы: ${character.optJSONArray("banned_phrases") ?: JSONArray()}. " +
                             "Не выдавай несуществующие воспоминания за реальные. " +
-                            "Инструменты на этом маршруте отключены."
+                            minimalContextInstruction()
                     ))
                     .put(JSONObject(history.last().toString()))
             } else messages
@@ -310,9 +310,11 @@ object ChatEngine {
     }
 
 
+    internal fun minimalContextInstruction(): String = "Инструменты на этом маршруте отключены."
+
     internal fun parseAction(reply: String): JSONObject? {
         val trimmed = reply.trim()
-        val fenced = Regex("(?is)^\x60\x60\x60(?:json)?\\s*(\\{.*})\\s*\x60\x60\x60$").find(trimmed)
+        val fenced = Regex("(?is)^```(?:json)?\\s*(\\{.*})\\s*```$").find(trimmed)
         val jsonText = fenced?.groupValues?.get(1) ?: trimmed.takeIf { it.startsWith("{") && it.endsWith("}") }
             ?: return null
         val action = runCatching { JSONObject(jsonText) }.getOrNull() ?: return null
