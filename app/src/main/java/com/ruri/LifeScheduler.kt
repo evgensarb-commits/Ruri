@@ -136,7 +136,9 @@ class RuriLifeWorker(
             runCatching { JSONObject(it) }.getOrNull()
         }.firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" } ?: return
         val id = latest.optString("id").ifBlank { latest.optLong("ts").toString() }
-        val state = runCatching { JSONObject(FileManager.read(root, "memory/L4_state.json")) }.getOrDefault(JSONObject())
+        val rawState = FileManager.read(root, "memory/L4_state.json")
+        if (rawState.isBlank()) return
+        val state = runCatching { JSONObject(rawState) }.getOrNull() ?: return
         if (state.optString("last_research_detection_id") == id) return
         val message = latest.optString("text").trim()
         val pattern = Regex("(?iu)(?:что такое|кто такой|кто такая|что значит|объясни термин|объясни понятие|расскажи о)\\s+([^?!.\\n]{2,100})")
@@ -163,9 +165,9 @@ class RuriLifeWorker(
             val summary = if (response.has("error")) response.optString("error") else buildString {
                 for (i in 0 until minOf(results.length(), 7)) {
                     val item = results.optJSONObject(i) ?: continue
-                    append(item.optString("title")).append("\\n")
-                    append(item.optString("snippet")).append("\\n")
-                    append(item.optString("url")).append("\\n\\n")
+                    append(item.optString("title")).append("\n")
+                    append(item.optString("snippet")).append("\n")
+                    append(item.optString("url")).append("\n\n")
                 }
             }.take(10000)
             val eventId = "research-" + System.currentTimeMillis() + "-" + query.hashCode()
