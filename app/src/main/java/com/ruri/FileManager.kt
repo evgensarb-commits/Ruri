@@ -201,6 +201,8 @@ object FileManager {
         ensureRemoteModelContextPolicy(root)
         SecretStore.migrateLegacyApiKeys(root)
 
+        Capabilities.ensure(root)
+
         put(root, "memory/L4_state.json", """
             {
               "schema_version": 1,
