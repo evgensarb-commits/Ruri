@@ -133,6 +133,14 @@ object ChatEngine {
                 lastError = "${model.optString("name", model.optString("id"))}: требуется бесплатный API-ключ"
                 continue
             }
+            val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
+            val routeMeta = RouteMeta.route(root, routeId)
+            if (!RouteMeta.available(root, routeId) ||
+                !RouteMeta.quotaLeft(root, routeId, model.optInt("rpd", 200)) ||
+                (routeMeta.optBoolean("needs_vpn", false) && !NetState.vpn) ||
+                (!NetState.vpn && !routeMeta.optBoolean("ru_reachable", true))) {
+                continue
+            }
             val providerMessages = if (model.optBoolean("minimal_context", false)) {
                 // Kilo Auto Free may route through trial endpoints that log prompts.
                 // Send only the current turn and a short persona; never send memory/history/notifications.
@@ -156,7 +164,6 @@ object ChatEngine {
                 val message = providerMessages.optJSONObject(messageIndex) ?: continue
                 safeProviderMessages.put(SecretRedactor.redactEvent(message))
             }
-            val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
             runCatching { RouteMeta.recordAttempt(root, routeId) }
             var connection: HttpURLConnection? = null
             val diagnostic = JSONObject()
