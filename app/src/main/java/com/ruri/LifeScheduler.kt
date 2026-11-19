@@ -145,7 +145,7 @@ class RuriLifeWorker(
         val term = pattern.find(message)?.groupValues?.get(1)?.trim()?.take(100)
         state.put("last_research_detection_id", id)
         FileManager.write(root, "memory/L4_state.json", state.toString(2))
-        if (!term.isNullOrBlank()) enqueueEvent(context, "research_task:" + term)
+        if (!term.isNullOrBlank()) LifeScheduler.enqueueEvent(context, "research_task:" + term)
     }
 
     private fun runResearchTasks(root: java.io.File, pending: List<JSONObject>) {
