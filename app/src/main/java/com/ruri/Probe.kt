@@ -48,7 +48,10 @@ object Probe {
         }
     }
 
-    fun heartbeat(root: File, config: JSONObject) {
+    fun heartbeat(root: File, config: JSONObject, now: Long = System.currentTimeMillis()) {
+        val global = RouteMeta.route(root, "_global")
+        if (now - global.optLong("last_heartbeat_at", 0L) < HEARTBEAT_MS) return
+        RouteMeta.update(root, "_global") { it.put("last_heartbeat_at", now) }
         val models = config.optJSONArray("models") ?: JSONArray()
         refreshReachability(root, models, topOnly = true)
     }
