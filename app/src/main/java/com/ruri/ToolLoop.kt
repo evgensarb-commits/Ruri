@@ -45,6 +45,8 @@ object ToolLoop {
         return if (parseJsonAction(reply) == null) reply.trim() else ""
     }
 
+    internal fun isActionJson(raw: String): Boolean = parseJsonAction(raw) != null
+
     private fun parseJsonAction(raw: String): JSONObject? {
         val trimmed = raw.trim()
         val fenced = Regex("(?is)^\\x60\\x60\\x60(?:json)?\\s*(\\{.*\\})\\s*\\x60\\x60\\x60$").find(trimmed)
