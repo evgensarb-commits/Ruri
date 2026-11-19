@@ -32,7 +32,7 @@ class CapabilitiesMigrationTest : BodyHandsTestBase() {
         val limits = self.getJSONArray("limitations")
         assertTrue(known.length() >= capabilities.getJSONArray("senses").length() + capabilities.getJSONArray("actions").length())
         assertEquals(capabilities.getJSONArray("limits").length(), limits.length())
-        assertTrue(known.toString().contains("полке"))
+        assertTrue(known.toString().contains("Полка"))
     }
 }
 
