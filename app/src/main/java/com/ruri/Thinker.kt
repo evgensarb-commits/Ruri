@@ -153,7 +153,7 @@ object Thinker {
             SecretStore.saveRuntimeConfig(root, config.toString(2))
         }
         val safeReply = SecretRedactor.redactText(reply.trim())
-        if (safeReply.isBlank() || safeReply.startsWith("{") || runCatching { JSONObject(safeReply).has("action") }.getOrDefault(false)) {
+        if (safeReply.isBlank() || ToolLoop.isActionJson(safeReply)) {
             state.put("last_thought", now)
             FileManager.write(root, "memory/L4_state.json", state.toString(2))
             return
