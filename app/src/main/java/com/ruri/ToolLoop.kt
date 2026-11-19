@@ -13,7 +13,32 @@ object ToolLoop {
         reply: String,
         messages: JSONArray,
         requestNext: (JSONArray) -> String?
-    ): String = ChatEngine.runToolLoop(root, reply, messages, requestNext)
+    ): String {
+        var current = reply
+        var hops = 0
+        while (true) {
+            val action = ChatEngine.parseAction(current) ?: return current
+            if (hops >= 3) return current
+            val name = action.optString("action")
+            val params = JSONObject(action.toString()).apply { remove("action") }
+            FileManager.appendEvent(root, SecretRedactor.redactEvent(
+                JSONObject().put("type", "tool_call").put("action", name).put("params", params)
+            ))
+            val result = executeTool(root, name, action)
+            if (name == "search") ChatEngine.captureSearchUrls(result.second)
+            val safeText = SecretRedactor.redactText(result.second).take(4000)
+            FileManager.appendEvent(root, SecretRedactor.redactEvent(
+                JSONObject().put("type", "tool_result").put("action", name)
+                    .put("ok", result.first).put("text", safeText)
+            ))
+            messages.put(JSONObject().put("role", "user")
+                .put("content", "[ИНСТРУМЕНТ ${name}]: ${safeText}"))
+            hops++
+            if (hops == 3) messages.put(JSONObject().put("role", "system")
+                .put("content", "Лимит инструментов исчерпан — ответь обычной прозой"))
+            current = requestNext(messages) ?: return "Не удалось получить ответ после выполнения инструмента."
+        }
+    }
 
     fun executeTool(root: File, action: String, params: JSONObject): Pair<Boolean, String> =
         ChatEngine.executeTool(root, action, params)
