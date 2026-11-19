@@ -34,6 +34,12 @@ class AutonomyPackageTest {
     }
 
     @Test
+    fun shelfWatcherRecoversReadableStringsFromBinaryFiles() {
+        val bytes = byteArrayOf(0, 1) + "embedded readable payload from a document".toByteArray() + byteArrayOf(0, 2)
+        assertTrue(ShelfWatcher.decodeText(bytes).contains("embedded readable payload"))
+    }
+
+    @Test
     fun googleHtmlScrapeExtractsOrganicResult() {
         val html = """<a href="/url?q=https%3A%2F%2Fexample.org%2F&sa=U"><h3>Example page</h3></a>"""
         val result = JSONObject(WebSearch.parseGoogleHtml(html, "example"))
