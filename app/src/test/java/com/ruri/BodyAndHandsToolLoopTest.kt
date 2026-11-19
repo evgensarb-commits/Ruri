@@ -7,13 +7,12 @@ import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-private abstract class BodyHandsTestBase {
+abstract class BodyHandsTestBase {
     protected lateinit var root: File
     @Before fun createRoot() { root = Files.createTempDirectory("ruri-body-hands").toFile() }
     @After fun removeRoot() { root.deleteRecursively() }
@@ -59,7 +58,7 @@ class ToolProtocolParseTest {
         )?.optString("action"))
         assertNull(ChatEngine.parseAction("Сейчас поищу: {\"action\":\"search\",\"query\":\"x\"}"))
         assertNull(ChatEngine.parseAction("""{"action":"search","query":"x","extra":"bad"}"""))
-        assertNull(ChatEngine.parseAction("""{"action":"search","query":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}"""))
+        assertNull(ChatEngine.parseAction("""{"action":"search","query":"${"x".repeat(301)}"}"""))
     }
 }
 
