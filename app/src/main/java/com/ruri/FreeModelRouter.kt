@@ -25,4 +25,18 @@ internal object FreeModelRouter {
                 .thenBy { models.optJSONObject(it)?.optInt("priority", 100) ?: 100 }
         )
     }
+
+    fun orderedIndices(
+        root: java.io.File,
+        models: JSONArray,
+        primaryIndex: Int,
+        requireNsfw: Boolean = false,
+        task: Task = Task.CHAT
+    ): List<Int> = RouteSelector.ordered(
+        root = root,
+        models = models,
+        current = primaryIndex,
+        task = task,
+        needNsfw = requireNsfw
+    )
 }
