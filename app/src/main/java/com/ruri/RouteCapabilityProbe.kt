@@ -44,6 +44,7 @@ internal object RouteCapabilityProbe {
             val needsVpn = model.optBoolean("needs_vpn", routeMeta.optBoolean("needs_vpn", false))
             if (needsVpn && !NetState.vpn) continue
             if (!NetState.vpn && !routeMeta.optBoolean("ru_reachable", true)) continue
+            if (!RouteMeta.available(root, id, now)) continue
             if (!RouteMeta.quotaLeft(root, id, model.optInt("rpd", 200))) {
                 model.put("nsfw_capable", false)
                 model.put("nsfw_tested_at", 0L)
