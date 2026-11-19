@@ -66,7 +66,8 @@ object RouteSelector {
                 val tested = model.optLong("nsfw_tested_at", 0L) > 0L &&
                     model.optString("nsfw_probe_status") == "passed" &&
                     model.optBoolean("nsfw_capable", false)
-                if (!tested || !meta.optJSONObject("caps")?.optBoolean("nsfw", true)!!) continue
+                val metaSupportsNsfw = meta.optJSONObject("caps")?.optBoolean("nsfw", true) ?: true
+                if (!tested || !metaSupportsNsfw) continue
             }
             if (!RouteMeta.quotaLeft(root, id, model.optInt("rpd", 200))) continue
             candidates += index to score(meta, task)
@@ -77,7 +78,9 @@ object RouteSelector {
                 .thenBy { models.optJSONObject(it.first)?.optInt("priority", 100) ?: 100 }
                 .thenByDescending {
                     val model = models.optJSONObject(it.first)
-                    RouteMeta.route(root, model?.optString("id").orEmpty()).optLong("last_ok", 0L)
+                    val id = model?.optString("id").orEmpty()
+                        .ifBlank { model?.optString("name").orEmpty().ifBlank { "route_${it.first}" } }
+                    RouteMeta.route(root, id).optLong("last_ok", 0L)
                 }
         ).map { it.first }
     }
