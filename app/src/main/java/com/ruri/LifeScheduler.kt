@@ -101,7 +101,8 @@ class RuriLifeWorker(
 
             try {
                 BackupPolicy.checkpointState(root)
-                BackupPolicy.maybeRolling(appContext, "maintenance")
+                val backupTrigger = if (reason.contains("significant")) "significant" else "maintenance"
+                BackupPolicy.maybeRolling(appContext, backupTrigger)
             } catch (backupError: Exception) {
                 Log.e("Ruri", "Rolling backup checkpoint failed; life cycle will continue", backupError)
             }
