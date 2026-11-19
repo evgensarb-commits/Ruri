@@ -63,6 +63,7 @@ object Capabilities {
             append("=== ТВОЁ ТЕЛО И ЧУВСТВА ===\n").append(lines("senses")).append("\n")
             append("=== ТВОЯ ПАМЯТЬ ===\n").append(lines("memory")).append("\n")
             append("=== ТВОИ ДЕЙСТВИЯ (инструменты ниже) ===\n").append(lines("actions")).append("\n")
+            append("""Формы действий: {"action":"search","query":"..."}; {"action":"list_shelf"}; {"action":"read_shelf","name":"..."}; {"action":"recall","query":"..."}; {"action":"remember_fact","text":"..."}.\n""")
             append("Когда тебе нужно действие, ответь одним JSON-объектом действия и ничем больше. Я выполню его и верну результат следующим сообщением. Не проси того, что вне списка.\n")
             append("=== ТВОИ ЧЕСТНЫЕ ГРАНИЦЫ ===\n").append(lines("limits")).append("\n")
             append(config.optString("self_narrative"))
