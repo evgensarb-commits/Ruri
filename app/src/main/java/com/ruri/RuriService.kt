@@ -42,7 +42,9 @@ class RuriService : Service() {
             runCatching {
                 NetState.refresh(applicationContext)
                 val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
-                Probe.refreshReachability(filesDir, config.optJSONArray("models") ?: JSONArray(), topOnly = false, force = true)
+                if (Probe.claimStartupRefresh(filesDir)) {
+                    Probe.refreshReachability(filesDir, config.optJSONArray("models") ?: JSONArray(), topOnly = false, force = true)
+                }
             }.onFailure { android.util.Log.w("Ruri", "Startup route refresh failed", it) }
         }, "ruri-service-route-refresh").start()
     }

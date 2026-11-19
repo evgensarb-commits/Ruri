@@ -92,7 +92,9 @@ class MainActivity : AppCompatActivity() {
         routeExecutor.execute {
             runCatching {
                 val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
-                Probe.refreshReachability(filesDir, config.optJSONArray("models") ?: org.json.JSONArray(), topOnly = false, force = true)
+                if (Probe.claimStartupRefresh(filesDir)) {
+                    Probe.refreshReachability(filesDir, config.optJSONArray("models") ?: org.json.JSONArray(), topOnly = false, force = true)
+                }
             }.onFailure { android.util.Log.w("Ruri", "Activity startup route refresh failed", it) }
         }
         try { LifeScheduler.ensurePeriodic(this) }
@@ -225,6 +227,10 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun read(path: String): String = FileManager.read(filesDir, path)
+
+        @JavascriptInterface
+        fun readLastEvents(filter: String, limit: Int): String =
+            FileManager.readLastEvents(filesDir, filter, limit).toString()
 
         @JavascriptInterface
         fun readNetworkDiagnostics(): String = NetworkDiagnostics.latest(filesDir)

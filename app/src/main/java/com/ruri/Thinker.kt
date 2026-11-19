@@ -116,7 +116,14 @@ object Thinker {
             if (model.optString("api_key").isBlank()) continue
             val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
             runCatching { RouteMeta.recordAttempt(root, routeId) }
-            reply = requestModel(model, prompt)
+            val messages = JSONArray()
+                .put(JSONObject().put("role", "system").put("content", prompt))
+                .put(JSONObject().put("role", "user").put("content",
+                    if (initiative) "Напиши сообщение Командиру обычной прозой." else "Напиши внутреннюю мысль для дневника обычной прозой."))
+            val initial = requestModel(model, messages)
+            reply = if (initial.isNullOrBlank()) null else ToolLoop.unwrapDiaryReply(root, initial, messages) { next ->
+                requestModel(model, next)
+            }
             if (!reply.isNullOrBlank() && initiative &&
                 RouteCapabilityProbe.looksLikeRefusalOrDisclaimer(reply)) {
                 RouteCapabilityProbe.markNotCapable(root, config, index, "initiative_refusal_or_disclaimer")
@@ -146,6 +153,11 @@ object Thinker {
             SecretStore.saveRuntimeConfig(root, config.toString(2))
         }
         val safeReply = SecretRedactor.redactText(reply.trim())
+        if (safeReply.isBlank() || ToolLoop.isActionJson(safeReply)) {
+            state.put("last_thought", now)
+            FileManager.write(root, "memory/L4_state.json", state.toString(2))
+            return
+        }
 
         val diary = readJson(root, "memory/L2_diary.json")
         val entries = diary.optJSONArray("entries") ?: JSONArray()
@@ -165,7 +177,7 @@ object Thinker {
         diary.put("updated_at", now)
         FileManager.write(root, "memory/L2_diary.json", diary.toString(2))
         if (initiative) {
-            appendChatMessage(root, "ruri", safeReply, now)
+            appendChatMessage(root, "ruri", safeReply, now, ChatEngine.sourceUrlsSnapshot())
             state.put("waiting_for_reply", true)
             state.put("initiative_sent_at", now)
             state.put("last_initiative", now)
@@ -278,7 +290,7 @@ object Thinker {
         return SecretRedactor.redactText(prompt)
     }
 
-    private fun requestModel(model: JSONObject, prompt: String): String? {
+    private fun requestModel(model: JSONObject, messages: JSONArray): String? {
         var connection: HttpURLConnection? = null
         return try {
             val baseUrl = model.optString("base_url").trimEnd('/')
@@ -294,7 +306,7 @@ object Thinker {
             }
             val body = JSONObject()
                 .put("model", model.optString("model"))
-                .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt)))
+                .put("messages", messages)
                 .put("temperature", 0.85)
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
@@ -334,16 +346,15 @@ object Thinker {
         )
     }
 
-    private fun appendChatMessage(root: File, who: String, text: String, ts: Long) {
-        FileManager.appendEvent(
-            root,
-            JSONObject()
-                .put("ts", ts)
-                .put("type", "message")
-                .put("source", if (who == "ruri") "agent" else "commander")
-                .put("who", who)
-                .put("text", text)
-        )
+    private fun appendChatMessage(root: File, who: String, text: String, ts: Long, sourceUrls: JSONArray = JSONArray()) {
+        val event = JSONObject()
+            .put("ts", ts)
+            .put("type", "message")
+            .put("source", if (who == "ruri") "agent" else "commander")
+            .put("who", who)
+            .put("text", text)
+        if (sourceUrls.length() > 0) event.put("source_urls", sourceUrls)
+        FileManager.appendEvent(root, event)
     }
 
     private fun hoursSince(ts: Long, now: Long): Double = if (ts <= 0L) -1.0 else (now - ts) / 3600000.0

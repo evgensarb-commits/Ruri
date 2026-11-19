@@ -11,6 +11,8 @@ object Probe {
     const val REACH_TTL_MS = 10L * 60L * 1000L
     const val HEARTBEAT_MS = 20L * 60L * 1000L
     const val FULL_PROBE_MS = 24L * 60L * 60L * 1000L
+    const val FORCE_REFRESH_THROTTLE_MS = 60_000L
+    const val STARTUP_REFRESH_THROTTLE_MS = 300_000L
     private const val CONNECT_TIMEOUT_MS = 4_000
     private const val READ_TIMEOUT_MS = 4_000
     @Volatile private var lastRecoveryRefreshAt = 0L
@@ -56,7 +58,17 @@ object Probe {
         return true
     }
 
-    internal fun recoveryRefreshAllowed(last: Long, now: Long): Boolean = RouteRecovery.shouldRefresh(last, now)
+    internal fun recoveryRefreshAllowed(last: Long, now: Long): Boolean =
+        now - last >= FORCE_REFRESH_THROTTLE_MS
+
+    @Synchronized
+    fun claimStartupRefresh(root: File, now: Long = System.currentTimeMillis()): Boolean {
+        val global = RouteMeta.route(root, "_global")
+        val last = global.optLong("last_startup_refresh_at", 0L)
+        if (now - last < STARTUP_REFRESH_THROTTLE_MS) return false
+        RouteMeta.update(root, "_global") { it.put("last_startup_refresh_at", now) }
+        return true
+    }
 
     fun heartbeat(root: File, config: JSONObject, now: Long = System.currentTimeMillis()) {
         val global = RouteMeta.route(root, "_global")
