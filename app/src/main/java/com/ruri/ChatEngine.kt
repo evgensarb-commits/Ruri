@@ -29,7 +29,24 @@ object ChatEngine {
             )
             if (reachableOrder.isNotEmpty()) return respondInternal(root, allowRecovery = false, assumeReachable = true)
             OfflineQueue.markPending(root)
-            return OFFLINE_REPLY
+            val selected = models.optJSONObject(current)
+            val name = selected?.optString("name")?.takeIf { it.isNotBlank() } ?: "выбранный маршрут"
+            val id = selected?.optString("id")?.ifBlank { "route_$current" } ?: "route_$current"
+            val meta = RouteMeta.route(root, id)
+            val reason = when {
+                selected == null -> "Нет доступного маршрута: список бесплатных моделей пуст"
+                selected.optString("api_key").isBlank() -> "Маршрут $name: API-ключ не задан"
+                meta.optBoolean("needs_vpn", selected.optBoolean("needs_vpn", false)) && !NetState.vpn ->
+                    "Маршрут $name: требуется VPN"
+                !RouteMeta.quotaLeft(root, id, selected.optInt("rpd", 200)) ->
+                    "Маршрут $name: дневная квота исчерпана"
+                meta.optLong("cooldown_until", 0L) > System.currentTimeMillis() ->
+                    "Маршрут $name: временный cooldown"
+                !meta.optBoolean("reachable", true) ->
+                    "Маршрут $name: DNS или сервер недоступен при последней проверке"
+                else -> "Маршрут $name: Android сообщает, что сетевого подключения нет"
+            }
+            return if (config.optBoolean("exclusive_route", false)) "$reason. Автоматический переход отключён." else reason
         }
         if (models.length() == 0) {
             OfflineQueue.markPending(root)
