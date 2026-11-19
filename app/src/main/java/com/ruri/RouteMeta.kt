@@ -16,16 +16,6 @@ object RouteMeta {
             timeZone = TimeZone.getTimeZone("UTC")
         }.format(Date())
 
-    private fun nextUtcMidnight(): Long {
-        val c = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
-        c.add(Calendar.DAY_OF_YEAR, 1)
-        c.set(Calendar.HOUR_OF_DAY, 0)
-        c.set(Calendar.MINUTE, 0)
-        c.set(Calendar.SECOND, 0)
-        c.set(Calendar.MILLISECOND, 0)
-        return c.timeInMillis
-    }
-
     @Synchronized
     fun load(root: File): JSONObject = try {
         val raw = FileManager.read(root, PATH)
