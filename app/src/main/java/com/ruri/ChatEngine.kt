@@ -13,6 +13,7 @@ import android.os.SystemClock
 /** Native model gateway: WebView never sends provider requests directly. */
 object ChatEngine {
     const val OFFLINE_REPLY = "Связи нет. Отвечу, когда она вернётся."
+    @Volatile private var lastSearchSourceUrls = JSONArray()
 
     fun respond(root: File): String = respondInternal(root, allowRecovery = true)
 
@@ -316,7 +317,8 @@ object ChatEngine {
                     allFailuresNetwork = false
                     continue
                 }
-                val reply = runToolLoop(root, initialReply, messages) { nextMessages ->
+                lastSearchSourceUrls = JSONArray()
+                val reply = ToolLoop.runToolLoop(root, initialReply, messages) { nextMessages ->
                     requestToolFollowup(model, nextMessages)
                 }
                 if (RouteCapabilityProbe.isAdultTopic(history.last().optString("content")) &&
@@ -334,7 +336,7 @@ object ChatEngine {
                 NetworkDiagnostics.record(root, diagnostic)
                 runCatching { RouteMeta.recordSuccess(root, routeId, task) }
                 // Keep Routeway as primary; fallback success is temporary, not a reconfiguration.
-                appendFinalReply(root, reply, model.optString("name", model.optString("id", "маршрут")) )
+                appendFinalReply(root, reply, model.optString("name", model.optString("id", "маршрут")), lastSearchSourceUrls)
                 runCatching { BackupPolicy.checkpointState(root) }
                 runCatching { OfflineQueue.clear(root) }
                 return reply
@@ -432,6 +434,7 @@ object ChatEngine {
                 JSONObject().put("type", "tool_call").put("action", actionName).put("params", params)
             ))
             val result = executeTool(root, actionName, action)
+            if (actionName == "search") lastSearchSourceUrls = extractSourceUrls(result.second)
             val safeText = SecretRedactor.redactText(result.second).take(4000)
             FileManager.appendEvent(root, SecretRedactor.redactEvent(
                 JSONObject().put("type", "tool_result").put("action", actionName)
@@ -448,7 +451,7 @@ object ChatEngine {
         }
     }
 
-    private fun executeTool(root: File, action: String, params: JSONObject): Pair<Boolean, String> {
+    internal fun executeTool(root: File, action: String, params: JSONObject): Pair<Boolean, String> {
         return try {
             val result = when (action) {
                 "search" -> WebSearch.search(root, params.optString("query"))
@@ -526,9 +529,15 @@ object ChatEngine {
         }
     }
 
-    internal fun appendFinalReply(root: File, reply: String, routeName: String = "маршрут") {
-        val saved = JSONObject(FileManager.appendEvent(root, JSONObject()
-            .put("type", "message").put("source", "agent").put("who", "ruri").put("text", reply)))
+    internal fun appendFinalReply(
+        root: File,
+        reply: String,
+        routeName: String = "маршрут",
+        sourceUrls: JSONArray = JSONArray()
+    ) {
+        val event = JSONObject().put("type", "message").put("source", "agent").put("who", "ruri").put("text", reply)
+        if (sourceUrls.length() > 0) event.put("source_urls", JSONArray(sourceUrls.toString()))
+        val saved = JSONObject(FileManager.appendEvent(root, event))
         val badge = JSONObject()
             .put("ts", saved.optLong("ts"))
             .put("route", routeName)
@@ -537,6 +546,27 @@ object ChatEngine {
             .lineSequence().filter { it.isNotBlank() }.toMutableList()
         existing.add(badge.toString())
         FileManager.write(root, "memory/route_badges.jsonl", existing.takeLast(5000).joinToString("\n", postfix = "\n"))
+    }
+
+    private fun extractSourceUrls(raw: String): JSONArray {
+        val found = linkedSetOf<String>()
+        fun walk(value: Any?) {
+            when (value) {
+                is JSONObject -> {
+                    val keys = value.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        val child = value.opt(key)
+                        if (key.equals("url", true) && child is String &&
+                            (child.startsWith("https://") || child.startsWith("http://"))) found.add(child)
+                        else walk(child)
+                    }
+                }
+                is JSONArray -> for (i in 0 until value.length()) walk(value.opt(i))
+            }
+        }
+        runCatching { walk(JSONObject(raw)) }.onFailure { runCatching { walk(JSONArray(raw)) } }
+        return JSONArray().also { out -> found.take(20).forEach { url -> out.put(url) } }
     }
 
     private fun readJson(root: File, path: String): JSONObject =
