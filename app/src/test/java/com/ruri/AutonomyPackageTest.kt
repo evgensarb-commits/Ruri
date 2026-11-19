@@ -9,10 +9,11 @@ import org.junit.Test
 
 class AutonomyPackageTest {
     @Test
-    fun thinkerSkipsMinimalContextRoutes() {
-        assertTrue(Thinker.shouldSkipMinimalContextRoute(JSONObject().put("minimal_context", true)))
-        assertFalse(Thinker.shouldSkipMinimalContextRoute(JSONObject().put("minimal_context", false)))
-        assertFalse(Thinker.shouldSkipMinimalContextRoute(JSONObject()))
+    fun fullMemoryRoutePolicyRejectsMinimalAndAnonymousProviders() {
+        assertTrue(FreeModelRouter.isDisallowedMemoryRoute(JSONObject().put("minimal_context", true)))
+        assertTrue(FreeModelRouter.isDisallowedMemoryRoute(JSONObject().put("allow_anonymous", true)))
+        assertTrue(FreeModelRouter.isDisallowedMemoryRoute(JSONObject().put("id", "kilo")))
+        assertFalse(FreeModelRouter.isDisallowedMemoryRoute(JSONObject().put("id", "routeway")))
     }
 
     @Test
