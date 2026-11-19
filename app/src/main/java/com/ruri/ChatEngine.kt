@@ -335,6 +335,10 @@ object ChatEngine {
                 diagnostic.put("result", "success")
                 NetworkDiagnostics.record(root, diagnostic)
                 runCatching { RouteMeta.recordSuccess(root, routeId, task) }
+                // Never persist a raw action object as a chat message.
+                if (reply.isBlank() || reply.trim().startsWith("{")) {
+                    throw IllegalStateException("Модель не вернула обычный текстовый ответ после инструментов")
+                }
                 // Keep Routeway as primary; fallback success is temporary, not a reconfiguration.
                 appendFinalReply(root, reply, model.optString("name", model.optString("id", "маршрут")), lastSearchSourceUrls)
                 runCatching { BackupPolicy.checkpointState(root) }
