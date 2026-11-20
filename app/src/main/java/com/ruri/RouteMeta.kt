@@ -17,12 +17,65 @@ object RouteMeta {
         }.format(Date())
 
     @Synchronized
-    fun load(root: File): JSONObject = try {
-        val raw = FileManager.read(root, PATH)
-        if (raw.isBlank()) JSONObject() else JSONObject(raw)
-    } catch (e: Exception) {
-        android.util.Log.w("Ruri", "Route metadata could not be read; starting with empty metadata", e)
-        JSONObject()
+    fun load(root: File): JSONObject {
+        val all = try {
+            val raw = FileManager.read(root, PATH)
+            if (raw.isBlank()) JSONObject() else JSONObject(raw)
+        } catch (e: Exception) {
+            android.util.Log.w("Ruri", "Route metadata could not be read; starting with empty metadata", e)
+            JSONObject()
+        }
+        var migrated = false
+        val ids = all.keys()
+        while (ids.hasNext()) {
+            val route = all.optJSONObject(ids.next()) ?: continue
+            listOf("nsfw_capable", "nsfw_tested_at", "nsfw_probe_status", "nsfw").forEach { key ->
+                if (route.has(key)) {
+                    route.remove(key)
+                    migrated = true
+                }
+            }
+            val caps = route.optJSONObject("caps")
+            if (caps?.has("nsfw") == true) {
+                caps.remove("nsfw")
+                route.put("caps", caps)
+                migrated = true
+            }
+        }
+        if (migrated) FileManager.write(root, PATH, all.toString(2))
+        return all
+    }
+
+    /** One-time cleanup for legacy model-config and route-metadata NSFW capability flags. */
+    fun migrateLegacyNsfwFlags(root: File) {
+        load(root) // Route metadata caps.nsfw is migrated and rewritten by load().
+
+        fun stripLegacyFlags(config: JSONObject): Boolean {
+            var changed = false
+            val models = config.optJSONArray("models") ?: return false
+            for (index in 0 until models.length()) {
+                val model = models.optJSONObject(index) ?: continue
+                listOf("nsfw_capable", "nsfw_tested_at", "nsfw_probe_status").forEach { key ->
+                    if (model.has(key)) {
+                        model.remove(key)
+                        changed = true
+                    }
+                }
+            }
+            return changed
+        }
+
+        runCatching {
+            val runtime = JSONObject(SecretStore.readRuntimeConfig(root))
+            if (stripLegacyFlags(runtime)) SecretStore.saveRuntimeConfig(root, runtime.toString(2))
+        }
+
+        runCatching {
+            val legacyFile = File(root, "core/config.json")
+            if (!legacyFile.isFile) return@runCatching
+            val legacy = JSONObject(legacyFile.readText(Charsets.UTF_8))
+            if (stripLegacyFlags(legacy)) FileManager.write(root, "core/config.json", legacy.toString(2))
+        }
     }
 
     @Synchronized
@@ -41,7 +94,6 @@ object RouteMeta {
             .put("last_ok", 0L)
             .put("last_attempt", 0L)
             .put("last_reachability_at", 0L)
-            .put("last_full_probe_at", 0L)
             .put("task_success_streaks", JSONObject())
             .put("reachable", true)
             .put("needs_vpn", false)
@@ -83,12 +135,16 @@ object RouteMeta {
     fun setNeedsVpn(root: File, id: String, needsVpn: Boolean) =
         update(root, id) { it.put("needs_vpn", needsVpn) }
 
-    fun setCapability(root: File, id: String, capability: String, capable: Boolean) =
+    fun setCapability(root: File, id: String, capability: String, capable: Boolean) {
+        require(!capability.equals("nsfw", ignoreCase = true)) {
+            "NSFW route capabilities are not persisted"
+        }
         update(root, id) {
             val caps = it.optJSONObject("caps") ?: JSONObject()
             caps.put(capability, capable)
             it.put("caps", caps)
         }
+    }
 
     @Synchronized
     fun quotaLeft(root: File, id: String, requestsPerDay: Int): Boolean {
@@ -102,20 +158,6 @@ object RouteMeta {
             current = route(root, id)
         }
         return current.optInt("day_count", 0) < requestsPerDay.coerceAtLeast(1)
-    }
-
-    /** Claims a full provider capability probe before the network call, so a process crash cannot duplicate it. */
-    fun claimFullProbe(root: File, id: String, now: Long = System.currentTimeMillis(), force: Boolean = false): Boolean {
-        var claimed = false
-        update(root, id) {
-            val last = it.optLong("last_full_probe_at", 0L)
-            val allowed = if (force) now - last >= 60_000L else now - last >= Probe.FULL_PROBE_MS
-            if (allowed) {
-                it.put("last_full_probe_at", now)
-                claimed = true
-            }
-        }
-        return claimed
     }
 
     fun available(root: File, id: String, now: Long = System.currentTimeMillis()): Boolean {
@@ -156,7 +198,7 @@ object RouteMeta {
                 it.put("ru_reachable", false)
                 it.put("reachable", false)
             }
-            "refusal" -> Unit // NSFW capability is updated by RouteCapabilityProbe.
+            "refusal" -> Unit // Refusals are logged; they never permanently change route eligibility.
             else -> {
                 val streak = it.optInt("fail_streak", 0) + 1
                 it.put("fail_streak", streak)
