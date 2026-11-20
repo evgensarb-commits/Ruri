@@ -23,13 +23,17 @@ object Notifier {
         }
     }
 
-    fun thought(ctx: Context, text: String) {
+    fun thought(ctx: Context, text: String, messageId: String? = null) {
         try {
             if (Build.VERSION.SDK_INT >= 33 &&
                 ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
             init(ctx)
+            val intent = Intent(ctx, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                if (!messageId.isNullOrBlank()) putExtra("message_id", messageId)
+            }
             val pi = PendingIntent.getActivity(
-                ctx, 1, Intent(ctx, MainActivity::class.java),
+                ctx, messageId?.hashCode() ?: 1, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             val notification = NotificationCompat.Builder(ctx, THOUGHT_CHANNEL_ID)

@@ -27,17 +27,53 @@ button.secondary{background:transparent;color:#f4c94f}
 .card p{margin:0;color:#9cafcb;font-size:13px}.field{display:grid;gap:5px;margin:12px 0}.field label{font:10px monospace;color:#8395b2;letter-spacing:.1em}
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.result{padding:12px 0;border-bottom:1px solid #273653}.result a{color:#f4c94f;font-weight:650;text-decoration:none}.result p{font-size:13px;color:#9cafcb;margin:6px 0}
 .small{font-size:11px;color:#8395b2}.error{color:#ff9a9a}.typing{padding:10px 13px;background:#15213a;border-left:2px solid #f4c94f}
+ 
+:root{--bg:#070b12;--panel:#0d1524;--border:#273653;--gold:#f4c94f;--cyan:#36d7e9;--text:#dce4f2;--muted:#7f91ad}
+body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif}
+header,nav,.composer{background:var(--panel);border-color:var(--border)}
+header strong,.section{color:var(--text)}
+#status,.meta,.small,.field label{color:var(--muted)}
+.meta{font:10px ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.07em}
+nav button{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;border-bottom:2px solid transparent}
+nav button.on{color:var(--gold);border-bottom-color:var(--gold)}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:6px}
+textarea,input,select,.bub,.action,.gear,.overlay-head button{border-radius:6px}
+textarea,input,select{background:var(--bg);border-color:var(--border);color:var(--text)}
+button.action{background:var(--gold);border:1px solid var(--gold);color:#10141b;border-radius:6px}
+button.action.secondary{background:transparent;color:var(--gold)}
+.her .bub{background:var(--panel);border:1px solid var(--border);border-left:2px solid var(--gold)}
+.me .bub{background:var(--panel);border:1px solid var(--border);border-right:2px solid var(--cyan)}
+.sources{border-left-color:var(--gold)}
+.sources a{color:var(--cyan)}
+.receipt{color:var(--cyan);font:11px ui-monospace,SFMono-Regular,Consolas,monospace;margin-left:6px;letter-spacing:-.08em}
+.msg-delete{justify-self:end;align-self:start;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:1px 7px;font:13px ui-monospace,monospace}
+.msg-delete:active{color:var(--gold);border-color:var(--gold)}
+.typing{background:var(--panel);border-left:2px solid var(--gold);border-radius:6px;animation:typingPulse 1.4s ease-in-out infinite}
+@keyframes typingPulse{0%,100%{opacity:.55}50%{opacity:1}}
+.l0-filter{background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:7px 10px;font:10px ui-monospace,monospace}
+.l0-filter.on{border-color:var(--gold);color:var(--gold);background:#171b24}
+.l0-row{border-top:1px solid var(--border);padding:9px 2px;font:11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere;cursor:pointer}
+.l0-row .l0-summary{color:var(--text)}
+.l0-detail{display:none;background:var(--panel);color:var(--muted);padding:9px;margin:7px 0 10px;border:1px solid var(--border);border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;font:10px/1.45 ui-monospace,monospace}
+.l0-detail.open{display:block}
+.message-focus .bub{outline:1px solid var(--cyan);box-shadow:0 0 0 2px #36d7e933}
+
 </style>
 </head>
 <body>
 <header><strong>RU-R1 · Рури</strong><span id="status">● ЗАГРУЗКА</span><button id="settingsToggle" class="gear" aria-label="Настройки">⚙</button></header>
-<nav><button class="on" data-pane="chat">ЧАТ</button><button data-pane="diary">ДНЕВНИК</button></nav>
+<nav><button class="on" data-pane="chat">ЧАТ</button><button data-pane="diary">ДНЕВНИК</button><button data-pane="l0">L0</button></nav>
 <main>
 <section class="pane on" id="pane-chat">
 <div id="chat"></div>
 <div class="composer"><div class="inrow"><button class="action secondary" id="attach" title="Добавить файл">📎</button><input id="attachFile" type="file" hidden><textarea id="input" rows="1" placeholder="Написать Рури…"></textarea><button class="action" id="send">➤</button></div><div class="small" id="inputHelp">Enter — отправить · Shift+Enter — новая строка</div></div>
 </section>
 <section class="pane" id="pane-diary"><div class="scroll"><h2 class="section">ДНЕВНИК <span>Рури</span></h2><div id="diary"></div></div></section>
+<section class="pane" id="pane-l0"><div class="scroll">
+<h2 class="section">ЖУРНАЛ <span>L0</span></h2>
+<div class="actions" id="l0filters"></div>
+<button class="action secondary" id="l0refresh">ОБНОВИТЬ</button>
+<div id="l0list"></div></div></section>
 <section class="pane overlay-pane" id="pane-brain"><div class="scroll"><div class="overlay-head"><h2 class="section">МОЗГ <span>и личность</span></h2><button id="closeSettings">✕</button></div>
 <div class="card"><b>БЕСПЛАТНЫЕ МАРШРУТЫ — БЕЗ ПЛАТНЫХ ЗАПРОСОВ</b><p>Основной: Routeway · Gemma 4 MeroMero Free. Резерв: Requesty · Google Gemma 4 Free. Вызываются только явно бесплатные маршруты; free-tier guard не отключается. Gemini и Groq — legacy neutral_fallback: выключены, требуют VPN, ru_reachable=false, nsfw_capable=false. Для любого маршрута NSFW-возможность считается false до успешного live-зонда.</p><p>Добавь ключи Routeway и Requesty ниже. Ключи хранятся в Android Keystore.</p><p><a href="#" onclick="Ruri.openUrl('https://routeway.ai/');return false">Routeway — получить ключ</a> · <a href="#" onclick="Ruri.openUrl('https://www.requesty.ai/model/google/gemma-4-31b-it');return false">Requesty — получить ключ</a></p></div>
 <div class="card"><b>МАРШРУТЫ</b><p>Авто использует текущую сортировку. При включении «только этот маршрут» Рури не переключится на резерв, если выбранный провайдер упадёт.</p><div id="routeList" class="small">Загружаю маршруты…</div><label style="display:flex;align-items:center;gap:8px;margin-top:10px"><input id="exclusiveRoute" type="checkbox" style="width:auto"> Только этот маршрут</label><div id="routeMode" class="small">Режим: авто</div></div>
@@ -83,32 +119,53 @@ function read(p){return Ruri.read(p)||'';}
 function write(p,v){var r=Ruri.write(p,v);if(typeof r==='string'&&r.indexOf('ERROR:')===0)throw new Error(r);return r;}
 function appendLog(obj){var result=Ruri.appendEvent(JSON.stringify(obj));if(typeof result==='string'&&result.indexOf('ERROR:')===0)throw new Error(result);}
 function routeBadges(){var map={};try{read('memory/route_badges.jsonl').split('\n').forEach(function(line){if(!line.trim())return;var b=JSON.parse(line);map[String(b.ts)]=b;});}catch(_){}return map;}
+var messageReceipts={};
+function refreshMessageReceipts(){try{messageReceipts=JSON.parse(Ruri.readReceipts()||'{}');}catch(_){messageReceipts={};}}
 function messageNode(who,text,ts,extra,route){
 var d=document.createElement('div');d.className='msg '+(who==='ruri'?'her':'me');
+var id=extra&&extra.id?String(extra.id):'';
+if(id)d.setAttribute('data-message-id',id);
 var badge=who==='ruri'&&route?' · '+esc(route)+' · ПОЛНАЯ ПАМЯТЬ':'';
-d.innerHTML='<div class="meta">'+(who==='ruri'?'РУРИ':'КОМАНДИР')+' · '+new Date(ts||Date.now()).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+badge+'</div><div class="bub">'+esc(text)+'</div>';
+var meta=document.createElement('div');meta.className='meta';
+meta.textContent=(who==='ruri'?'РУРИ':'КОМАНДИР')+' · '+new Date(ts||Date.now()).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+badge;
+var receipt=id?(messageReceipts[id]||{}):{};
+var receiptText='';
+if(who==='commander')receiptText=receipt.read_by_ruri?'✓✓':(receipt.delivered?'✓':'');
+else receiptText=receipt.read_by_commander?'✓✓':'';
+if(receiptText){var rs=document.createElement('span');rs.className='receipt';rs.textContent=receiptText;meta.appendChild(rs);}
+d.appendChild(meta);
+var bub=document.createElement('div');bub.className='bub';bub.textContent=String(text==null?'':text);d.appendChild(bub);
 var sourceUrls=extra&&Array.isArray(extra.source_urls)?extra.source_urls:[];
 if(who==='ruri'&&sourceUrls.length){
 var block=document.createElement('div');block.className='sources';block.appendChild(document.createTextNode('Источники:'));
 sourceUrls.forEach(function(url){if(typeof url!=='string'||!/^https?:\/\//i.test(url))return;var a=document.createElement('a');a.href='#';a.textContent=url;a.addEventListener('click',function(e){e.preventDefault();Ruri.openUrl(url);});block.appendChild(a);});
 if(block.children.length>1)d.appendChild(block);
 }
-if(who==='ruri'&&extra&&extra.search_ok===false){var b=document.createElement('div');b.className='small error';b.textContent='поиск не удался';b.style.marginTop='4px';d.appendChild(b);}
+if(who==='ruri'&&extra&&extra.search_ok===false){var failed=document.createElement('div');failed.className='small error';failed.textContent='поиск не удался';failed.style.marginTop='4px';d.appendChild(failed);}
+if(id){
+var del=document.createElement('button');del.className='msg-delete';del.type='button';del.title='Удалить из отображения и памяти поиска';del.textContent='×';
+del.addEventListener('click',function(ev){ev.stopPropagation();if(!confirm('Убрать это сообщение из чата, дневника и памяти поиска? Запись L0 останется в журнале.'))return;var r=Ruri.deleteMessage(id);if(String(r).indexOf('ERROR:')===0){alert(r);return;}loadChat();loadDiary();if(typeof loadL0Pane==='function'&&$('#pane-l0').classList.contains('on'))loadL0Pane();});
+d.appendChild(del);
+}
 return d;
 }
 function loadChat(){
 var box=$('#chat');box.innerHTML='';var badges=routeBadges();
-read('memory/L0_raw.jsonl').split('\n').forEach(function(line){
-try{var e=JSON.parse(line);if(e.type==='message'&&e.who){var b=badges[String(e.ts||e.timestamp)];box.appendChild(messageNode(e.who,e.text,e.ts,e,b&&b.route));}}catch(_){}
-});
+var events=read('memory/L0_raw.jsonl').split('\n').map(function(line){try{return JSON.parse(line);}catch(_){return null;}}).filter(function(e){return e&&e.type==='message'&&e.who&&!Ruri.isMessageDeleted(e.id||'');});
+events.forEach(function(e){if(e.who==='ruri'&&e.id)Ruri.markReadByCommander(e.id);});
+refreshMessageReceipts();
+events.forEach(function(e){var b=badges[String(e.ts)];box.appendChild(messageNode(e.who,e.text,e.ts,e,b&&b.route));});
 box.scrollTop=box.scrollHeight;
 }
 function loadDiary(){
 try{var entries=JSON.parse(read('memory/L2_diary.json')||'{"entries":[]}').entries||[];
 var box=$('#diary');box.innerHTML='';
-entries.filter(function(e){return !e.kind||e.kind==='thought';}).slice(-100).reverse().forEach(function(e){var d=messageNode('ruri',e.text,e.ts);d.querySelector('.meta').textContent='МЫСЛЬ · '+new Date(e.ts).toLocaleString('ru-RU');box.appendChild(d);});
+entries.filter(function(e){return (!e.kind||e.kind==='thought')&&(!e.id||!Ruri.isMessageDeleted(e.id));}).slice(-100).reverse().forEach(function(e){if(e.id)Ruri.markReadByCommander(e.id);});
+refreshMessageReceipts();
+entries.filter(function(e){return (!e.kind||e.kind==='thought')&&(!e.id||!Ruri.isMessageDeleted(e.id));}).slice(-100).reverse().forEach(function(e){var d=messageNode('ruri',e.text,e.ts,e);d.querySelector('.meta').firstChild.textContent='МЫСЛЬ · '+new Date(e.ts||Date.now()).toLocaleString('ru-RU');box.appendChild(d);});
 }catch(e){$('#diary').textContent='Ошибка чтения дневника: '+e.message;}
 }
+
 function historyForModel(){
 var items=[];
 read('memory/L0_raw.jsonl').split('\n').slice(-80).forEach(function(line){try{var e=JSON.parse(line);if(e.type==='message'&&e.who&&e.text)items.push({role:e.who==='ruri'?'assistant':'user',content:e.text});}catch(_){}});
@@ -129,8 +186,8 @@ catch(e){delete nativeChatCallbacks[id];reject(e);}
 }
 function sendMessage(text){
 if(!text.trim()||busy)return;busy=true;$('#send').disabled=true;status('ДУМАЮ');
-var user={ts:Date.now(),type:'message',who:'commander',text:text};
-try{appendLog(user);Ruri.markCommanderSeen();$('#chat').appendChild(messageNode('commander',text,user.ts));}
+var user={id:'c-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),ts:Date.now(),type:'message',who:'commander',text:text};
+try{appendLog(user);Ruri.markCommanderSeen();loadChat();}
 catch(e){busy=false;$('#send').disabled=false;status('ОШИБКА ПАМЯТИ');alert(e.message);return;}
 var typing=document.createElement('div');typing.className='msg her';typing.id='typing';typing.innerHTML='<div class="typing">Рури обдумывает ответ…</div>';$('#chat').appendChild(typing);$('#chat').scrollTop=$('#chat').scrollHeight;
 callModel(text).then(function(reply){
@@ -155,7 +212,46 @@ document.querySelectorAll('nav button').forEach(function(b){b.addEventListener('
 document.querySelectorAll('nav button').forEach(function(x){x.classList.remove('on');});b.classList.add('on');
 document.querySelectorAll('.pane').forEach(function(p){p.classList.remove('on');});$('#pane-'+b.dataset.pane).classList.add('on');
 if(b.dataset.pane==='diary')loadDiary();
+if(b.dataset.pane==='l0')loadL0Pane();
 });});
+var l0FilterTypes=[
+{value:'all',label:'все'},{value:'message',label:'message'},{value:'tool_call',label:'tool_call'},
+{value:'tool_result',label:'tool_result'},{value:'wake',label:'wake'},{value:'phone_notification',label:'phone_notification'},
+{value:'shelf_file_ingested',label:'shelf_file_ingested'},{value:'facts_extracted',label:'facts_extracted'},{value:'error',label:'error'}
+];
+var activeL0Filter='all';
+function renderL0Filters(){
+var box=$('#l0filters');if(!box)return;box.innerHTML='';
+l0FilterTypes.forEach(function(item){var b=document.createElement('button');b.type='button';b.className='l0-filter'+(item.value===activeL0Filter?' on':'');b.textContent=item.label;b.addEventListener('click',function(){activeL0Filter=item.value;renderL0Filters();loadL0Pane();});box.appendChild(b);});
+}
+function loadL0Pane(){
+var box=$('#l0list');if(!box)return;box.textContent='Загрузка…';
+try{
+var events=JSON.parse(Ruri.readLastEvents(activeL0Filter,100)||'[]');box.innerHTML='';
+events.forEach(function(item){
+var row=document.createElement('div');row.className='l0-row';
+var when=item.ts?new Date(item.ts).toLocaleString('ru-RU'):'—';
+var summary=document.createElement('div');summary.className='l0-summary';
+summary.textContent=when+' · '+item.type+(item.action?' · '+item.action:'')+(item.content?' — '+item.content:'');
+var detail=document.createElement('pre');detail.className='l0-detail';detail.textContent=JSON.stringify(item.event||item,null,2);
+row.appendChild(summary);row.appendChild(detail);
+row.addEventListener('click',function(){detail.classList.toggle('open');});
+box.appendChild(row);
+});
+if(!events.length)box.textContent='Записей нет.';
+}catch(e){box.textContent='Ошибка чтения L0: '+e.message;}
+}
+window.openMessageById=function(id){
+if(!id)return;loadChat();loadDiary();
+var nodes=Array.prototype.slice.call(document.querySelectorAll('[data-message-id]'));
+var target=nodes.find(function(node){return node.getAttribute('data-message-id')===String(id);});
+if(!target)return;
+var inDiary=!!target.closest('#pane-diary'),pane=inDiary?'diary':'chat';
+document.querySelectorAll('.pane').forEach(function(p){p.classList.remove('on');});
+var active=$('#pane-'+pane);if(active)active.classList.add('on');
+document.querySelectorAll('nav button').forEach(function(b){b.classList.toggle('on',b.dataset.pane===pane);});
+target.classList.add('message-focus');target.scrollIntoView({behavior:'smooth',block:'center'});
+};
 function loadL0Journal(){
 var box=$('#l0List');box.textContent='Загрузка…';
 try{var events=JSON.parse(Ruri.readLastEvents($('#l0Filter').value,100)||'[]');box.innerHTML='';
@@ -164,6 +260,8 @@ if(!events.length)box.textContent='Записей нет.';
 }catch(e){box.textContent='Ошибка чтения L0: '+e.message;}
 }
 $('#loadL0').addEventListener('click',loadL0Journal);
+$('#l0refresh').addEventListener('click',loadL0Pane);
+renderL0Filters();
 $('#run-diag').addEventListener('click',function(){
   var out=$('#diag-out');out.textContent='Сбор данных…';
   try{

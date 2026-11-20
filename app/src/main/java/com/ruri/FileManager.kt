@@ -279,7 +279,7 @@ object FileManager {
     fun readLastEvents(root: File, filter: String = "all", limit: Int = 100): JSONArray {
         val bounded = limit.coerceIn(1, 100)
         val allowed = setOf("message", "tool_call", "tool_result", "wake", "phone_notification",
-            "shelf_file_ingested", "recall_deep_used")
+            "shelf_file_ingested", "recall_deep_used", "facts_extracted", "error")
         val requested = filter.takeIf { it == "all" || it in allowed } ?: "all"
         val result = JSONArray()
         readLastLines(root, L0_PATH, maxLines = 500, maxBytes = 2 * 1024 * 1024)
@@ -287,16 +287,23 @@ object FileManager {
                 if (result.length() >= bounded) return@forEach
                 val event = runCatching { SecretRedactor.redactEvent(JSONObject(line)) }.getOrNull() ?: return@forEach
                 val type = event.optString("type")
-                if (requested != "all" && type != requested) return@forEach
-                val item = JSONObject()
-                    .put("ts", event.optLong("ts", event.optLong("timestamp", 0L)))
-                    .put("type", type)
+                val matches = when (requested) {
+                    "all" -> true
+                    "error" -> type == "error" || type.endsWith("_error") || type == "model_error"
+                    else -> type == requested
+                }
+                if (!matches) return@forEach
                 val data = event.optJSONObject("data")
                 val content = event.optString("text")
                     .ifBlank { event.optString("reason") }
                     .ifBlank { event.optString("action") }
                     .ifBlank { data?.optString("reason").orEmpty() }
                     .ifBlank { data?.optString("text").orEmpty() }
+                val item = JSONObject()
+                    .put("id", event.optString("id"))
+                    .put("ts", event.optLong("ts", event.optLong("timestamp", 0L)))
+                    .put("type", type)
+                    .put("event", JSONObject(event.toString()))
                 if (content.isNotBlank()) item.put("content", SecretRedactor.redactText(content).take(360))
                 if (event.has("action")) item.put("action", event.optString("action"))
                 result.put(item)
@@ -443,7 +450,9 @@ object FileManager {
     fun appendEvent(root: File, input: JSONObject): String {
         val target = safe(root, L0_PATH) ?: throw IllegalStateException("Invalid L0 path")
         val event = SecretRedactor.redactEvent(input)
-        val ts = event.optLong("timestamp", event.optLong("ts", System.currentTimeMillis()))
+        if (!event.has("ts") && event.has("timestamp")) event.put("ts", event.optLong("timestamp"))
+        if (!event.has("ts")) event.put("ts", System.currentTimeMillis())
+        val ts = event.optLong("ts", System.currentTimeMillis())
         event.put("id", event.optString("id").ifBlank { "evt-" + UUID.randomUUID().toString() })
         event.put("timestamp", ts)
         event.put("ts", ts)

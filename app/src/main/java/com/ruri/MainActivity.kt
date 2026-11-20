@@ -31,6 +31,8 @@ class MainActivity : AppCompatActivity() {
     private val routeExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var importFileCallback: ValueCallback<Array<Uri>>? = null
+    @Volatile private var activityResumed = false
+    private var pendingMessageId: String? = null
     private val importFileRequestCode = 2002
 
     @SuppressLint("SetJavaScriptEnabled", "AddJavascriptInterface")
@@ -38,6 +40,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         FileManager.init(filesDir)
         Notifier.init(this)
+        pendingMessageId = intent?.getStringExtra("message_id")
 
         web = WebView(this)
         setContentView(web)
@@ -50,6 +53,7 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 web.evaluateJavascript("window.startOnboarding && window.startOnboarding()", null)
+                openPendingMessageIfReady()
             }
         }
         web.webChromeClient = object : WebChromeClient() {
@@ -104,6 +108,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     @Deprecated("Deprecated in Android API; retained for WebView file chooser compatibility")
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingMessageId = intent.getStringExtra("message_id")
+        openPendingMessageIfReady()
+    }
+
+    private fun openPendingMessageIfReady() {
+        val id = pendingMessageId ?: return
+        if (!::web.isInitialized) return
+        pendingMessageId = null
+        web.evaluateJavascript(
+            "window.openMessageById && window.openMessageById(" + JSONObject.quote(id) + ")",
+            null
+        )
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == importFileRequestCode) {
@@ -119,6 +140,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        activityResumed = true
         NetState.refresh(this)
         if (OfflineQueue.hasPending(filesDir) && NetState.online) {
             LifeScheduler.enqueueEvent(this, "offline_drain")
@@ -130,6 +152,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
+        activityResumed = false
         try { BackupPolicy.maybeRolling(this, "pause") }
         catch (e: Exception) { android.util.Log.w("Ruri", "Pause rolling backup failed", e) }
         super.onPause()
@@ -206,7 +229,11 @@ class MainActivity : AppCompatActivity() {
             chatExecutor.execute {
                 try {
                     val reply = ChatEngine.respond(filesDir)
+                    val messageId = ChatEngine.lastSavedReplyId()
                     mainHandler.post {
+                        if (!activityResumed && !messageId.isNullOrBlank()) {
+                            Notifier.thought(this@MainActivity, reply, messageId)
+                        }
                         if (::web.isInitialized) web.evaluateJavascript(
                             "window.onNativeChatResult(" + JSONObject.quote(callbackId) + "," +
                                 JSONObject.quote(reply) + ",null)", null
@@ -231,6 +258,27 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun readLastEvents(filter: String, limit: Int): String =
             FileManager.readLastEvents(filesDir, filter, limit).toString()
+
+        @JavascriptInterface
+        fun readReceipts(): String = Receipts.export(filesDir)
+
+        @JavascriptInterface
+        fun markReadByCommander(id: String): String {
+            Receipts.readByCommander(filesDir, id)
+            return "OK"
+        }
+
+        @JavascriptInterface
+        fun deleteMessage(id: String): String {
+            return try {
+                require(id.isNotBlank() && id.length <= 200) { "Invalid message id" }
+                Tombstone.add(filesDir, id)
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "delete failed") }
+        }
+
+        @JavascriptInterface
+        fun isMessageDeleted(id: String): Boolean = Tombstone.isDeleted(filesDir, id)
 
         @JavascriptInterface
         fun readNetworkDiagnostics(): String = NetworkDiagnostics.latest(filesDir)
@@ -284,8 +332,9 @@ class MainActivity : AppCompatActivity() {
         fun appendEvent(eventJson: String): String {
             return try {
                 val event = JSONObject(eventJson)
-                FileManager.appendEvent(filesDir, event)
+                val saved = JSONObject(FileManager.appendEvent(filesDir, event))
                 if (event.optString("type") == "message" && event.optString("who") == "commander") {
+                    Receipts.delivered(filesDir, saved.optString("id"))
                     LifeScheduler.enqueueEvent(this@MainActivity, "commander_message")
                 }
                 "OK"
@@ -302,7 +351,6 @@ class MainActivity : AppCompatActivity() {
         fun markCommanderSeen(): String {
             return try {
                 val state = JSONObject(FileManager.read(filesDir, "memory/L4_state.json"))
-                state.put("last_seen_commander", System.currentTimeMillis())
                 state.put("waiting_for_reply", false)
                 state.put("ignored_count", 0)
                 FileManager.write(filesDir, "memory/L4_state.json", state.toString(2))

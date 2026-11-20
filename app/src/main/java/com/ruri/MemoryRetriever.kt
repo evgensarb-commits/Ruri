@@ -31,6 +31,7 @@ object MemoryRetriever {
         val terms = tokenize(query)
         if (terms.isEmpty()) return ""
         val memories = ArrayList<Memory>()
+        val deletedIds = Tombstone.ids(root)
 
         val facts = readJson(root, "memory/L1_facts.json").optJSONArray("facts") ?: JSONArray()
         for (i in 0 until facts.length()) {
@@ -45,6 +46,7 @@ object MemoryRetriever {
         val diary = readJson(root, "memory/L2_diary.json").optJSONArray("entries") ?: JSONArray()
         for (i in 0 until diary.length()) {
             val entry = diary.optJSONObject(i) ?: continue
+            if (entry.optString("id").isNotBlank() && entry.optString("id") in deletedIds) continue
             val text = entry.optString("text").trim()
             if (text.isNotBlank()) memories.add(
                 Memory(
@@ -60,7 +62,10 @@ object MemoryRetriever {
         val parsedEvents = events.mapNotNull { line ->
             runCatching { JSONObject(line) }.getOrNull()
         }
-        val messageEvents = parsedEvents.filter { it.optString("type") == "message" }
+        val messageEvents = parsedEvents.filter {
+            it.optString("type") == "message" &&
+                (it.optString("id").isBlank() || it.optString("id") !in deletedIds)
+        }
         // Recent conversation is already supplied as chat history; recall older episodes here.
         for (event in messageEvents.dropLast(14)) {
             val text = event.optString("text").trim()
