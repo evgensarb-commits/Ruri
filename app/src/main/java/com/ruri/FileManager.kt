@@ -222,6 +222,8 @@ object FileManager {
               "onboarding_done": false
             }
         """.trimIndent())
+
+        EmotionEngine.ensure(root)
     }
 
     fun read(root: File, path: String): String {
