@@ -222,7 +222,7 @@ class VisionHonestUnavailableTest {
             file.writeBytes(byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0, 0, 0, 0, 0))
             assertEquals("[изображение без описания: vision недоступен]",
                 ChatEngine.shelfText(root, "unknown.png"))
-            assertTrue(Capabilities.bodySection(root).contains("если vision-маршрут недоступен"))
+            assertTrue(Capabilities.bodySection(root).contains("Если vision-маршрут недоступен"))
         } finally {
             root.deleteRecursively()
         }
