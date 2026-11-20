@@ -302,7 +302,8 @@ write('core/search.json',JSON.stringify(s,null,2));
 loadSearch();
 alert('Настройки поиска сохранены.');
 }catch(e){alert(e.message);}});
-function loadVisionStatus(){try{$('#visionStatus').textContent='Vision: '+(Ruri.visionStatus()||'none');}catch(_){$('#visionStatus').textContent='Vision: none';}}
+window.setVisionStatus=function(value){var node=$('#visionStatus');if(node)node.textContent='Vision: '+(value||'none');};
+function loadVisionStatus(){try{$('#visionStatus').textContent='Vision: '+(Ruri.visionStatus()||'проверяю…');}catch(_){$('#visionStatus').textContent='Vision: none';}}
 function loadCharacter(){try{var c=JSON.parse(read('core/character.json')||'{}');$('#charName').value=c.name||'';$('#charStyle').value=c.speech_style||'';}catch(_){}loadVisionStatus();refreshUsageAccess();loadNetworkDiagnostics();loadAutomaticBackups();loadRoutes();loadSearch();loadBackupVisibility();}
 $('#saveCharacter').addEventListener('click',function(){try{var c=JSON.parse(read('core/character.json')||'{}');c.name=$('#charName').value.trim()||'Рури';c.speech_style=$('#charStyle').value.trim();write('core/character.json',JSON.stringify(c,null,2));alert('Характер сохранён.');}catch(e){alert(e.message);}});
 $('#notificationAccess').addEventListener('click',function(){var r=Ruri.openNotificationAccessSettings();if(String(r).indexOf('ERROR:')===0)alert(r);});
