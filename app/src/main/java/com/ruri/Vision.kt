@@ -126,7 +126,7 @@ object Vision {
     }
 
     fun describe(root: File, bytes: ByteArray, mime: String, prompt: String): String? {
-        if (bytes.isEmpty() || bytes.size > MAX_IMAGE_BYTES || !mime.startsWith("image/")) return null
+        if (bytes.isEmpty() || bytes.size > MAX_IMAGE_BYTES || !mime.startsWith("image/", ignoreCase = true)) return null
         val model = visionRoute(root) ?: return null
         val id = routeId(model)
         RouteMeta.recordAttempt(root, id)
@@ -136,7 +136,7 @@ object Vision {
             .put(JSONObject().put("type", "image_url").put("image_url",
                 JSONObject().put("url", "data:" + mime + ";base64," + base64)))
         val response = call(model, JSONArray().put(JSONObject().put("role", "user").put("content", content)))
-        val description = response?.let { SecretRedactor.redactText(it).take(4000).takeIf(String::isNotBlank) }
+        val description = response?.let { SecretRedactor.redactText(it).take(4000).takeIf { text -> text.isNotBlank() } }
         if (description.isNullOrBlank()) {
             runCatching { RouteMeta.recordFailure(root, id, "other", Task.VISION) }
             return null
