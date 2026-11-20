@@ -49,13 +49,6 @@ object Diagnostics {
             val id = model.optString("id")
                 .ifBlank { model.optString("name").ifBlank { "route_$index" } }
             val meta = routeMetadata.optJSONObject(id) ?: JSONObject()
-            val caps = meta.optJSONObject("caps") ?: JSONObject()
-            val modelNsfwStatus = model.optString("nsfw_probe_status", "not_tested")
-            val nsfwCapable = when {
-                model.has("nsfw_capable") -> model.optBoolean("nsfw_capable")
-                caps.has("nsfw") -> caps.optBoolean("nsfw")
-                else -> false
-            }
             val dayCount = if (meta.optString("day_key") == utcDay) meta.optInt("day_count", 0) else 0
             val route = JSONObject()
                 .put("name", model.optString("name", id))
@@ -66,9 +59,6 @@ object Diagnostics {
                 .put("api_key_configured", model.optString("api_key").isNotBlank())
                 .put("reachable", meta.optBoolean("reachable", true))
                 .put("needs_vpn", meta.optBoolean("needs_vpn", model.optBoolean("needs_vpn", false)))
-                .put("nsfw_capable", nsfwCapable)
-                .put("nsfw_probe_status", modelNsfwStatus)
-                .put("nsfw_tested_at", model.optLong("nsfw_tested_at", 0L))
                 .put("in_cooldown", meta.optLong("cooldown_until", 0L) > now)
                 .put("cooldown_until", meta.optLong("cooldown_until", 0L))
                 .put("requests_today", dayCount)
