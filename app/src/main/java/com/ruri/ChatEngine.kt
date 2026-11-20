@@ -432,6 +432,7 @@ object ChatEngine {
         val name = action.optString("action")
         val allowed = when (name) {
             "search", "recall" -> setOf("action", "query")
+            "read_url" -> setOf("action", "url")
             "list_shelf" -> setOf("action")
             "read_shelf" -> setOf("action", "name")
             "remember_fact" -> setOf("action", "text")
@@ -442,6 +443,10 @@ object ChatEngine {
         when (name) {
             "search", "recall" -> if (action.optString("query").isBlank() || action.optString("query").length > 300) return null
             "read_shelf" -> if (ShelfWatcher.safeName(action.optString("name")) == null) return null
+            "read_url" -> {
+                val url = action.optString("url").trim()
+                if (url.length > 2048 || !url.matches(Regex("(?i)^https?://.+"))) return null
+            }
             "remember_fact" -> if (action.optString("text").trim().length !in 5..300) return null
         }
         return action
@@ -478,11 +483,15 @@ object ChatEngine {
                     EmotionEngine.onSearchResult(root, ok)
                     ok to SecretRedactor.redactText(raw)
                 }
+                "read_url" -> {
+                    val (ok, text) = UrlReader.read(root, params.optString("url"))
+                    ok to SecretRedactor.redactText(text)
+                }
                 "list_shelf" -> true to SecretRedactor.redactText(FileManager.list(root, "shelf"))
                 "read_shelf" -> {
                     val safe = ShelfWatcher.safeName(params.optString("name"))
                         ?: return false to "Недопустимое имя файла"
-                    true to SecretRedactor.redactText(FileManager.read(root, "shelf/" + safe).take(12000))
+                    true to SecretRedactor.redactText(shelfText(root, safe).take(12000))
                 }
                 "recall" -> true to SecretRedactor.redactText(MemoryRetriever.recall(root, params.optString("query"), 5))
                 "remember_fact" -> true to SecretRedactor.redactText(rememberFact(root, params.optString("text")))
@@ -491,6 +500,19 @@ object ChatEngine {
         } catch (e: Exception) {
             false to SecretRedactor.redactText(e.message ?: "Ошибка инструмента")
         }
+    }
+
+    internal fun shelfText(root: File, name: String): String {
+        val safe = ShelfWatcher.safeName(name) ?: return "Недопустимое имя файла"
+        val file = File(root, "shelf/" + safe)
+        if (!file.isFile) return "Файл не найден"
+        val bytes = runCatching { file.readBytes() }.getOrElse { return "Файл недоступен" }
+        if (Vision.mimeOf(bytes) != null) {
+            return FileManager.read(root, "shelf/.desc/" + safe + ".txt")
+                .takeIf { it.isNotBlank() }?.take(4000)
+                ?: "[изображение без описания: vision недоступен]"
+        }
+        return FileManager.read(root, "shelf/" + safe).take(12000)
     }
 
     private fun rememberFact(root: File, rawText: String): String {

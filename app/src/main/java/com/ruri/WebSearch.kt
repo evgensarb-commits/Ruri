@@ -10,24 +10,13 @@ import java.net.URLEncoder
 
 /** Google-only web search. Uses CSE when configured, otherwise parses public Google results. */
 object WebSearch {
-    fun search(query: String): String = search(null, query)
+    fun search(query: String): String = search(File("."), query)
 
-    fun search(root: File?, query: String): String {
+    fun search(root: File, query: String): String {
         val q = SecretRedactor.redactText(query.trim())
         if (q.length < 2) return error("Введите поисковый запрос")
         if (q.length > 300) return error("Запрос слишком длинный")
-        val settings = root?.let {
-            runCatching { JSONObject(FileManager.read(it, "core/search.json")) }.getOrDefault(JSONObject())
-        } ?: JSONObject()
-        val key = settings.optString("cse_key").trim()
-        val cx = settings.optString("cse_cx").trim()
-        return try {
-            if (key.isNotBlank() && cx.isNotBlank()) searchCse(q, key, cx)
-            else searchGoogle(q)
-        } catch (e: Exception) {
-            Log.w("Ruri", "Google search unavailable", e)
-            error("Поиск недоступен")
-        }
+        return SearchRouter.search(root, q)
     }
 
     internal fun parseCseResponse(raw: String, query: String): String {
@@ -80,10 +69,12 @@ object WebSearch {
         return parsed
     }
 
-    private fun searchGoogle(query: String): String {
+    internal fun searchGoogle(query: String): String {
         val url = "https://www.google.com/search?q=" + enc(query) + "&num=10"
         return parseGoogleHtml(request(url), query)
     }
+
+    internal fun searchGooglePublic(query: String): String = searchGoogle(query)
 
     private fun request(address: String): String {
         var connection: HttpURLConnection? = null
