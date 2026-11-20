@@ -48,11 +48,13 @@ object LifeStateEngine {
         val newEvents = batch.events
 
         // A new L0 message is new activity even when two events share the same millisecond.
-        applyCommanderActivity(state, newEvents)
+        if (applyCommanderActivity(state, newEvents)) EmotionEngine.onCommanderReply(root)
 
         val battery = BatteryLevel.get(context)
         val freeBytes = try { StatFs(root.absolutePath).availableBytes } catch (_: Exception) { -1L }
         val lastSeen = state.optLong("last_seen_commander", 0L)
+        EmotionEngine.tick(root, now, lastSeen,
+            state.optJSONObject("recent_activity")?.optLong("last_event_at", now) ?: now)
         val quietHours = if (lastSeen <= 0L) 0.0 else
             ((now - lastSeen).coerceAtLeast(0L) / 3_600_000.0)
 
@@ -88,6 +90,7 @@ object LifeStateEngine {
         newEvents.forEach { event ->
             val type = event.optString("type", "unknown").ifBlank { "unknown" }
             typeCounts.put(type, typeCounts.optInt(type, 0) + 1)
+            if (type == "shelf_file_ingested") EmotionEngine.onShelfFile(root)
         }
         val lastNewEvent = newEvents.lastOrNull()
         state.put(

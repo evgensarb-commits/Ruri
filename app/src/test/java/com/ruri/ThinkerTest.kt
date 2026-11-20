@@ -1,25 +1,31 @@
 package com.ruri
 
+import java.nio.file.Files
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class ThinkerTest {
     @Test
-    fun twoOrMoreIgnoredInitiativesRestoreOffendedMood() {
-        val state = JSONObject().put("ignored_count", 2).put("bond", 0.9)
-        assertEquals("обиженная", Thinker.moodFor(state, "maintenance"))
+    fun moodComesFromEmotionChannelsInsteadOfLegacyIgnoredCount() {
+        assertEquals("обиженная", EmotionEngine.moodLabel(JSONObject().put("hurt", 65)))
     }
 
     @Test
-    fun ignoredEventAlsoSetsOffendedMood() {
-        val state = JSONObject().put("ignored_count", 1)
-        assertEquals("обиженная", Thinker.moodFor(state, "initiative_ignored"))
+    fun ignoredEventsPersistHurtAndEventuallyProduceOffendedMood() {
+        val root = Files.createTempDirectory("ruri-thinker-emotions").toFile()
+        try {
+            FileManager.init(root)
+            repeat(4) { EmotionEngine.onIgnored(root) }
+            assertEquals(70.0, EmotionEngine.readValues(root).getDouble("hurt"), 0.0)
+            assertEquals("обиженная", EmotionEngine.moodLabel(EmotionEngine.readValues(root)))
+        } finally {
+            root.deleteRecursively()
+        }
     }
 
     @Test
-    fun alreadyOffendedMoodSurvivesMaintenanceWake() {
-        val state = JSONObject().put("mood", "обиженная").put("ignored_count", 0).put("bond", 0.9)
-        assertEquals("обиженная", Thinker.moodFor(state, "maintenance"))
+    fun moodLabelUsesCurrentEmotionValuesNotLegacyMoodString() {
+        assertEquals("собранная", EmotionEngine.moodLabel(JSONObject().put("hurt", 0)))
     }
 }

@@ -222,6 +222,17 @@ object FileManager {
               "onboarding_done": false
             }
         """.trimIndent())
+
+        EmotionEngine.ensure(root)
+        // Seed the first tick from the state creation time; zero would otherwise
+        // be interpreted as thousands of idle hours since the Unix epoch.
+        val emotionState = runCatching { JSONObject(read(root, "memory/emotions.json")) }.getOrNull()
+        if (emotionState != null && emotionState.optLong("last_tick_at", 0L) == 0L) {
+            val baseline = emotionState.optLong("updated_at", System.currentTimeMillis())
+                .takeIf { it > 0L } ?: System.currentTimeMillis()
+            emotionState.put("last_tick_at", baseline)
+            write(root, "memory/emotions.json", emotionState.toString(2))
+        }
     }
 
     fun read(root: File, path: String): String {

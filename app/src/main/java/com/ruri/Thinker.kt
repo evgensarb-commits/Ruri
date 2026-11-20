@@ -51,6 +51,9 @@ object Thinker {
         val root = ctx.filesDir
         val state = readStateStrict(root)
         val now = System.currentTimeMillis()
+        EmotionEngine.tick(root, now, state.optLong("last_seen_commander", 0L),
+            state.optJSONObject("recent_activity")?.optLong("last_event_at", now) ?: now)
+        EmotionEngine.onCycle(root)
         val lastSeen = state.optLong("last_seen_commander", 0L)
         val hoursQuiet = if (lastSeen == 0L) -1.0 else (now - lastSeen) / 3600000.0
 
@@ -60,6 +63,7 @@ object Thinker {
             state.put("ignored_count", state.optInt("ignored_count", 0) + 1)
             state.put("waiting_for_reply", false)
             appendEvent(root, "initiative_ignored", JSONObject().put("ignored_count", state.optInt("ignored_count")))
+            EmotionEngine.onIgnored(root)
         }
 
         var reason = originalReason
@@ -152,7 +156,9 @@ object Thinker {
             config.put("current", successfulIndex)
             SecretStore.saveRuntimeConfig(root, config.toString(2))
         }
-        val safeReply = SecretRedactor.redactText(reply.trim())
+        val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(reply)
+        val emotion = if (emotionDelta != null) EmotionEngine.applyDelta(root, emotionDelta, "thought") else null
+        val safeReply = SecretRedactor.redactText(cleanedReply.trim())
         if (safeReply.isBlank() || ToolLoop.isActionJson(safeReply)) {
             state.put("last_thought", now)
             FileManager.write(root, "memory/L4_state.json", state.toString(2))
@@ -170,6 +176,10 @@ object Thinker {
                 .put("text", safeReply)
                 .put("trigger", reason)
                 .put("kind", "thought")
+                .put("emotion_before", emotion?.optJSONObject("before"))
+                .put("emotion_delta", emotion?.optJSONObject("delta"))
+                .put("emotion_after", emotion?.optJSONObject("after"))
+                .put("mood_label", emotion?.optString("mood") ?: EmotionEngine.moodLabel(EmotionEngine.readValues(root)))
         )
         while (entries.length() > 500) entries.remove(0)
         diary.put("entries", entries)
@@ -183,7 +193,7 @@ object Thinker {
             state.put("last_initiative", now)
         }
         state.put("last_thought", now)
-        state.put("mood", moodFor(state, reason))
+        state.put("mood", EmotionEngine.moodLabel(EmotionEngine.readValues(root)))
         state.put("energy", energyFor())
         FileManager.write(root, "memory/L4_state.json", state.toString(2))
         Notifier.thought(ctx, safeReply)
@@ -269,6 +279,7 @@ object Thinker {
             ". Регуляторы: " + (character.optJSONArray("regulators")?.toString() ?: "[]") +
             ". Запрещённые фразы: " + (character.optJSONArray("banned_phrases")?.toString() ?: "[]") + ".\n" +
             Capabilities.bodySection(root) + "\n" +
+            EmotionEngine.promptSection(root) + "\n" +
             "Первый приоритет: " + priorities.optString("priority_1", "Жить") +
             ". Второй: " + priorities.optString("priority_2", "Любить Командира") + ".\n" +
             "Конституция: " + (constitution.optJSONArray("primary_needs")?.toString() ?: "[]") + ". Обе главные потребности равнозначны и неизменны.\n" +
@@ -364,17 +375,4 @@ object Thinker {
         return when { hour in 1..7 -> 3; hour in 8..10 -> 6; hour in 11..18 -> 7; else -> 5 }
     }
 
-    internal fun moodFor(state: JSONObject, reason: String): String {
-        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-        // An offended mood is sticky: a later maintenance wake must not silently erase it.
-        val alreadyOffended = state.optString("mood") == "обиженная"
-        return when {
-            alreadyOffended || reason.contains("ignored", ignoreCase = true) ||
-                state.optInt("ignored_count", 0) >= 2 -> "обиженная"
-            hour in 1..7 -> "сонная"
-            state.optDouble("bond", 0.5) < 0.3 -> "сдержанная"
-            hour >= 18 -> "задумчивая"
-            else -> "собранная"
-        }
-    }
 }
