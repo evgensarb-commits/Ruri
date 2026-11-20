@@ -128,10 +128,16 @@ object Thinker {
             if (!reply.isNullOrBlank() && initiative &&
                 RouteSelector.looksLikeRefusalOrDisclaimer(reply)) {
                 runCatching { RouteMeta.recordFailure(root, routeId, "refusal", task) }
+                if (RouteSelector.isAdultTopic(prompt)) {
+                    FileManager.appendEvent(root, JSONObject()
+                        .put("type", "nsfw_refusal")
+                        .put("route", routeId)
+                        .put("snippet", SecretRedactor.redactText(reply).take(300))
+                        .put("ts", System.currentTimeMillis()))
+                }
                 appendEvent(root, "model_route_rejected", JSONObject()
                     .put("model", model.optString("id"))
-                    .put("reason", "initiative_refusal_or_disclaimer")
-                    .put("snippet", SecretRedactor.redactText(reply).take(300)))
+                    .put("reason", "initiative_refusal_or_disclaimer"))
                 reply = null
                 continue
             }
