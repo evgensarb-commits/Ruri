@@ -101,7 +101,7 @@ button.action.secondary{background:transparent;color:var(--gold)}
 <div class="card" id="l0Journal">
 <b>ЖУРНАЛ L0</b>
 <div class="field"><label for="l0Filter">ТИП ЗАПИСИ</label><select id="l0Filter">
-<option value="all">Все</option><option value="message">message</option><option value="tool_call">tool_call</option><option value="tool_result">tool_result</option><option value="wake">wake</option><option value="phone_notification">phone_notification</option><option value="shelf_file_ingested">shelf_file_ingested</option><option value="recall_deep_used">recall_deep_used</option>
+<option value="all">Все</option><option value="message">message</option><option value="tool_call">tool_call</option><option value="tool_result">tool_result</option><option value="wake">wake</option><option value="phone_notification">phone_notification</option><option value="shelf_file_ingested">shelf_file_ingested</option><option value="shelf_image_described">shelf_image_described</option><option value="shelf_image_unreadable">shelf_image_unreadable</option><option value="recall_deep_used">recall_deep_used</option>
 </select></div>
 <button class="action secondary" id="loadL0">ЗАГРУЗИТЬ ПОСЛЕДНИЕ 100</button>
 <div id="l0List" style="margin-top:10px"></div>
@@ -218,7 +218,7 @@ if(b.dataset.pane==='l0')loadL0Pane();
 var l0FilterTypes=[
 {value:'all',label:'все'},{value:'message',label:'message'},{value:'tool_call',label:'tool_call'},
 {value:'tool_result',label:'tool_result'},{value:'wake',label:'wake'},{value:'phone_notification',label:'phone_notification'},
-{value:'shelf_file_ingested',label:'shelf_file_ingested'},{value:'facts_extracted',label:'facts_extracted'},{value:'nsfw_refusal',label:'nsfw_refusal'},{value:'error',label:'error'}
+{value:'shelf_file_ingested',label:'shelf_file_ingested'},{value:'shelf_image_described',label:'shelf_image_described'},{value:'shelf_image_unreadable',label:'shelf_image_unreadable'},{value:'facts_extracted',label:'facts_extracted'},{value:'nsfw_refusal',label:'nsfw_refusal'},{value:'error',label:'error'}
 ];
 var activeL0Filter='all';
 function renderL0Filters(){
@@ -292,7 +292,6 @@ var s=JSON.parse(read('core/search.json')||'{}');
 $('#serperKey').value=s.serper_key||'';
 $('#searxngUrl').value=s.searxng_url||'';
 $('#searchStatus').textContent=(s.serper_key?'Serper: ключ есть. ':'Serper: ключа нет. ')+(s.searxng_url?'Ноут: '+s.searxng_url:'Ноут: не задан.');
-try{$('#visionStatus').textContent='Vision: '+(Ruri.visionStatus()||'none');}catch(_){$('#visionStatus').textContent='Vision: none';}
 }catch(e){$('#searchStatus').textContent='Ошибка чтения search.json';}}
 $('#saveSearch').addEventListener('click',function(){try{
 var s=JSON.parse(read('core/search.json')||'{}');
@@ -303,7 +302,9 @@ write('core/search.json',JSON.stringify(s,null,2));
 loadSearch();
 alert('Настройки поиска сохранены.');
 }catch(e){alert(e.message);}});
-function loadCharacter(){try{var c=JSON.parse(read('core/character.json')||'{}');$('#charName').value=c.name||'';$('#charStyle').value=c.speech_style||'';}catch(_){}refreshUsageAccess();loadNetworkDiagnostics();loadAutomaticBackups();loadRoutes();loadSearch();loadBackupVisibility();}
+window.setVisionStatus=function(value){var node=$('#visionStatus');if(node)node.textContent='Vision: '+(value||'none');};
+function loadVisionStatus(){try{$('#visionStatus').textContent='Vision: '+(Ruri.visionStatus()||'проверяю…');}catch(_){$('#visionStatus').textContent='Vision: none';}}
+function loadCharacter(){try{var c=JSON.parse(read('core/character.json')||'{}');$('#charName').value=c.name||'';$('#charStyle').value=c.speech_style||'';}catch(_){}loadVisionStatus();refreshUsageAccess();loadNetworkDiagnostics();loadAutomaticBackups();loadRoutes();loadSearch();loadBackupVisibility();}
 $('#saveCharacter').addEventListener('click',function(){try{var c=JSON.parse(read('core/character.json')||'{}');c.name=$('#charName').value.trim()||'Рури';c.speech_style=$('#charStyle').value.trim();write('core/character.json',JSON.stringify(c,null,2));alert('Характер сохранён.');}catch(e){alert(e.message);}});
 $('#notificationAccess').addEventListener('click',function(){var r=Ruri.openNotificationAccessSettings();if(String(r).indexOf('ERROR:')===0)alert(r);});
 function refreshUsageAccess(){try{var ok=!!Ruri.hasUsageAccess();$('#usageAccessStatus').textContent=ok?'Доступ включён. Название активного приложения доступно локально.':'Доступ выключен. Рури видит только общие события устройства.';}catch(e){$('#usageAccessStatus').textContent='Не удалось проверить доступ.';}}

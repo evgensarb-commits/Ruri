@@ -12,33 +12,102 @@ object Vision {
     private const val MAX_IMAGE_BYTES = 8 * 1024 * 1024
     private const val PROBE_TTL_MS = 24L * 60L * 60L * 1000L
 
+    /** Select only routes accepted by the shared free-route policy; no paid or disabled fallback. */
     fun visionRoute(root: File): JSONObject? {
+        if (!NetState.online) return null
         val config = runCatching { JSONObject(SecretStore.readRuntimeConfig(root)) }.getOrElse { JSONObject() }
         val models = config.optJSONArray("models") ?: JSONArray()
-        for (i in 0 until models.length()) {
-            val model = models.optJSONObject(i) ?: continue
-            if (!model.optBoolean("free_tier", true)) continue
-            val meta = RouteMeta.route(root, model.optString("id"))
-            if (meta.optJSONObject("caps")?.optBoolean("vision", false) == true) return JSONObject(model.toString())
+        return findVisionRoute(
+            root = root,
+            models = models,
+            current = config.optInt("current", 0),
+            online = NetState.online,
+            vpn = NetState.vpn,
+            probeRoute = ::probe
+        )
+    }
+
+    /** Returns a previously verified route without issuing a network request from the UI thread. */
+    fun cachedVisionRoute(root: File): JSONObject? {
+        val config = runCatching { JSONObject(SecretStore.readRuntimeConfig(root)) }.getOrElse { JSONObject() }
+        val models = config.optJSONArray("models") ?: JSONArray()
+        val current = config.optInt("current", 0)
+        val ordered = (0 until models.length()).sortedWith(
+            compareBy<Int> { if (it == current) 0 else 1 }
+                .thenBy { models.optJSONObject(it)?.optInt("priority", 100) ?: 100 }
+        )
+        for (index in ordered) {
+            val model = models.optJSONObject(index) ?: continue
+            if (!isEligibleVisionModel(model)) continue
+            val id = routeId(model)
+            val caps = RouteMeta.route(root, id).optJSONObject("caps") ?: JSONObject()
+            if (caps.optBoolean("vision", false)) return JSONObject(model.toString())
         }
-        val now = System.currentTimeMillis()
-        for (i in 0 until models.length()) {
-            val model = models.optJSONObject(i) ?: continue
-            if (!model.optBoolean("free_tier", true)) continue
-            val id = model.optString("id")
+        return null
+    }
+
+    /** Injectable selection seam for unit tests; production always supplies the real network probe. */
+    internal fun findVisionRoute(
+        root: File,
+        models: JSONArray,
+        current: Int,
+        online: Boolean,
+        vpn: Boolean,
+        probeRoute: (JSONObject) -> Boolean,
+        now: Long = System.currentTimeMillis()
+    ): JSONObject? {
+        val order = RouteSelector.orderedIndices(
+            root = root,
+            models = models,
+            current = current,
+            task = Task.VISION,
+            online = online,
+            vpn = vpn
+        )
+        if (order.isEmpty()) return null
+
+        val candidates = order.mapNotNull { index ->
+            models.optJSONObject(index)?.takeIf(::isEligibleVisionModel)
+        }
+        for (model in candidates) {
+            val id = routeId(model)
+            val caps = RouteMeta.route(root, id).optJSONObject("caps") ?: JSONObject()
+            if (caps.optBoolean("vision", false)) return JSONObject(model.toString())
+        }
+
+        for (model in candidates) {
+            val id = routeId(model)
             val meta = RouteMeta.route(root, id)
             val caps = meta.optJSONObject("caps") ?: JSONObject()
             if (caps.has("vision") && !caps.optBoolean("vision") &&
                 now - meta.optLong("vision_probe_at", 0L) < PROBE_TTL_MS) continue
-            val capable = probe(model)
+
+            // A capability probe is a real provider request and consumes the route's free quota.
+            RouteMeta.recordAttempt(root, id)
+            val capable = runCatching { probeRoute(JSONObject(model.toString())) }.getOrDefault(false)
             RouteMeta.update(root, id) {
                 val updatedCaps = it.optJSONObject("caps") ?: JSONObject()
                 updatedCaps.put("vision", capable)
                 it.put("caps", updatedCaps).put("vision_probe_at", now)
             }
-            if (capable) return JSONObject(model.toString())
+            if (capable) {
+                runCatching { RouteMeta.recordSuccess(root, id, Task.VISION) }
+                return JSONObject(model.toString())
+            }
+            runCatching { RouteMeta.recordFailure(root, id, "other", Task.VISION) }
         }
         return null
+    }
+
+    internal fun isEligibleVisionModel(model: JSONObject): Boolean =
+        model.optBoolean("free_tier", false) &&
+            model.optBoolean("enabled", true) &&
+            routeId(model).isNotBlank() &&
+            model.optString("api_key").isNotBlank() &&
+            model.optString("base_url").startsWith("https://", ignoreCase = true)
+
+    private fun routeId(model: JSONObject): String = model.optString("id").ifBlank {
+        model.optString("name")
     }
 
     internal fun isUsableProbeResponse(response: String?): Boolean {
@@ -57,16 +126,23 @@ object Vision {
     }
 
     fun describe(root: File, bytes: ByteArray, mime: String, prompt: String): String? {
-        if (bytes.isEmpty() || bytes.size > MAX_IMAGE_BYTES || !mime.startsWith("image/")) return null
+        if (bytes.isEmpty() || bytes.size > MAX_IMAGE_BYTES || !mime.startsWith("image/", ignoreCase = true)) return null
         val model = visionRoute(root) ?: return null
+        val id = routeId(model)
+        RouteMeta.recordAttempt(root, id)
         val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
         val content = JSONArray()
             .put(JSONObject().put("type", "text").put("text", prompt))
             .put(JSONObject().put("type", "image_url").put("image_url",
                 JSONObject().put("url", "data:" + mime + ";base64," + base64)))
         val response = call(model, JSONArray().put(JSONObject().put("role", "user").put("content", content)))
-            ?: return null
-        return SecretRedactor.redactText(response).take(4000).takeIf { it.isNotBlank() }
+        val description = response?.let { SecretRedactor.redactText(it).take(4000).takeIf { text -> text.isNotBlank() } }
+        if (description.isNullOrBlank()) {
+            runCatching { RouteMeta.recordFailure(root, id, "other", Task.VISION) }
+            return null
+        }
+        runCatching { RouteMeta.recordSuccess(root, id, Task.VISION) }
+        return description
     }
 
     fun describeShelfFile(root: File, name: String): String? {
@@ -76,7 +152,7 @@ object Vision {
         val bytes = runCatching { file.readBytes() }.getOrNull() ?: return null
         val mime = mimeOf(bytes) ?: return null
         return describe(root, bytes, mime,
-            "Опиши изображение с полки подробно: объекты, люди, текст, стиль, настроение.")
+            "Опиши изображение с полки подробно: объекты, люди и их позы, текст на картинке, стиль и настроение. Не выдумывай детали.")
     }
 
     fun mimeOf(bytes: ByteArray): String? = when {
