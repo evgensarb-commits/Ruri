@@ -103,3 +103,81 @@ class EmotionEpisodeTagsTest : EmotionEngineTestBase() {
         assertTrue(recalled.indexOf("кофе утром") in 0 until recalled.indexOf("кофе вечером"))
     }
 }
+
+
+class EmotionThresholdsTest : EmotionEngineTestBase() {
+    @Test fun neutralEmotionValuesPreserveExistingSchedule() {
+        val th = EmotionEngine.thresholds(root)
+        assertEquals(3.5, th.getDouble("initiative_h"), 0.0001)
+        assertEquals(3.0, th.getDouble("cooldown_h"), 0.0001)
+        assertEquals(6.0, th.getDouble("reflection_h"), 0.0001)
+    }
+
+    @Test fun boredomAndAffectionLowerInitiativeThreshold() {
+        EmotionEngine.applyDelta(root, JSONObject().put("boredom", 60.0).put("affection", 30.0), "test")
+        val th = EmotionEngine.thresholds(root)
+        assertTrue(th.getDouble("initiative_h") < 3.5)
+        assertTrue(th.getDouble("cooldown_h") < 3.0)
+    }
+
+    @Test fun hurtAndFatigueRaiseInitiativeThreshold() {
+        EmotionEngine.applyDelta(root, JSONObject().put("hurt", 70.0).put("fatigue", 60.0), "test")
+        val th = EmotionEngine.thresholds(root)
+        assertTrue(th.getDouble("initiative_h") > 3.5)
+        assertTrue(th.getDouble("cooldown_h") > 3.0)
+    }
+
+    @Test fun interestAndBoredomShortenReflectionInterval() {
+        EmotionEngine.applyDelta(root, JSONObject().put("interest", 50.0).put("boredom", 40.0), "test")
+        assertTrue(EmotionEngine.thresholds(root).getDouble("reflection_h") < 6.0)
+    }
+}
+
+class InitiativeGateEmotionTest : EmotionEngineTestBase() {
+    @Test fun emotionCanMakeInitiativeDueEarlierOrDelayIt() {
+        val now = System.currentTimeMillis()
+        val lastSeen = now - 3L * EMOTION_TEST_HOUR_MS
+        assertEquals(false, EmotionEngine.initiativeGate(root, lastSeen, now, false, 0L))
+
+        EmotionEngine.applyDelta(root, JSONObject().put("boredom", 80.0), "test")
+        assertEquals(true, EmotionEngine.initiativeGate(root, lastSeen, now, false, 0L))
+
+        EmotionEngine.applyDelta(root, JSONObject().put("boredom", -80.0)
+            .put("hurt", 90.0).put("fatigue", 80.0), "test")
+        assertEquals(false, EmotionEngine.initiativeGate(root, lastSeen, now, false, 0L))
+    }
+
+    @Test fun waitingForReplyAlwaysBlocksInitiative() {
+        val now = System.currentTimeMillis()
+        assertEquals(false, EmotionEngine.initiativeGate(
+            root, now - 12L * EMOTION_TEST_HOUR_MS, now, true, 0L
+        ))
+    }
+}
+
+class ThresholdsMergeTest : EmotionEngineTestBase() {
+    @Test fun oldEmotionConfigReceivesMissingInitiativeWeights() {
+        val config = JSONObject(FileManager.read(root, "core/emotions.json"))
+        val drift = config.getJSONObject("drift")
+        val newKeys = listOf(
+            "base_initiative_h", "base_cooldown_h", "base_reflection_h",
+            "w_hurt_init", "w_fatigue_init", "w_boredom_init",
+            "w_affection_init", "w_anxiety_init", "w_interest_init"
+        )
+        newKeys.forEach { drift.remove(it) }
+        FileManager.write(root, "core/emotions.json", config.toString(2))
+
+        EmotionEngine.ensure(root)
+
+        val migrated = JSONObject(FileManager.read(root, "core/emotions.json")).getJSONObject("drift")
+        assertEquals(3.5, migrated.getDouble("base_initiative_h"), 0.0)
+        assertEquals(3.0, migrated.getDouble("base_cooldown_h"), 0.0)
+        assertEquals(6.0, migrated.getDouble("base_reflection_h"), 0.0)
+        assertEquals(2.0, migrated.getDouble("w_hurt_init"), 0.0)
+        assertEquals(2.0, migrated.getDouble("w_fatigue_init"), 0.0)
+        assertEquals(1.5, migrated.getDouble("w_boredom_init"), 0.0)
+        assertEquals(1.0, migrated.getDouble("w_affection_init"), 0.0)
+        assertEquals(1.0, migrated.getDouble("w_anxiety_init"), 0.0)
+        assertEquals(0.5, migrated.getDouble("w_interest_init"), 0.0)
+    }
+}

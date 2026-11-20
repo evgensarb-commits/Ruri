@@ -68,10 +68,10 @@ object Thinker {
 
         var reason = originalReason
         var initiative = false
-        val lastInitiative = state.optLong("last_initiative", 0L)
-        if (lastSeen > 0L && hoursQuiet >= 3.5 &&
-            !state.optBoolean("waiting_for_reply", false) &&
-            (lastInitiative == 0L || now - lastInitiative >= 3L * 60L * 60L * 1000L)) {
+        if (EmotionEngine.initiativeGate(
+                root, lastSeen, now, state.optBoolean("waiting_for_reply", false),
+                state.optLong("last_initiative", 0L)
+            )) {
             reason = "инициатива_после_тишины"
             initiative = true
         }

@@ -37,7 +37,10 @@ object EmotionEngine {
             .put("cycle_fatigue", 1)
             .put("rest_relief_fatigue", 5).put("rest_h", 2)
             .put("ignored_hurt", 15).put("ignored_anger", 5)
-            .put("reply_hurt_relief", 10).put("reply_anxiety_relief", 5).put("reply_joy", 5))
+            .put("reply_hurt_relief", 10).put("reply_anxiety_relief", 5).put("reply_joy", 5)
+            .put("base_initiative_h", 3.5).put("base_cooldown_h", 3.0).put("base_reflection_h", 6.0)
+            .put("w_hurt_init", 2.0).put("w_fatigue_init", 2.0).put("w_boredom_init", 1.5)
+            .put("w_affection_init", 1.0).put("w_anxiety_init", 1.0).put("w_interest_init", 0.5))
         .put("lexicon", JSONObject()
             .put("sadness", JSONArray().put("груст").put("плохо").put("тоска").put("тяжело").put("печал"))
             .put("joy", JSONArray().put("рад").put("счаст").put("весел").put("круто").put("кайф"))
@@ -48,6 +51,11 @@ object EmotionEngine {
 
     fun ensure(root: File) {
         if (!FileManager.exists(root, CONFIG)) FileManager.write(root, CONFIG, defaults().toString(2))
+        val cfg = runCatching { JSONObject(FileManager.read(root, CONFIG)) }.getOrElse { defaults() }
+        val defDrift = defaults().optJSONObject("drift") ?: JSONObject()
+        val curDrift = cfg.optJSONObject("drift") ?: JSONObject().also { cfg.put("drift", it) }
+        for (k in defDrift.keys()) if (!curDrift.has(k)) curDrift.put(k, defDrift.get(k))
+        FileManager.write(root, CONFIG, cfg.toString(2))
         if (!FileManager.exists(root, STATE)) {
             val values = JSONObject()
             for ((name, c) in channels(root)) values.put(name, c.optDouble("base", 50.0))
@@ -66,6 +74,50 @@ object EmotionEngine {
     }
 
     private fun drift(root: File): JSONObject = config(root).optJSONObject("drift") ?: JSONObject()
+
+    fun thresholds(root: File): JSONObject {
+        val v = readValues(root)
+        val d = drift(root)
+        val channelConfig = config(root).optJSONObject("channels") ?: JSONObject()
+        // Normalize around each channel's configured base, so a neutral state preserves
+        // the historical 3.5h / 3h / 6h schedule exactly.
+        fun n(k: String): Double {
+            val base = channelConfig.optJSONObject(k)?.optDouble("base", 0.0) ?: 0.0
+            return (v.optDouble(k, base) - base) / 100.0
+        }
+        val init = (d.optDouble("base_initiative_h", 3.5)
+            + n("hurt") * d.optDouble("w_hurt_init", 2.0)
+            + n("fatigue") * d.optDouble("w_fatigue_init", 2.0)
+            - n("boredom") * d.optDouble("w_boredom_init", 1.5)
+            - n("affection") * d.optDouble("w_affection_init", 1.0)
+            - n("anxiety") * d.optDouble("w_anxiety_init", 1.0)
+            - n("interest") * d.optDouble("w_interest_init", 0.5)).coerceIn(0.5, 8.0)
+        val cool = (d.optDouble("base_cooldown_h", 3.0)
+            + n("fatigue") * 2.0 + n("hurt") * 1.0
+            - n("boredom") * 1.0 - n("affection") * 0.5).coerceIn(0.5, 6.0)
+        val refl = (d.optDouble("base_reflection_h", 6.0)
+            - n("interest") * 2.0 - n("boredom") * 2.0
+            + n("fatigue") * 2.0).coerceIn(1.0, 12.0)
+        return JSONObject()
+            .put("initiative_h", init)
+            .put("cooldown_h", cool)
+            .put("reflection_h", refl)
+    }
+
+    internal fun initiativeGate(
+        root: File,
+        lastSeen: Long,
+        now: Long,
+        waitingForReply: Boolean,
+        lastInitiative: Long
+    ): Boolean {
+        if (lastSeen <= 0L || waitingForReply) return false
+        val th = thresholds(root)
+        val quietHours = (now - lastSeen).coerceAtLeast(0L) / HOUR
+        val cooldownMs = (th.optDouble("cooldown_h", 3.0) * HOUR).toLong()
+        return quietHours >= th.optDouble("initiative_h", 3.5) &&
+            (lastInitiative == 0L || now - lastInitiative >= cooldownMs)
+    }
 
     private fun readState(root: File): JSONObject =
         runCatching { JSONObject(FileManager.read(root, STATE)) }.getOrElse { JSONObject() }
