@@ -126,6 +126,52 @@ class VisionProbeTest {
         assertEquals("image/jpeg", Vision.mimeOf(byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0, 0)))
         assertNull(Vision.mimeOf("not an image".toByteArray()))
     }
+
+    @Test fun onlyEnabledKeyedFreeHttpsModelsAreVisionEligible() {
+        assertTrue(Vision.isEligibleVisionModel(JSONObject()
+            .put("id", "routeway").put("free_tier", true).put("enabled", true)
+            .put("api_key", "configured").put("base_url", "https://api.example.org/v1")))
+        assertFalse(Vision.isEligibleVisionModel(JSONObject()
+            .put("id", "paid").put("free_tier", false).put("enabled", true)
+            .put("api_key", "configured").put("base_url", "https://api.example.org/v1")))
+        assertFalse(Vision.isEligibleVisionModel(JSONObject()
+            .put("id", "disabled").put("free_tier", true).put("enabled", false)
+            .put("api_key", "configured").put("base_url", "https://api.example.org/v1")))
+        assertFalse(Vision.isEligibleVisionModel(JSONObject()
+            .put("id", "no-key").put("free_tier", true).put("enabled", true)
+            .put("api_key", "").put("base_url", "https://api.example.org/v1")))
+        assertFalse(Vision.isEligibleVisionModel(JSONObject()
+            .put("id", "http").put("free_tier", true).put("enabled", true)
+            .put("api_key", "configured").put("base_url", "http://api.example.org/v1")))
+    }
+
+    @Test fun routeProbeUsesOnlyEligibleFreeModelsAndCachesVisionCapability() {
+        val root = Files.createTempDirectory("ruri-vision-route-probe").toFile()
+        try {
+            FileManager.init(root)
+            val models = JSONArray()
+                .put(JSONObject().put("id", "paid").put("free_tier", false).put("enabled", true)
+                    .put("api_key", "paid-key").put("base_url", "https://paid.example.org/v1"))
+                .put(JSONObject().put("id", "disabled").put("free_tier", true).put("enabled", false)
+                    .put("api_key", "disabled-key").put("base_url", "https://disabled.example.org/v1"))
+                .put(JSONObject().put("id", "routeway").put("free_tier", true).put("enabled", true)
+                    .put("api_key", "free-key").put("base_url", "https://free.example.org/v1")
+                    .put("model", "free-model").put("rpd", 100))
+
+            val probed = mutableListOf<String>()
+            val selected = Vision.findVisionRoute(
+                root, models, current = 0, online = true, vpn = false,
+                probeRoute = { model -> probed += model.optString("id"); true }
+            )
+
+            assertEquals("routeway", selected?.optString("id"))
+            assertEquals(listOf("routeway"), probed)
+            assertTrue(RouteMeta.route(root, "routeway").optJSONObject("caps")?.optBoolean("vision") == true)
+            assertEquals(1, RouteMeta.route(root, "routeway").optInt("day_count"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
 }
 
 class ShelfImageDescribedTest {
@@ -158,7 +204,7 @@ class ShelfImageDescribedTest {
             ShelfWatcher.ingestFile(root, "scan.png") { null }
             val event = FileManager.readLastLines(root, "memory/L0_raw.jsonl", 20)
                 .map { JSONObject(it) }.single { it.optString("type") == "shelf_image_unreadable" }
-            assertEquals("no vision route", event.optString("reason"))
+            assertEquals("vision route unavailable", event.optString("reason"))
             assertFalse(FileManager.read(root, "shelf/.desc/scan.png.txt").isNotBlank())
         } finally {
             root.deleteRecursively()
