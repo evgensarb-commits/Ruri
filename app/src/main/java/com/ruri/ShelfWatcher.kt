@@ -45,30 +45,56 @@ object ShelfWatcher {
         dir.listFiles()?.filter { it.isFile }?.forEach { markAdded(ctx, it.name) }
     }
 
-    /** Converts queued file events into bounded, auditable L0 records. */
+    /** Converts queued files into auditable L0 records. Images are never ingested as UTF-8 text. */
     fun ingestPending(ctx: Context, pending: List<JSONObject>) {
         val root = ctx.filesDir
         pending.forEach { queued ->
             val reason = queued.optString("reason")
             if (!reason.startsWith("shelf_file_added:")) return@forEach
             val name = safeName(reason.removePrefix("shelf_file_added:")) ?: return@forEach
-            val file = File(root, "shelf/" + name)
-            if (!file.isFile) return@forEach
-            try {
-                val bytes = file.readBytes()
-                val text = decodeText(bytes).take(12000)
-                val id = "shelf-" + file.name.hashCode() + "-" + file.lastModified()
-                FileManager.appendEvent(root, JSONObject()
-                    .put("id", id).put("ts", System.currentTimeMillis())
-                    .put("type", "shelf_file_ingested").put("source", "shelf")
-                    .put("name", name).put("size_bytes", bytes.size)
-                    .put("text", text).put("extractor", if (text.isBlank()) "metadata_only" else "utf8_text"))
-                val query = (name.substringBeforeLast('.', name) + " " + text.take(180)).trim().take(280)
-                if (query.length >= 2) LifeScheduler.enqueueEvent(ctx, "research_task:" + query)
-            } catch (e: Exception) {
-                Log.w("Ruri", "Could not ingest shelf file " + name, e)
-            }
+            val query = runCatching { ingestFile(root, name) }
+                .onFailure { Log.w("Ruri", "Could not ingest shelf file " + name, it) }
+                .getOrNull()
+            if (!query.isNullOrBlank()) LifeScheduler.enqueueEvent(ctx, "research_task:" + query)
         }
+    }
+
+    internal fun ingestFile(
+        root: File,
+        name: String,
+        describeImage: (String) -> String? = { Vision.describeShelfFile(root, it) }
+    ): String? {
+        val safe = safeName(name) ?: return null
+        val file = File(root, "shelf/" + safe)
+        if (!file.isFile) return null
+        val bytes = file.readBytes()
+        val mime = Vision.mimeOf(bytes)
+        if (mime != null) {
+            val description = runCatching { describeImage(safe) }.getOrNull()?.trim()?.take(4000)
+            if (!description.isNullOrBlank()) {
+                FileManager.write(root, "shelf/.desc/" + safe + ".txt", SecretRedactor.redactText(description))
+                FileManager.appendEvent(root, JSONObject()
+                    .put("type", "shelf_image_described").put("source", "shelf")
+                    .put("name", safe).put("size_bytes", bytes.size)
+                    .put("mime", mime).put("text", description).put("extractor", "vision"))
+            } else {
+                FileManager.appendEvent(root, JSONObject()
+                    .put("type", "shelf_image_unreadable").put("source", "shelf")
+                    .put("name", safe).put("size_bytes", bytes.size)
+                    .put("mime", mime).put("reason", "no vision route"))
+            }
+            return null
+        }
+
+        val text = decodeText(bytes).take(12000)
+        val id = "shelf-" + file.name.hashCode() + "-" + file.lastModified()
+        FileManager.appendEvent(root, JSONObject()
+            .put("id", id).put("ts", System.currentTimeMillis())
+            .put("type", "shelf_file_ingested").put("source", "shelf")
+            .put("name", safe).put("size_bytes", bytes.size)
+            .put("text", text).put("extractor", if (text.isBlank()) "metadata_only" else "utf8_text"))
+        val query = (safe.substringBeforeLast('.', safe) + " " + text.take(180)).trim().take(280)
+        return query.takeIf { it.length >= 2 }
     }
 
     private fun readSeen(root: File): JSONObject =

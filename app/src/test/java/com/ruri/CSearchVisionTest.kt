@@ -74,3 +74,75 @@ class ReadUrlToolTest {
         }
     }
 }
+
+
+class VisionProbeTest {
+    @Test fun probeAcceptsActualDescriptionAndRejectsRefusalOrBlank() {
+        assertTrue(Vision.isUsableProbeResponse("красный"))
+        assertFalse(Vision.isUsableProbeResponse("I cannot inspect this image"))
+        assertFalse(Vision.isUsableProbeResponse("Не могу разобрать изображение"))
+        assertFalse(Vision.isUsableProbeResponse("   "))
+        assertFalse(Vision.isUsableProbeResponse(null))
+    }
+
+    @Test fun detectsSupportedImageSignatures() {
+        assertEquals("image/png", Vision.mimeOf(byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0, 0, 0, 0, 0)))
+        assertEquals("image/jpeg", Vision.mimeOf(byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0, 0)))
+        assertNull(Vision.mimeOf("not an image".toByteArray()))
+    }
+}
+
+class ShelfImageDescribedTest {
+    @Test fun shelfImageIsDescribedAndNeverPassedThroughTextIngestion() {
+        val root = Files.createTempDirectory("ruri-shelf-image").toFile()
+        try {
+            FileManager.init(root)
+            val file = java.io.File(root, "shelf/photo.png")
+            file.parentFile?.mkdirs()
+            file.writeBytes(byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0, 0, 0, 0, 0))
+            val query = ShelfWatcher.ingestFile(root, "photo.png") { "Красный велосипед у стены" }
+            assertNull(query)
+            assertEquals("Красный велосипед у стены",
+                FileManager.read(root, "shelf/.desc/photo.png.txt"))
+            val events = FileManager.readLastLines(root, "memory/L0_raw.jsonl", 20).map { JSONObject(it) }
+            assertTrue(events.any { it.optString("type") == "shelf_image_described" })
+            assertFalse(events.any { it.optString("type") == "shelf_file_ingested" })
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test fun unavailableVisionWritesAuditableUnreadableEvent() {
+        val root = Files.createTempDirectory("ruri-shelf-unreadable").toFile()
+        try {
+            FileManager.init(root)
+            val file = java.io.File(root, "shelf/scan.png")
+            file.parentFile?.mkdirs()
+            file.writeBytes(byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0, 0, 0, 0, 0))
+            ShelfWatcher.ingestFile(root, "scan.png") { null }
+            val event = FileManager.readLastLines(root, "memory/L0_raw.jsonl", 20)
+                .map { JSONObject(it) }.single { it.optString("type") == "shelf_image_unreadable" }
+            assertEquals("no vision route", event.optString("reason"))
+            assertFalse(FileManager.read(root, "shelf/.desc/scan.png.txt").isNotBlank())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+}
+
+class VisionHonestUnavailableTest {
+    @Test fun imageWithoutDescriptionGetsExplicitPlaceholderAndHonestyPrompt() {
+        val root = Files.createTempDirectory("ruri-vision-unavailable").toFile()
+        try {
+            FileManager.init(root)
+            val file = java.io.File(root, "shelf/unknown.png")
+            file.parentFile?.mkdirs()
+            file.writeBytes(byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0, 0, 0, 0, 0))
+            assertEquals("[изображение без описания: vision недоступен]",
+                ChatEngine.shelfText(root, "unknown.png"))
+            assertTrue(Capabilities.bodySection(root).contains("если vision-маршрут недоступен"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+}

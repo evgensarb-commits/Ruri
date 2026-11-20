@@ -43,6 +43,11 @@ object Capabilities {
         fun compact(value: String): String = value.substringBefore(":")
             .substringBefore("—").substringBefore("(").trim().take(80)
         for (i in 0 until senses.length()) known.put(compact(senses.optString(i)))
+        if (actions.length() > 0 && !actions.optString(0).contains("read_url")) {
+            actions.put(0, actions.optString(0).trimEnd('.') + ", read_url.")
+            config.put("actions", actions)
+            FileManager.write(root, PATH, config.toString(2))
+        }
         for (i in 0 until actions.length()) known.put(compact(actions.optString(i)))
         val selfModel = runCatching { JSONObject(FileManager.read(root, "memory/self_model.json")) }
             .getOrElse { JSONObject() }
@@ -72,6 +77,7 @@ object Capabilities {
             append("""{"action":"search","query":"..."}; {"action":"list_shelf"}; {"action":"read_shelf","name":"..."}; {"action":"recall","query":"..."}; {"action":"remember_fact","text":"..."}; {"action":"read_url","url":"https://example.org"}.
 """)
             append("read_url: открыть и прочитать страницу (или получить vision-описание картинки по URL).\n")
+            append("Изображения на полке и по URL ты видишь через vision-описание; если vision-маршрут недоступен — честно скажи, что видишь файл, но не разбираешь изображение.\n")
             append("Когда нужен инструмент, ответь одним JSON-объектом (один JSON-объект) только с этими шестью action. Дождись tool_result; если ok=false или результат пуст, честно сообщи о неудаче и не заявляй, что действие выполнено.\n")
             append("=== РУКИ 2: ЛОКАЛЬНАЯ АВТОНОМИЯ ===\n")
             append("• ").append(localDescription).append("\n")

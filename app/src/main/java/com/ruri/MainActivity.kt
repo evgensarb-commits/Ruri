@@ -281,6 +281,9 @@ class MainActivity : AppCompatActivity() {
         fun isMessageDeleted(id: String): Boolean = Tombstone.isDeleted(filesDir, id)
 
         @JavascriptInterface
+        fun visionStatus(): String = Vision.visionRoute(filesDir)?.optString("name")?.takeIf { it.isNotBlank() } ?: "none"
+
+        @JavascriptInterface
         fun readNetworkDiagnostics(): String = NetworkDiagnostics.latest(filesDir)
 
         @JavascriptInterface
