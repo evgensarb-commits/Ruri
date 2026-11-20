@@ -112,9 +112,7 @@ object FactExtractor {
         }
         val models = config.optJSONArray("models") ?: JSONArray()
         val current = config.optInt("current", 0)
-        val order = FreeModelRouter.orderedIndices(
-            root, models, current, requireNsfw = false, task = Task.REASON
-        )
+        val order = FreeModelRouter.orderedIndices(root, models, current, Task.REASON)
         val prompt = buildPrompt(transcriptWindow)
         var parsed: JSONObject? = null
         var usedModel = ""

@@ -83,7 +83,6 @@ class RuriLifeWorker(
                     )
                 }
                 Probe.heartbeat(root, routeConfig)
-                Probe.fullProbeIfDue(root, routeConfig)
             }
 
             // Do useful local work first; it does not require an API key or network.
@@ -232,10 +231,8 @@ class RuriLifeWorker(
             explicitSelfTask -> Task.TOOLS
             else -> Task.REASON
         }
-        val needsNsfw = initiativeDue && RouteSelector.nsfwWindow(root)
         return FreeModelRouter.orderedIndices(
-            root, models, config.optInt("current", 0),
-            requireNsfw = needsNsfw, task = task
+            root, models, config.optInt("current", 0), task
         ).isNotEmpty()
     }
 }

@@ -279,7 +279,7 @@ object FileManager {
     fun readLastEvents(root: File, filter: String = "all", limit: Int = 100): JSONArray {
         val bounded = limit.coerceIn(1, 100)
         val allowed = setOf("message", "tool_call", "tool_result", "wake", "phone_notification",
-            "shelf_file_ingested", "shelf_image_described", "shelf_image_unreadable", "recall_deep_used", "facts_extracted", "error")
+            "shelf_file_ingested", "shelf_image_described", "shelf_image_unreadable", "recall_deep_used", "facts_extracted", "nsfw_refusal", "error")
         val requested = filter.takeIf { it == "all" || it in allowed } ?: "all"
         val result = JSONArray()
         readLastLines(root, L0_PATH, maxLines = 500, maxBytes = 2 * 1024 * 1024)
@@ -713,6 +713,8 @@ object FileManager {
             config.put("models", models)
             for (i in 0 until models.length()) {
                 val model = models.optJSONObject(i) ?: continue
+                val oldNsfwKeys = model.keys().asSequence().filter { it.startsWith("nsfw_") }.toList()
+                oldNsfwKeys.forEach { model.remove(it); changed = true }
                 if (model.optString("model") == "gemini-2.0-flash") {
                     model.put("model", "gemini-3.8-flash")
                     changed = true
@@ -743,9 +745,6 @@ object FileManager {
 
             val routewayIndex = ensureProvider("routeway", JSONObject()
                 .put("id", "routeway")
-                .put("nsfw_capable", false)
-                .put("nsfw_tested_at", 0L)
-                .put("nsfw_probe_status", "untested")
                 .put("name", "Routeway · Gemma MeroMero Free")
                 .put("base_url", "https://api.routeway.ai/v1")
                 .put("api_key", "")
@@ -756,9 +755,6 @@ object FileManager {
 
             ensureProvider("requesty", JSONObject()
                 .put("id", "requesty")
-                .put("nsfw_capable", false)
-                .put("nsfw_tested_at", 0L)
-                .put("nsfw_probe_status", "untested")
                 .put("name", "Requesty · Google Gemma 4 Free")
                 .put("base_url", "https://router.requesty.ai/v1")
                 .put("api_key", "")
@@ -766,6 +762,13 @@ object FileManager {
                 .put("priority", 3)
                 .put("free_tier", true)
                 .put("enabled", true))
+
+            // Remove any legacy NSFW probe keys after all provider defaults have been merged.
+            for (i in 0 until models.length()) {
+                val model = models.optJSONObject(i) ?: continue
+                val legacyNsfwKeys = model.keys().asSequence().filter { it.startsWith("nsfw_") }.toList()
+                legacyNsfwKeys.forEach { model.remove(it); changed = true }
+            }
 
             ensureProvider("gemini", JSONObject()
                 .put("id", "gemini").put("name", "Gemini (legacy, disabled)")
@@ -784,7 +787,6 @@ object FileManager {
                     val legacyFields = mapOf(
                         "needs_vpn" to true,
                         "ru_reachable" to false,
-                        "nsfw_capable" to false,
                         "role" to "neutral_fallback",
                         "free_tier" to false,
                         "enabled" to false

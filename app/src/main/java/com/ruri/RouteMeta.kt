@@ -17,12 +17,31 @@ object RouteMeta {
         }.format(Date())
 
     @Synchronized
-    fun load(root: File): JSONObject = try {
-        val raw = FileManager.read(root, PATH)
-        if (raw.isBlank()) JSONObject() else JSONObject(raw)
-    } catch (e: Exception) {
-        android.util.Log.w("Ruri", "Route metadata could not be read; starting with empty metadata", e)
-        JSONObject()
+    fun load(root: File): JSONObject {
+        val all = try {
+            val raw = FileManager.read(root, PATH)
+            if (raw.isBlank()) JSONObject() else JSONObject(raw)
+        } catch (e: Exception) {
+            android.util.Log.w("Ruri", "Route metadata could not be read; starting with empty metadata", e)
+            JSONObject()
+        }
+        var changed = false
+        val routeIds = all.keys().asSequence().toList()
+        for (id in routeIds) {
+            val route = all.optJSONObject(id) ?: continue
+            val legacyKeys = route.keys().asSequence()
+                .filter { it.startsWith("nsfw_") || it == "last_full_probe_at" }
+                .toList()
+            legacyKeys.forEach { route.remove(it); changed = true }
+            val caps = route.optJSONObject("caps")
+            if (caps?.has("nsfw") == true) {
+                caps.remove("nsfw")
+                if (caps.length() == 0) route.remove("caps")
+                changed = true
+            }
+        }
+        if (changed) FileManager.write(root, PATH, all.toString(2))
+        return all
     }
 
     @Synchronized
@@ -41,7 +60,6 @@ object RouteMeta {
             .put("last_ok", 0L)
             .put("last_attempt", 0L)
             .put("last_reachability_at", 0L)
-            .put("last_full_probe_at", 0L)
             .put("task_success_streaks", JSONObject())
             .put("reachable", true)
             .put("needs_vpn", false)
@@ -83,12 +101,16 @@ object RouteMeta {
     fun setNeedsVpn(root: File, id: String, needsVpn: Boolean) =
         update(root, id) { it.put("needs_vpn", needsVpn) }
 
-    fun setCapability(root: File, id: String, capability: String, capable: Boolean) =
+    fun setCapability(root: File, id: String, capability: String, capable: Boolean) {
+        require(!capability.equals("nsfw", ignoreCase = true)) {
+            "NSFW capability flags are permanently disabled"
+        }
         update(root, id) {
             val caps = it.optJSONObject("caps") ?: JSONObject()
             caps.put(capability, capable)
             it.put("caps", caps)
         }
+    }
 
     @Synchronized
     fun quotaLeft(root: File, id: String, requestsPerDay: Int): Boolean {
@@ -102,20 +124,6 @@ object RouteMeta {
             current = route(root, id)
         }
         return current.optInt("day_count", 0) < requestsPerDay.coerceAtLeast(1)
-    }
-
-    /** Claims a full provider capability probe before the network call, so a process crash cannot duplicate it. */
-    fun claimFullProbe(root: File, id: String, now: Long = System.currentTimeMillis(), force: Boolean = false): Boolean {
-        var claimed = false
-        update(root, id) {
-            val last = it.optLong("last_full_probe_at", 0L)
-            val allowed = if (force) now - last >= 60_000L else now - last >= Probe.FULL_PROBE_MS
-            if (allowed) {
-                it.put("last_full_probe_at", now)
-                claimed = true
-            }
-        }
-        return claimed
     }
 
     fun available(root: File, id: String, now: Long = System.currentTimeMillis()): Boolean {
@@ -156,7 +164,7 @@ object RouteMeta {
                 it.put("ru_reachable", false)
                 it.put("reachable", false)
             }
-            "refusal" -> Unit // NSFW capability is updated by RouteCapabilityProbe.
+            "refusal" -> Unit // A refusal is per response; it never changes route capability or cooldown.
             else -> {
                 val streak = it.optInt("fail_streak", 0) + 1
                 it.put("fail_streak", streak)

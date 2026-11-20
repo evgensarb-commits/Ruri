@@ -24,8 +24,7 @@ class RouteSelectorTest {
             RouteMeta.update(root, "route-b") { it.getJSONObject("scores").put(Task.WARMTH.name, 0.9) }
 
             val order = RouteSelector.ordered(
-                root, models, current = 0, task = Task.WARMTH, needNsfw = false,
-                online = true, vpn = false
+                root, models, current = 0, task = Task.WARMTH, online = true, vpn = false
             )
             assertEquals(listOf(1, 0), order)
             assertTrue(order.none { models.getJSONObject(it).optString("id") == "paid" })
@@ -48,36 +47,15 @@ class RouteSelectorTest {
 
             assertEquals(
                 listOf(1),
-                RouteSelector.ordered(root, models, 0, Task.CHAT, false, online = true, vpn = false)
+                RouteSelector.ordered(root, models, 0, Task.CHAT, online = true, vpn = false)
             )
             assertEquals(
                 listOf(0, 1),
-                RouteSelector.ordered(root, models, 0, Task.CHAT, false, online = true, vpn = true)
+                RouteSelector.ordered(root, models, 0, Task.CHAT, online = true, vpn = true)
             )
         } finally {
             root.deleteRecursively()
         }
     }
 
-    @Test
-    fun adultRouteMustHavePassedItsLiveProbeAndMetadataCapability() {
-        val root = Files.createTempDirectory("ruri-nsfw-route").toFile()
-        try {
-            val models = JSONArray()
-                .put(JSONObject().put("id", "untested").put("free_tier", true).put("enabled", true)
-                    .put("api_key", "configured").put("nsfw_capable", true)
-                    .put("nsfw_tested_at", 0L).put("nsfw_probe_status", "passed"))
-                .put(JSONObject().put("id", "passed").put("free_tier", true).put("enabled", true)
-                    .put("api_key", "configured").put("nsfw_capable", true)
-                    .put("nsfw_tested_at", 100L).put("nsfw_probe_status", "passed"))
-            RouteMeta.setCapability(root, "passed", "nsfw", true)
-
-            assertEquals(
-                listOf(1),
-                RouteSelector.ordered(root, models, 0, Task.CREATIVE, true, online = true, vpn = false)
-            )
-        } finally {
-            root.deleteRecursively()
-        }
-    }
 }

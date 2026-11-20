@@ -100,14 +100,10 @@ object Thinker {
             return
         }
 
-        RouteCapabilityProbe.refreshIfDue(root, config)
         val prompt = buildPrompt(ctx, root, state, reason, initiative)
         val current = config.optInt("current", 0)
         val task = if (initiative) Task.WARMTH else Task.REASON
-        val requireNsfw = initiative && RouteSelector.nsfwWindow(root)
-        val order = FreeModelRouter.orderedIndices(
-            root, models, current, requireNsfw = requireNsfw, task = task
-        )
+        val order = FreeModelRouter.orderedIndices(root, models, current, task)
         if (order.isEmpty()) {
             state.put("last_thought", now)
             persistStatePreservingTurnInFlight(root, state)
@@ -130,12 +126,12 @@ object Thinker {
                 ChatEngine.requestToolFollowup(model, next)
             }
             if (!reply.isNullOrBlank() && initiative &&
-                RouteCapabilityProbe.looksLikeRefusalOrDisclaimer(reply)) {
-                RouteCapabilityProbe.markNotCapable(root, config, index, "initiative_refusal_or_disclaimer")
+                RouteSelector.looksLikeRefusalOrDisclaimer(reply)) {
                 runCatching { RouteMeta.recordFailure(root, routeId, "refusal", task) }
                 appendEvent(root, "model_route_rejected", JSONObject()
                     .put("model", model.optString("id"))
-                    .put("reason", "initiative_refusal_or_disclaimer"))
+                    .put("reason", "initiative_refusal_or_disclaimer")
+                    .put("snippet", SecretRedactor.redactText(reply).take(300)))
                 reply = null
                 continue
             }

@@ -113,7 +113,7 @@ class KiloRemovedTest : BodyHandsTestBase() {
         }
         assertFalse(config.toString().contains("kilo-auto"))
         assertTrue(config.optBoolean("free_only"))
-        assertTrue(FreeModelRouter.orderedIndices(models, config.optInt("current", 0))
+        assertTrue(FreeModelRouter.orderedIndices(root, models, config.optInt("current", 0), Task.CHAT)
             .all { !models.getJSONObject(it).optBoolean("minimal_context", false) })
     }
 
