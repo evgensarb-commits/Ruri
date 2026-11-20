@@ -56,7 +56,7 @@ class AutonomyPackageIntegrationTest {
         val fileManager = source("src/main/java/com/ruri/FileManager.kt")
         assertTrue(fileManager.contains("needs_vpn"))
         assertTrue(fileManager.contains("ru_reachable"))
-        assertTrue(fileManager.contains("nsfw_capable"))
+        assertFalse(fileManager.contains("nsfw_capable"))
         assertTrue(fileManager.contains("neutral_fallback"))
         assertTrue(fileManager.contains("free_only"))
     }
