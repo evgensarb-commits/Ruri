@@ -80,7 +80,17 @@ object RouteMeta {
 
     @Synchronized
     fun save(root: File, value: JSONObject) {
-        FileManager.write(root, PATH, value.toString(2))
+        val sanitized = JSONObject(value.toString())
+        val ids = sanitized.keys()
+        while (ids.hasNext()) {
+            val route = sanitized.optJSONObject(ids.next()) ?: continue
+            listOf("nsfw_capable", "nsfw_tested_at", "nsfw_probe_status", "nsfw").forEach(route::remove)
+            route.optJSONObject("caps")?.let { caps ->
+                caps.remove("nsfw")
+                route.put("caps", caps)
+            }
+        }
+        FileManager.write(root, PATH, sanitized.toString(2))
     }
 
     private fun defaultRoute(): JSONObject {
