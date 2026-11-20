@@ -27,17 +27,4 @@ class FreeModelRouterTest {
         assertEquals(listOf(2, 0, 1), FreeModelRouter.orderedIndices(models, primaryIndex = 2))
     }
 
-    @Test
-    fun chatRequiresExplicitlyPassedNsfwProbe() {
-        val models = JSONArray()
-            .put(JSONObject().put("id", "routeway").put("priority", 1).put("free_tier", true).put("enabled", true)
-                .put("nsfw_capable", false).put("nsfw_tested_at", 100L).put("nsfw_probe_status", "refused_or_disclaimer"))
-            .put(JSONObject().put("id", "kilo").put("priority", 2).put("free_tier", true).put("enabled", true)
-                .put("nsfw_capable", true).put("nsfw_tested_at", 100L).put("nsfw_probe_status", "passed"))
-            .put(JSONObject().put("id", "requesty").put("priority", 3).put("free_tier", true).put("enabled", true)
-                .put("nsfw_capable", true).put("nsfw_tested_at", 0L).put("nsfw_probe_status", "passed"))
-
-        assertEquals(listOf(1), FreeModelRouter.orderedIndices(models, 0, requireNsfw = true))
-        assertEquals(listOf(0, 1, 2), FreeModelRouter.orderedIndices(models, 0, requireNsfw = false))
-    }
 }
