@@ -22,10 +22,12 @@ object MemoryRetriever {
         val kind: String,
         val text: String,
         val timestamp: Long,
-        val confidence: Double = 1.0
+        val confidence: Double = 1.0,
+        val emotionAfter: JSONObject? = null
     )
 
     fun recall(root: File, query: String, limit: Int = 6): String {
+        val queryEmotions = EmotionEngine.queryEmotions(root, query)
         val terms = tokenize(query)
         if (terms.isEmpty()) return ""
         val memories = ArrayList<Memory>()
@@ -45,7 +47,10 @@ object MemoryRetriever {
             val entry = diary.optJSONObject(i) ?: continue
             val text = entry.optString("text").trim()
             if (text.isNotBlank()) memories.add(
-                Memory("эпизод дневника", text, entry.optLong("ts", 0L))
+                Memory(
+                    "эпизод дневника", text, entry.optLong("ts", 0L),
+                    emotionAfter = entry.optJSONObject("emotion_after")?.let { JSONObject(it.toString()) }
+                )
             )
         }
 
@@ -62,7 +67,8 @@ object MemoryRetriever {
             if (text.isNotBlank()) memories.add(
                 Memory(
                     if (event.optString("who") == "ruri") "прошлый ответ Рури" else "прошлая реплика Командира",
-                    text, event.optLong("timestamp", event.optLong("ts", 0L))
+                    text, event.optLong("timestamp", event.optLong("ts", 0L)),
+                    emotionAfter = event.optJSONObject("emotion_after")?.let { JSONObject(it.toString()) }
                 )
             )
         }
@@ -94,8 +100,11 @@ object MemoryRetriever {
             val density = overlapTerms.size.toDouble() / memoryTerms.size.coerceAtLeast(1).toDouble()
             val ageDays = if (memory.timestamp > 0L) ((now - memory.timestamp).coerceAtLeast(0L) / 86400000.0) else 3650.0
             val recency = 1.0 / (1.0 + ageDays / 365.0)
-            val score = coverage * 3.0 + density + recency * 0.15 +
+            var score = coverage * 3.0 + density + recency * 0.15 +
                 memory.confidence.coerceIn(0.0, 1.0) * 0.1
+            memory.emotionAfter?.let { episodeEmotion ->
+                for (emotion in queryEmotions) if (episodeEmotion.optDouble(emotion, 0.0) > 50.0) score += 2.0
+            }
             Triple(memory, score, overlapTerms)
         }.sortedByDescending { it.second }
 
@@ -121,7 +130,10 @@ object MemoryRetriever {
             if (links.isEmpty()) return@mapNotNull null
             val ageDays = if (memory.timestamp > 0L) ((now - memory.timestamp).coerceAtLeast(0L) / 86400000.0) else 3650.0
             val recency = 1.0 / (1.0 + ageDays / 365.0)
-            val score = 0.55 + links.size.coerceAtMost(3) * 0.18 + recency * 0.05
+            var score = 0.55 + links.size.coerceAtMost(3) * 0.18 + recency * 0.05
+            memory.emotionAfter?.let { episodeEmotion ->
+                for (emotion in queryEmotions) if (episodeEmotion.optDouble(emotion, 0.0) > 50.0) score += 2.0
+            }
             Triple(memory, score, links)
         }.sortedByDescending { it.second }
 
