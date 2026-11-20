@@ -199,6 +199,7 @@ object FileManager {
         // never discards credentials from the encrypted SecretStore.
         SecretStore.migrateLegacyApiKeys(root)
         migrateModelConfig(root)
+        RouteMeta.migrateLegacyNsfwFlags(root)
         migrateGoalSchema(root)
         ensureRemoteModelContextPolicy(root)
 
@@ -279,7 +280,8 @@ object FileManager {
     fun readLastEvents(root: File, filter: String = "all", limit: Int = 100): JSONArray {
         val bounded = limit.coerceIn(1, 100)
         val allowed = setOf("message", "tool_call", "tool_result", "wake", "phone_notification",
-            "shelf_file_ingested", "shelf_image_described", "shelf_image_unreadable", "recall_deep_used", "facts_extracted", "nsfw_refusal", "error")
+            "shelf_file_ingested", "shelf_image_described", "shelf_image_unreadable", "recall_deep_used", "facts_extracted",
+            "nsfw_refusal", "error")
         val requested = filter.takeIf { it == "all" || it in allowed } ?: "all"
         val result = JSONArray()
         readLastLines(root, L0_PATH, maxLines = 500, maxBytes = 2 * 1024 * 1024)
@@ -713,8 +715,6 @@ object FileManager {
             config.put("models", models)
             for (i in 0 until models.length()) {
                 val model = models.optJSONObject(i) ?: continue
-                val oldNsfwKeys = model.keys().asSequence().filter { it.startsWith("nsfw_") }.toList()
-                oldNsfwKeys.forEach { model.remove(it); changed = true }
                 if (model.optString("model") == "gemini-2.0-flash") {
                     model.put("model", "gemini-3.8-flash")
                     changed = true
@@ -762,13 +762,6 @@ object FileManager {
                 .put("priority", 3)
                 .put("free_tier", true)
                 .put("enabled", true))
-
-            // Remove any legacy NSFW probe keys after all provider defaults have been merged.
-            for (i in 0 until models.length()) {
-                val model = models.optJSONObject(i) ?: continue
-                val legacyNsfwKeys = model.keys().asSequence().filter { it.startsWith("nsfw_") }.toList()
-                legacyNsfwKeys.forEach { model.remove(it); changed = true }
-            }
 
             ensureProvider("gemini", JSONObject()
                 .put("id", "gemini").put("name", "Gemini (legacy, disabled)")
