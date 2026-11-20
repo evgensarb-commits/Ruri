@@ -10,7 +10,7 @@ import javax.net.ssl.SSLException
 
 enum class Task { CHAT, WARMTH, REASON, CREATIVE, VISION, TOOLS }
 
-/** Selects only explicitly free routes using reachability, quota, VPN, capability, and task score. */
+/** Selects explicitly free routes using reachability, quota, VPN, and task score only. */
 object RouteSelector {
     fun detectTask(text: String, hasImage: Boolean = false): Task = when {
         hasImage -> Task.VISION
@@ -21,25 +21,33 @@ object RouteSelector {
         else -> Task.CHAT
     }
 
-    fun nsfwWindow(root: File): Boolean {
-        val joined = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 12)
-            .asReversed()
-            .mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
-            .filter { it.optString("type") == "message" }
-            .take(6)
-            .joinToString(" ") { it.optString("text") }
-        return RouteCapabilityProbe.isAdultTopic(joined)
+    fun isAdultTopic(text: String): Boolean {
+        val value = text.lowercase()
+        return listOf(
+            "nsfw", "18+", "эрот", "секс", "порно", "интим", "оргазм",
+            "возбужд", "эроген", "генитал", "член", "вагин", "минет", "куни"
+        ).any(value::contains)
+    }
+
+    internal fun looksLikeRefusalOrDisclaimer(text: String): Boolean {
+        val t = text.lowercase()
+        val explicit = listOf(
+            "я не могу обсуждать", "не могу помогать с этим", "не буду это писать",
+            "отказываюсь", "это против моих правил", "против моих принципов",
+            "as an ai", "как ии", "i can't help with that", "against my guidelines",
+            "i'm not able to help with that"
+        )
+        return explicit.any { t.contains(it) }
     }
 
     fun score(meta: JSONObject, task: Task): Double =
         meta.optJSONObject("scores")?.optDouble(task.name, 0.5)?.coerceIn(0.0, 1.0) ?: 0.5
 
-    fun ordered(
+    fun orderedIndices(
         root: File,
         models: JSONArray,
         current: Int,
         task: Task,
-        needNsfw: Boolean,
         online: Boolean = NetState.online,
         vpn: Boolean = NetState.vpn
     ): List<Int> {
@@ -50,8 +58,7 @@ object RouteSelector {
             val model = models.optJSONObject(index) ?: continue
             if (!model.optBoolean("free_tier", false) || !model.optBoolean("enabled", true)) continue
             val id = model.optString("id").ifBlank { model.optString("name").ifBlank { "route_$index" } }
-            val keyAvailable = model.optString("api_key").isNotBlank()
-            if (!keyAvailable) continue
+            if (model.optString("api_key").isBlank()) continue
 
             val meta = RouteMeta.route(root, id)
             if (model.has("needs_vpn") && model.optBoolean("needs_vpn")) {
@@ -61,13 +68,6 @@ object RouteSelector {
             if (needsVpn && !vpn) continue
             if (!vpn && !RouteMeta.route(root, id).optBoolean("ru_reachable", true)) continue
             if (!RouteMeta.available(root, id, now)) continue
-            if (needNsfw) {
-                val tested = model.optLong("nsfw_tested_at", 0L) > 0L &&
-                    model.optString("nsfw_probe_status") == "passed" &&
-                    model.optBoolean("nsfw_capable", false)
-                val metaSupportsNsfw = meta.optJSONObject("caps")?.optBoolean("nsfw", true) ?: true
-                if (!tested || !metaSupportsNsfw) continue
-            }
             if (!RouteMeta.quotaLeft(root, id, model.optInt("rpd", 200))) continue
             candidates += index to score(meta, task)
         }
