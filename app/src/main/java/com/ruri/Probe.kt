@@ -6,7 +6,7 @@ import java.io.File
 import java.net.URL
 import javax.net.ssl.HttpsURLConnection
 
-/** Cheap reachability heartbeats and explicit reachability refreshes. */
+/** Cheap reachability heartbeats and explicit route-availability checks. */
 object Probe {
     const val REACH_TTL_MS = 10L * 60L * 1000L
     const val HEARTBEAT_MS = 20L * 60L * 1000L

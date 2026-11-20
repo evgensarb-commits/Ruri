@@ -23,7 +23,7 @@ class RouteSelectorTest {
             RouteMeta.update(root, "route-a") { it.getJSONObject("scores").put(Task.WARMTH.name, 0.1) }
             RouteMeta.update(root, "route-b") { it.getJSONObject("scores").put(Task.WARMTH.name, 0.9) }
 
-            val order = RouteSelector.ordered(
+            val order = RouteSelector.orderedIndices(
                 root, models, current = 0, task = Task.WARMTH, online = true, vpn = false
             )
             assertEquals(listOf(1, 0), order)
@@ -47,11 +47,11 @@ class RouteSelectorTest {
 
             assertEquals(
                 listOf(1),
-                RouteSelector.ordered(root, models, 0, Task.CHAT, online = true, vpn = false)
+                RouteSelector.orderedIndices(root, models, 0, Task.CHAT, online = true, vpn = false)
             )
             assertEquals(
                 listOf(0, 1),
-                RouteSelector.ordered(root, models, 0, Task.CHAT, online = true, vpn = true)
+                RouteSelector.orderedIndices(root, models, 0, Task.CHAT, online = true, vpn = true)
             )
         } finally {
             root.deleteRecursively()

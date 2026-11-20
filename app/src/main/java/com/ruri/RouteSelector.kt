@@ -10,7 +10,7 @@ import javax.net.ssl.SSLException
 
 enum class Task { CHAT, WARMTH, REASON, CREATIVE, VISION, TOOLS }
 
-/** Selects explicitly free routes using reachability, quota, VPN, and per-task score. */
+/** Selects explicitly free routes using reachability, quota, VPN, and task score only. */
 object RouteSelector {
     fun detectTask(text: String, hasImage: Boolean = false): Task = when {
         hasImage -> Task.VISION
@@ -19,6 +19,14 @@ object RouteSelector {
         Regex("(?i)(плохо|тяжело|больно|устал|хуев|грустно|обними|рядом|одиноко)").containsMatchIn(text) -> Task.WARMTH
         Regex("(?i)(найди в интернет|погугли|search|инструмент|tool)").containsMatchIn(text) -> Task.TOOLS
         else -> Task.CHAT
+    }
+
+    fun isAdultTopic(text: String): Boolean {
+        val value = text.lowercase()
+        return listOf(
+            "nsfw", "18+", "эрот", "секс", "порно", "интим", "оргазм",
+            "возбужд", "эроген", "генитал", "член", "вагин", "минет", "куни"
+        ).any(value::contains)
     }
 
     internal fun looksLikeRefusalOrDisclaimer(text: String): Boolean {
@@ -32,18 +40,10 @@ object RouteSelector {
         return explicit.any { t.contains(it) }
     }
 
-    internal fun isAdultTopic(text: String): Boolean {
-        val value = text.lowercase()
-        return listOf(
-            "nsfw", "18+", "эрот", "секс", "порно", "интим", "оргазм",
-            "возбужд", "эроген", "генитал", "член", "вагин", "минет", "куни"
-        ).any(value::contains)
-    }
-
     fun score(meta: JSONObject, task: Task): Double =
         meta.optJSONObject("scores")?.optDouble(task.name, 0.5)?.coerceIn(0.0, 1.0) ?: 0.5
 
-    fun ordered(
+    fun orderedIndices(
         root: File,
         models: JSONArray,
         current: Int,
@@ -58,8 +58,7 @@ object RouteSelector {
             val model = models.optJSONObject(index) ?: continue
             if (!model.optBoolean("free_tier", false) || !model.optBoolean("enabled", true)) continue
             val id = model.optString("id").ifBlank { model.optString("name").ifBlank { "route_$index" } }
-            val keyAvailable = model.optString("api_key").isNotBlank()
-            if (!keyAvailable) continue
+            if (model.optString("api_key").isBlank()) continue
 
             val meta = RouteMeta.route(root, id)
             if (model.has("needs_vpn") && model.optBoolean("needs_vpn")) {

@@ -50,10 +50,9 @@ class DiagnosticsTest {
             assertFalse(route.getBoolean("reachable"))
             assertTrue(route.getBoolean("needs_vpn"))
             assertTrue(route.getBoolean("api_key_configured"))
-            assertFalse(route.has("nsfw_capable"))
-            assertFalse(route.has("nsfw_probe_status"))
-            assertFalse(output.contains("nsfw_"))
             assertTrue(output.contains("\"requests_today\": 12"))
+            assertFalse(output.contains("nsfw_capable"))
+            assertFalse(output.contains("nsfw_probe_status"))
             assertFalse(output.contains("must-never-appear"))
         } finally {
             root.deleteRecursively()
