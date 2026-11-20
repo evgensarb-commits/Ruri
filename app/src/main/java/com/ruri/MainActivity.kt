@@ -32,6 +32,7 @@ class MainActivity : AppCompatActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var importFileCallback: ValueCallback<Array<Uri>>? = null
     @Volatile private var activityResumed = false
+    @Volatile private var visionStatusProbeQueued = false
     private var pendingMessageId: String? = null
     private val importFileRequestCode = 2002
 
@@ -174,6 +175,37 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun refreshVisionStatusAsync() {
+        synchronized(this) {
+            if (visionStatusProbeQueued) return
+            visionStatusProbeQueued = true
+        }
+        routeExecutor.execute {
+            try {
+                NetState.refresh(applicationContext)
+                if (NetState.online) Vision.visionRoute(filesDir)
+            } catch (e: Exception) {
+                android.util.Log.w("Ruri", "Vision route status refresh failed", e)
+            } finally {
+                visionStatusProbeQueued = false
+            }
+            val status = when {
+                !NetState.online -> "нет сети"
+                else -> Vision.cachedVisionRoute(filesDir)
+                    ?.let { it.optString("name").ifBlank { it.optString("id") } }
+                    ?.takeIf { it.isNotBlank() } ?: "none"
+            }
+            mainHandler.post {
+                if (::web.isInitialized) {
+                    web.evaluateJavascript(
+                        "window.setVisionStatus && window.setVisionStatus(" + JSONObject.quote(status) + ")",
+                        null
+                    )
+                }
+            }
+        }
+    }
+
     inner class Bridge {
         @JavascriptInterface
         fun getDiagnostics(): String = Diagnostics.run(this@MainActivity)
@@ -280,9 +312,12 @@ class MainActivity : AppCompatActivity() {
         fun isMessageDeleted(id: String): Boolean = Tombstone.isDeleted(filesDir, id)
 
         @JavascriptInterface
-        fun visionStatus(): String = Vision.cachedVisionRoute(filesDir)
-            ?.let { it.optString("name").ifBlank { it.optString("id") } }
-            ?.takeIf { it.isNotBlank() } ?: "none"
+        fun visionStatus(): String {
+            refreshVisionStatusAsync()
+            return Vision.cachedVisionRoute(filesDir)
+                ?.let { it.optString("name").ifBlank { it.optString("id") } }
+                ?.takeIf { it.isNotBlank() } ?: "проверяю…"
+        }
 
         @JavascriptInterface
         fun readNetworkDiagnostics(): String = NetworkDiagnostics.latest(filesDir)
