@@ -54,6 +54,11 @@ object Capabilities {
 
     fun bodySection(root: File): String {
         val config = runCatching { JSONObject(FileManager.read(root, PATH)) }.getOrElse { defaults() }
+        val actions = config.optJSONArray("actions") ?: defaults().optJSONArray("actions") ?: JSONArray()
+        val toolDescription = actions.optString(0,
+            "Внешние инструменты: search, list_shelf, read_shelf, recall, remember_fact.")
+        val localDescription = actions.optString(1,
+            "Локальная автономия: инициатива, дневник и поддержание текущего состояния.")
         fun lines(key: String): String {
             val array = config.optJSONArray(key) ?: JSONArray()
             return (0 until array.length()).joinToString("\n") { "• " + array.optString(it) }
@@ -62,12 +67,15 @@ object Capabilities {
             append("=== ТВОЁ ТЕЛО И ЧУВСТВА ===\n").append(lines("senses")).append("\n")
             append("=== ТВОЯ ПАМЯТЬ ===\n").append(lines("memory")).append("\n")
             append("Ты помнишь между сессиями: это долговременная память, а не контекст одного диалога.\n")
-            append("=== ИНСТРУМЕНТЫ (только эти JSON-формы) ===\\n")
+            append("=== РУКИ 1: ВНЕШНИЕ ИНСТРУМЕНТЫ ===\n")
+            append("• ").append(toolDescription).append("\n")
             append("""{"action":"search","query":"..."}; {"action":"list_shelf"}; {"action":"read_shelf","name":"..."}; {"action":"recall","query":"..."}; {"action":"remember_fact","text":"..."}.
 """)
-            append("Когда нужен инструмент, ответь одним JSON-объектом только из списка выше. Только эти пять action существуют; не выдумывай другие действия. Если инструмент не нужен — отвечай обычной прозой.\\n")
-            append("=== УМЕНИЯ БЕЗ ПРОТОКОЛА ===\\nИнициатива, дневник, смена настроения — обычным текстом ответа, не JSON.\\n")
-            append("URL источников покажет интерфейс, тебе перечислять не нужно. Если цитируешь — копируй URL байт-в-байт из tool_result, не выдумывай. Не уверен в URL — не пиши ссылку.\\n")
+            append("Когда нужен инструмент, используй один JSON-объект только с этими пятью action. Дождись tool_result; если ok=false или результат пуст, честно сообщи о неудаче и не заявляй, что действие выполнено.\n")
+            append("=== РУКИ 2: ЛОКАЛЬНАЯ АВТОНОМИЯ ===\n")
+            append("• ").append(localDescription).append("\n")
+            append("Инициатива, дневник, эмоциональная регуляция и осмысление событий выполняются обычной прозой, не JSON-инструментами. Не выдумывай действия телефона, которых нет в разрешённых возможностях.\n")
+            append("URL источников покажет интерфейс, тебе перечислять не нужно. Если цитируешь — копируй URL байт-в-байт из tool_result, не выдумывай. Не уверен в URL — не пиши ссылку.\n")
             append("=== ТВОИ ЧЕСТНЫЕ ГРАНИЦЫ ===\n").append(lines("limits")).append("\n")
             append(config.optString("self_narrative"))
         }

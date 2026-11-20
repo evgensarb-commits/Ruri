@@ -14,8 +14,25 @@ import android.os.SystemClock
 object ChatEngine {
     const val OFFLINE_REPLY = "Связи нет. Отвечу, когда она вернётся."
     @Volatile private var lastSearchSourceUrls = JSONArray()
+    @Volatile private var lastFinalMessageId: String? = null
 
-    fun respond(root: File): String = respondInternal(root, allowRecovery = true)
+    fun respond(root: File): String {
+        lastFinalMessageId = null
+        setTurnInFlight(root, true)
+        return try { respondInternal(root, allowRecovery = true) }
+        finally { setTurnInFlight(root, false) }
+    }
+
+    internal fun setTurnInFlight(root: File, value: Boolean) {
+        val state = readJson(root, "memory/L4_state.json")
+        state.put("turn_in_flight", value)
+        FileManager.write(root, "memory/L4_state.json", state.toString(2))
+    }
+
+    internal fun lastSavedReplyId(): String? = lastFinalMessageId
+
+    internal fun shouldIncludeInChatHistory(root: File, event: JSONObject): Boolean =
+        event.optString("type") == "message" && !Tombstone.isDeleted(root, event.optString("id"))
 
     private fun respondInternal(root: File, allowRecovery: Boolean, assumeReachable: Boolean = false): String {
         val config = JSONObject(SecretStore.readRuntimeConfig(root))
@@ -128,7 +145,7 @@ object ChatEngine {
         val history = lines.asReversed().mapNotNull { line ->
             try {
                 val event = JSONObject(line)
-                if (event.optString("type") != "message") return@mapNotNull null
+                if (!shouldIncludeInChatHistory(root, event)) return@mapNotNull null
                 val text = event.optString("text").trim()
                 if (text.isBlank()) return@mapNotNull null
                 val role = if (event.optString("who") == "ruri") "assistant" else "user"
@@ -504,7 +521,7 @@ object ChatEngine {
         return "Факт записан в твою L1-память с confidence 0.6."
     }
 
-    private fun requestToolFollowup(model: JSONObject, messages: JSONArray): String? {
+    internal fun requestToolFollowup(model: JSONObject, messages: JSONArray): String? {
         val base = model.optString("base_url").trimEnd('/')
         if (!base.startsWith("https://")) return null
         var connection: HttpURLConnection? = null
@@ -539,25 +556,20 @@ object ChatEngine {
         emotion: JSONObject? = null,
         meta: JSONObject? = null,
         routeName: String = "маршрут"
-    ) {
+    ): String {
         val sourceUrls = meta?.optJSONArray("source_urls") ?: JSONArray()
         val searchOk = meta?.takeIf { it.has("search_ok") }?.optBoolean("search_ok")
-        appendFinalReplyInternal(
-            root, reply, routeName, sourceUrls, emotion, searchOk,
-            includeEmptySources = meta?.has("source_urls") == true
-        )
+        return appendFinalReplyInternal(root, reply, routeName, sourceUrls, emotion, searchOk,
+            includeEmptySources = meta?.has("source_urls") == true)
     }
 
-    /** Compatibility overload retained for existing source-link and route-badge callers. */
     internal fun appendFinalReply(
         root: File,
         reply: String,
         routeName: String,
         sourceUrls: JSONArray = JSONArray(),
         emotion: JSONObject? = null
-    ) {
-        appendFinalReplyInternal(root, reply, routeName, sourceUrls, emotion, null)
-    }
+    ): String = appendFinalReplyInternal(root, reply, routeName, sourceUrls, emotion, null)
 
     private fun appendFinalReplyInternal(
         root: File,
@@ -567,11 +579,11 @@ object ChatEngine {
         emotion: JSONObject?,
         searchOk: Boolean?,
         includeEmptySources: Boolean = false
-    ) {
-        val event = JSONObject().put("type", "message").put("source", "agent").put("who", "ruri").put("text", reply)
-        if (sourceUrls.length() > 0 || includeEmptySources) {
-            event.put("source_urls", JSONArray(sourceUrls.toString()))
-        }
+    ): String {
+        val id = java.util.UUID.randomUUID().toString()
+        val event = JSONObject().put("id", id).put("type", "message")
+            .put("source", "agent").put("who", "ruri").put("text", reply)
+        if (sourceUrls.length() > 0 || includeEmptySources) event.put("source_urls", JSONArray(sourceUrls.toString()))
         if (searchOk != null) event.put("search_ok", searchOk)
         if (emotion != null) {
             event.put("emotion_before", emotion.optJSONObject("before"))
@@ -580,14 +592,27 @@ object ChatEngine {
                 .put("mood_label", emotion.optString("mood"))
         }
         val saved = JSONObject(FileManager.appendEvent(root, event))
-        val badge = JSONObject()
-            .put("ts", saved.optLong("ts"))
-            .put("route", routeName)
-            .put("memory", "полная память")
+        val savedId = saved.optString("id").ifBlank { id }
+        lastFinalMessageId = savedId
+        val lastCmd = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 500)
+            .asReversed().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+            .firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" &&
+                !Tombstone.isDeleted(root, it.optString("id")) }
+        if (lastCmd != null) {
+            val state = readJson(root, "memory/L4_state.json")
+            state.put("last_seen_commander", lastCmd.optLong("ts",
+                lastCmd.optLong("timestamp", System.currentTimeMillis())))
+            FileManager.write(root, "memory/L4_state.json", state.toString(2))
+            Receipts.repliedByRuri(root, lastCmd.optString("id"))
+            Receipts.readByRuri(root, lastCmd.optString("id"))
+        }
+        val badge = JSONObject().put("ts", saved.optLong("ts"))
+            .put("route", routeName).put("memory", "полная память")
         val existing = FileManager.read(root, "memory/route_badges.jsonl")
             .lineSequence().filter { it.isNotBlank() }.toMutableList()
         existing.add(badge.toString())
         FileManager.write(root, "memory/route_badges.jsonl", existing.takeLast(5000).joinToString("\n", postfix = "\n"))
+        return savedId
     }
 
     private fun extractSourceUrls(raw: String): JSONArray {

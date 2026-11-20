@@ -158,8 +158,6 @@ object LifeStateEngine {
         val latest = newEvents.lastOrNull {
             it.optString("type") == "message" && it.optString("who") == "commander"
         } ?: return false
-        val eventTime = latest.optLong("timestamp", latest.optLong("ts", 0L))
-        state.put("last_seen_commander", maxOf(state.optLong("last_seen_commander", 0L), eventTime))
         state.put("last_commander_message_event_id", latest.optString("id"))
         state.put("waiting_for_reply", false)
         state.put("ignored_count", 0)

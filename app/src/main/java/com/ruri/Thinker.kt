@@ -50,6 +50,7 @@ object Thinker {
     private fun runCycle(ctx: Context, originalReason: String) {
         val root = ctx.filesDir
         val state = readStateStrict(root)
+        val inFlight = readJson(root, "memory/L4_state.json").optBoolean("turn_in_flight", false)
         val now = System.currentTimeMillis()
         EmotionEngine.tick(root, now, state.optLong("last_seen_commander", 0L),
             state.optJSONObject("recent_activity")?.optLong("last_event_at", now) ?: now)
@@ -68,7 +69,7 @@ object Thinker {
 
         var reason = originalReason
         var initiative = false
-        if (EmotionEngine.initiativeGate(
+        if (!inFlight && EmotionEngine.initiativeGate(
                 root, lastSeen, now, state.optBoolean("waiting_for_reply", false),
                 state.optLong("last_initiative", 0L)
             )) {
@@ -84,7 +85,7 @@ object Thinker {
         if (!NetState.online) {
             // Local state and memory maintenance already ran in RuriLifeWorker.
             state.put("last_thought", now)
-            FileManager.write(root, "memory/L4_state.json", state.toString(2))
+            persistStatePreservingTurnInFlight(root, state)
             return
         }
 
@@ -95,7 +96,7 @@ object Thinker {
         val models = config.optJSONArray("models") ?: JSONArray()
         if (models.length() == 0) {
             state.put("last_thought", now)
-            FileManager.write(root, "memory/L4_state.json", state.toString(2))
+            persistStatePreservingTurnInFlight(root, state)
             return
         }
 
@@ -109,7 +110,7 @@ object Thinker {
         )
         if (order.isEmpty()) {
             state.put("last_thought", now)
-            FileManager.write(root, "memory/L4_state.json", state.toString(2))
+            persistStatePreservingTurnInFlight(root, state)
             return
         }
         var reply: String? = null
@@ -126,7 +127,7 @@ object Thinker {
                     if (initiative) "Напиши сообщение Командиру обычной прозой." else "Напиши внутреннюю мысль для дневника обычной прозой."))
             val initial = requestModel(model, messages)
             reply = if (initial.isNullOrBlank()) null else ToolLoop.unwrapDiaryReply(root, initial, messages) { next ->
-                requestModel(model, next)
+                ChatEngine.requestToolFollowup(model, next)
             }
             if (!reply.isNullOrBlank() && initiative &&
                 RouteCapabilityProbe.looksLikeRefusalOrDisclaimer(reply)) {
@@ -149,7 +150,7 @@ object Thinker {
 
         if (reply.isNullOrBlank()) {
             state.put("last_thought", now)
-            FileManager.write(root, "memory/L4_state.json", state.toString(2))
+            persistStatePreservingTurnInFlight(root, state)
             return
         }
         if (successfulIndex >= 0 && successfulIndex != current) {
@@ -161,16 +162,25 @@ object Thinker {
         val safeReply = SecretRedactor.redactText(cleanedReply.trim())
         if (safeReply.isBlank() || ToolLoop.isActionJson(safeReply)) {
             state.put("last_thought", now)
-            FileManager.write(root, "memory/L4_state.json", state.toString(2))
+            persistStatePreservingTurnInFlight(root, state)
             return
         }
 
         val diary = readJson(root, "memory/L2_diary.json")
         val entries = diary.optJSONArray("entries") ?: JSONArray()
+        if (!initiative && !shouldAppendDiaryEntry(entries, safeReply)) {
+            state.put("last_thought", now)
+            state.put("mood", EmotionEngine.moodLabel(EmotionEngine.readValues(root)))
+            state.put("energy", energyFor())
+            persistStatePreservingTurnInFlight(root, state)
+            return
+        }
+        val diaryEntryId = java.util.UUID.randomUUID().toString()
         // Use a monotonic sequence independent of the rolling 500-entry window.
         val totalEntries = maxOf(diary.optLong("total_entries", entries.length().toLong()), entries.length().toLong()) + 1L
         entries.put(
             JSONObject()
+                .put("id", diaryEntryId)
                 .put("sequence", totalEntries)
                 .put("ts", now)
                 .put("text", safeReply)
@@ -186,8 +196,10 @@ object Thinker {
         diary.put("total_entries", totalEntries)
         diary.put("updated_at", now)
         FileManager.write(root, "memory/L2_diary.json", diary.toString(2))
-        if (initiative) {
+        val notificationMessageId = if (initiative) {
             appendChatMessage(root, "ruri", safeReply, now, ChatEngine.sourceUrlsSnapshot())
+        } else diaryEntryId
+        if (initiative) {
             state.put("waiting_for_reply", true)
             state.put("initiative_sent_at", now)
             state.put("last_initiative", now)
@@ -195,8 +207,9 @@ object Thinker {
         state.put("last_thought", now)
         state.put("mood", EmotionEngine.moodLabel(EmotionEngine.readValues(root)))
         state.put("energy", energyFor())
-        FileManager.write(root, "memory/L4_state.json", state.toString(2))
-        Notifier.thought(ctx, safeReply)
+        persistStatePreservingTurnInFlight(root, state)
+        val stillInFlight = readJson(root, "memory/L4_state.json").optBoolean("turn_in_flight", false)
+        if (!inFlight && !stillInFlight) Notifier.thought(ctx, safeReply, notificationMessageId)
     }
 
     private fun buildPrompt(ctx: Context, root: File, state: JSONObject, reason: String, initiative: Boolean): String {
@@ -343,6 +356,26 @@ object Thinker {
         }
     }
 
+    internal fun shouldAppendDiaryEntry(entries: JSONArray, text: String): Boolean {
+        val normalized = text.lowercase(java.util.Locale.ROOT).replace(Regex("\\s+"), " ").trim()
+        if (normalized.isBlank()) return false
+        val start = (entries.length() - 20).coerceAtLeast(0)
+        for (i in start until entries.length()) {
+            val entry = entries.optJSONObject(i) ?: continue
+            if (entry.optString("kind", "thought") != "thought") continue
+            val old = entry.optString("text").lowercase(java.util.Locale.ROOT)
+                .replace(Regex("\\s+"), " ").trim()
+            if (old == normalized) return false
+        }
+        return true
+    }
+
+    private fun persistStatePreservingTurnInFlight(root: File, state: JSONObject) {
+        state.put("turn_in_flight", readJson(root, "memory/L4_state.json")
+            .optBoolean("turn_in_flight", false))
+        FileManager.write(root, "memory/L4_state.json", state.toString(2))
+    }
+
     private fun readJson(root: File, path: String): JSONObject =
         try { JSONObject(FileManager.read(root, path)) } catch (_: Exception) { JSONObject() }
 
@@ -357,15 +390,13 @@ object Thinker {
         )
     }
 
-    private fun appendChatMessage(root: File, who: String, text: String, ts: Long, sourceUrls: JSONArray = JSONArray()) {
-        val event = JSONObject()
-            .put("ts", ts)
-            .put("type", "message")
+    private fun appendChatMessage(root: File, who: String, text: String, ts: Long, sourceUrls: JSONArray = JSONArray()): String {
+        val id = java.util.UUID.randomUUID().toString()
+        val event = JSONObject().put("id", id).put("ts", ts).put("type", "message")
             .put("source", if (who == "ruri") "agent" else "commander")
-            .put("who", who)
-            .put("text", text)
+            .put("who", who).put("text", text)
         if (sourceUrls.length() > 0) event.put("source_urls", sourceUrls)
-        FileManager.appendEvent(root, event)
+        return JSONObject(FileManager.appendEvent(root, event)).optString("id").ifBlank { id }
     }
 
     private fun hoursSince(ts: Long, now: Long): Double = if (ts <= 0L) -1.0 else (now - ts) / 3600000.0
