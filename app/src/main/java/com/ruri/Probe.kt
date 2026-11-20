@@ -6,11 +6,10 @@ import java.io.File
 import java.net.URL
 import javax.net.ssl.HttpsURLConnection
 
-/** Cheap reachability heartbeats; full capability probes retain their own daily quota guard. */
+/** Cheap reachability heartbeats and explicit route-availability checks. */
 object Probe {
     const val REACH_TTL_MS = 10L * 60L * 1000L
     const val HEARTBEAT_MS = 20L * 60L * 1000L
-    const val FULL_PROBE_MS = 24L * 60L * 60L * 1000L
     const val FORCE_REFRESH_THROTTLE_MS = 60_000L
     const val STARTUP_REFRESH_THROTTLE_MS = 300_000L
     private const val CONNECT_TIMEOUT_MS = 4_000
@@ -78,8 +77,4 @@ object Probe {
         refreshReachability(root, models, topOnly = true)
     }
 
-    fun fullProbeIfDue(root: File, config: JSONObject) {
-        if (!NetState.online) return
-        RouteCapabilityProbe.refreshIfDue(root, config)
-    }
 }
