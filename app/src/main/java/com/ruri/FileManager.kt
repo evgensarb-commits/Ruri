@@ -199,6 +199,7 @@ object FileManager {
         // never discards credentials from the encrypted SecretStore.
         SecretStore.migrateLegacyApiKeys(root)
         migrateModelConfig(root)
+        RouteMeta.migrateLegacyNsfwFlags(root)
         migrateGoalSchema(root)
         ensureRemoteModelContextPolicy(root)
 
