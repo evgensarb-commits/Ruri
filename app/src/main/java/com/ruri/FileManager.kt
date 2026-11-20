@@ -745,9 +745,6 @@ object FileManager {
 
             val routewayIndex = ensureProvider("routeway", JSONObject()
                 .put("id", "routeway")
-                .put("nsfw_capable", false)
-                .put("nsfw_tested_at", 0L)
-                .put("nsfw_probe_status", "untested")
                 .put("name", "Routeway · Gemma MeroMero Free")
                 .put("base_url", "https://api.routeway.ai/v1")
                 .put("api_key", "")
@@ -758,9 +755,6 @@ object FileManager {
 
             ensureProvider("requesty", JSONObject()
                 .put("id", "requesty")
-                .put("nsfw_capable", false)
-                .put("nsfw_tested_at", 0L)
-                .put("nsfw_probe_status", "untested")
                 .put("name", "Requesty · Google Gemma 4 Free")
                 .put("base_url", "https://router.requesty.ai/v1")
                 .put("api_key", "")
@@ -786,7 +780,6 @@ object FileManager {
                     val legacyFields = mapOf(
                         "needs_vpn" to true,
                         "ru_reachable" to false,
-                        "nsfw_capable" to false,
                         "role" to "neutral_fallback",
                         "free_tier" to false,
                         "enabled" to false
