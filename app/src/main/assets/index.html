@@ -77,13 +77,13 @@ button.action.secondary{background:transparent;color:var(--gold)}
 <section class="pane overlay-pane" id="pane-brain"><div class="scroll"><div class="overlay-head"><h2 class="section">МОЗГ <span>и личность</span></h2><button id="closeSettings">✕</button></div>
 <div class="card"><b>БЕСПЛАТНЫЕ МАРШРУТЫ — БЕЗ ПЛАТНЫХ ЗАПРОСОВ</b><p>Основной: Routeway · Gemma 4 MeroMero Free. Резерв: Requesty · Google Gemma 4 Free. Вызываются только явно бесплатные маршруты; free-tier guard не отключается. Gemini и Groq — legacy neutral_fallback: выключены, требуют VPN, ru_reachable=false, nsfw_capable=false. Для любого маршрута NSFW-возможность считается false до успешного live-зонда.</p><p>Добавь ключи Routeway и Requesty ниже. Ключи хранятся в Android Keystore.</p><p><a href="#" onclick="Ruri.openUrl('https://routeway.ai/');return false">Routeway — получить ключ</a> · <a href="#" onclick="Ruri.openUrl('https://www.requesty.ai/model/google/gemma-4-31b-it');return false">Requesty — получить ключ</a></p></div>
 <div class="card"><b>МАРШРУТЫ</b><p>Авто использует текущую сортировку. При включении «только этот маршрут» Рури не переключится на резерв, если выбранный провайдер упадёт.</p><div id="routeList" class="small">Загружаю маршруты…</div><label style="display:flex;align-items:center;gap:8px;margin-top:10px"><input id="exclusiveRoute" type="checkbox" style="width:auto"> Только этот маршрут</label><div id="routeMode" class="small">Режим: авто</div></div>
-<div class="card" style="margin:12px 0"><b>ПОИСК · ЦЕПОЧКА ПРОВАЙДЕРОВ</b>
-<p style="margin:6px 0 10px;color:#9cafcb;font-size:13px">Порядок: Brave → Yandex XML → Wikipedia → публичный Google scrape. Укажи ключи тех провайдеров, к которым у тебя есть бесплатный доступ. CSE deprecated: Custom Search JSON API больше не подключается новыми клиентами; старые значения сохраняются в core/search.json, но не участвуют в цепочке. Не включай Billing и платные fallback.</p>
-<div class="field"><label>BRAVE SEARCH API KEY</label><input id="braveKey" type="password" autocomplete="off" placeholder="Brave Search token"></div>
-<div class="field"><label>YANDEX XML USER</label><input id="yandexUser" type="text" autocomplete="off" placeholder="Yandex XML user"></div>
-<div class="field"><label>YANDEX XML KEY</label><input id="yandexKey" type="password" autocomplete="off" placeholder="Yandex XML key"></div>
+<div class="card" style="margin:12px 0"><b>ПОИСК: SERPER → НОУТ</b>
+<p style="margin:6px 0 10px;color:#9cafcb;font-size:13px">Сначала Serper (Google-результаты, ключ Serper). Если не ответил — твой SearXNG на ноуте. Оба молчат → честная ошибка. Для HTTP используй частный/LAN или Tailscale IP; публичный адрес — только через HTTPS.</p>
+<div class="field"><label>SERPER API KEY</label><input id="serperKey" type="password" autocomplete="off" placeholder="ключ с serper.dev"></div>
+<div class="field"><label>SEARXNG URL (ноут)</label><input id="searxngUrl" type="text" placeholder="http://100.x.y.z:8080"></div>
 <button class="action secondary" id="saveSearch">СОХРАНИТЬ ПОИСК</button>
-<div class="small" id="searchStatus">Brave/Yandex/Wikipedia/scrape по цепочке</div><div class="small" id="visionStatus">Vision: проверяю…</div></div>
+<div class="small" id="searchStatus">Проверяю…</div>
+<div class="small" id="visionStatus">Vision: проверяю…</div></div>
 <div class="actions"><button class="action secondary" id="showDiagnostics">ОТКРЫТЬ ДИАГНОСТИКУ</button></div><div class="card" style="margin-bottom:14px"><b>ДИАГНОСТИКА СОЕДИНЕНИЯ</b><p style="margin:6px 0 10px;color:#9cafcb;font-size:13px">Локальная проверка DNS, TLS-соединения, времени ожидания и HTTP-ответа. Ключи и переписка в журнал не записываются.</p><button class="action secondary" id="refreshNetworkDiagnostics">ПОСЛЕДНЯЯ ПОПЫТКА</button><pre id="networkDiagnostics" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere;margin-top:10px">Попыток соединения пока нет.</pre></div><div class="card" style="margin:12px 0"><b>АВТОМАТИЧЕСКИЕ КОПИИ НА ТЕЛЕФОНЕ</b><p style="margin:6px 0 10px;color:#9cafcb;font-size:13px">Рури хранит до 14 последних ежедневных снимков памяти. Архивы проверяются по SHA-256; API-ключи и Android Keystore в них не входят.</p><div id="backupStatus" class="small">Проверяю локальные копии…</div><div id="backupVisibility" class="small" style="margin-top:8px">Журнал и снимки…</div><div class="actions"><button class="action secondary" id="refreshBackups">ОБНОВИТЬ</button><button class="action secondary" id="createBackup">СОЗДАТЬ КОПИЮ СЕЙЧАС</button></div><div class="field"><label>КОПИЯ ДЛЯ ПРОВЕРКИ ИЛИ ВОССТАНОВЛЕНИЯ</label><select id="backupSelect"></select></div><div class="actions"><button class="action secondary" id="verifyBackup">ПРОВЕРИТЬ</button><button class="action secondary" id="restoreBackup">ВОССТАНОВИТЬ</button></div></div><div class="field"><label>ПРОВАЙДЕР ДЛЯ СОХРАНЕНИЯ КЛЮЧА</label><select id="model"><option value="routeway">Routeway · основной</option><option value="requesty">Requesty · третий резерв</option></select></div>
 <div class="field"><label>API KEY</label><input id="key" type="password" autocomplete="off" placeholder="Вставь ключ модели"></div>
 <button class="action" id="saveKey">СОХРАНИТЬ КЛЮЧ</button>
@@ -287,8 +287,22 @@ function refreshOnboarding(){try{var s=JSON.parse(read('memory/L4_state.json')||
 function startOnboarding(){refreshOnboarding();}
 window.startOnboarding=startOnboarding;window.refreshOnboarding=refreshOnboarding;window.refreshRouteCards=refreshRouteCards;
 $('#onboardingLater').addEventListener('click',function(){$('#onboardingCard').style.display='none';});
-function loadSearch(){try{var s=JSON.parse(read('core/search.json')||'{}');$('#braveKey').value=s.brave_key||'';$('#yandexUser').value=s.yandex_user||'';$('#yandexKey').value=s.yandex_key||'';$('#searchStatus').textContent='Brave/Yandex/Wikipedia/scrape по цепочке';try{$('#visionStatus').textContent='Vision: '+(Ruri.visionStatus()||'none');}catch(_){$('#visionStatus').textContent='Vision: none';}}catch(e){$('#searchStatus').textContent='Ошибка чтения search.json';}}
-$('#saveSearch').addEventListener('click',function(){try{var s=JSON.parse(read('core/search.json')||'{}');s.brave_key=$('#braveKey').value.trim();s.yandex_user=$('#yandexUser').value.trim();s.yandex_key=$('#yandexKey').value.trim();write('core/search.json',JSON.stringify(s,null,2));loadSearch();alert('Настройки поиска сохранены.');}catch(e){alert(e.message);}});
+function loadSearch(){try{
+var s=JSON.parse(read('core/search.json')||'{}');
+$('#serperKey').value=s.serper_key||'';
+$('#searxngUrl').value=s.searxng_url||'';
+$('#searchStatus').textContent=(s.serper_key?'Serper: ключ есть. ':'Serper: ключа нет. ')+(s.searxng_url?'Ноут: '+s.searxng_url:'Ноут: не задан.');
+try{$('#visionStatus').textContent='Vision: '+(Ruri.visionStatus()||'none');}catch(_){$('#visionStatus').textContent='Vision: none';}
+}catch(e){$('#searchStatus').textContent='Ошибка чтения search.json';}}
+$('#saveSearch').addEventListener('click',function(){try{
+var s=JSON.parse(read('core/search.json')||'{}');
+s.serper_key=$('#serperKey').value.trim();
+s.searxng_url=$('#searxngUrl').value.trim();
+['brave_key','yandex_user','yandex_key','cse_key','cse_cx'].forEach(function(k){delete s[k];});
+write('core/search.json',JSON.stringify(s,null,2));
+loadSearch();
+alert('Настройки поиска сохранены.');
+}catch(e){alert(e.message);}});
 function loadCharacter(){try{var c=JSON.parse(read('core/character.json')||'{}');$('#charName').value=c.name||'';$('#charStyle').value=c.speech_style||'';}catch(_){}refreshUsageAccess();loadNetworkDiagnostics();loadAutomaticBackups();loadRoutes();loadSearch();loadBackupVisibility();}
 $('#saveCharacter').addEventListener('click',function(){try{var c=JSON.parse(read('core/character.json')||'{}');c.name=$('#charName').value.trim()||'Рури';c.speech_style=$('#charStyle').value.trim();write('core/character.json',JSON.stringify(c,null,2));alert('Характер сохранён.');}catch(e){alert(e.message);}});
 $('#notificationAccess').addEventListener('click',function(){var r=Ruri.openNotificationAccessSettings();if(String(r).indexOf('ERROR:')===0)alert(r);});

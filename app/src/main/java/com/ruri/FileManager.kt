@@ -127,7 +127,7 @@ object FileManager {
             }
         """.trimIndent())
 
-        put(root, "core/search.json", """{ "cse_key": "", "cse_cx": "" }""")
+        put(root, "core/search.json", """{ "serper_key": "", "searxng_url": "" }""")
 
         put(root, "core/character.json", """
             {

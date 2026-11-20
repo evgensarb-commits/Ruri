@@ -10,30 +10,66 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SearchRouterChainTest {
-    @Test fun triesProvidersInOrderAndSkipsErrorsAndEmptyResults() {
+    @Test fun triesSerperThenSearxngOnlyAndSkipsErrors() {
         val calls = mutableListOf<String>()
-        val expected = JSONObject().put("query", "q").put("provider", "wikipedia")
-            .put("results", JSONArray().put(JSONObject().put("title", "Wiki").put("url", "https://ru.wikipedia.org")))
-            .toString()
+        val expected = JSONObject().put("query", "q").put("provider", "searxng")
+            .put("results", JSONArray().put(JSONObject().put("title", "Laptop result")
+                .put("url", "https://example.org").put("snippet", "snippet"))).toString()
         val actual = SearchRouter.firstSuccessful(listOf(
-            { calls += "brave"; null },
-            { calls += "yandex"; """{"error":"unavailable"}""" },
-            { calls += "wikipedia"; """{"query":"q","results":[]}""" },
-            { calls += "google"; expected }
+            { calls += "serper"; """{"error":"unavailable"}""" },
+            { calls += "searxng"; expected }
         ))
         assertEquals(expected, actual)
-        assertEquals(listOf("brave", "yandex", "wikipedia", "google"), calls)
+        assertEquals(listOf("serper", "searxng"), calls)
     }
 
-    @Test fun providerExceptionsDoNotStopFallback() {
+    @Test fun bothProvidersFailAndNoThirdProviderIsCalled() {
+        val calls = mutableListOf<String>()
+        val actual = SearchRouter.firstSuccessful(listOf(
+            { calls += "serper"; null },
+            { calls += "searxng"; """{"query":"q","results":[]}""" }
+        ))
+        assertNull(actual)
+        assertEquals(listOf("serper", "searxng"), calls)
+    }
+
+    @Test fun providerExceptionsDoNotStopTheSingleFallback() {
         val actual = SearchRouter.firstSuccessful(listOf(
             { throw IllegalStateException("offline") },
             { """{"query":"q","results":[{"title":"ok","url":"https://example.org"}]}""" }
         ))
         assertTrue(JSONObject(actual!!).getJSONArray("results").length() == 1)
     }
-}
 
+    @Test fun deniesBlockedQueriesAndAllowsOrdinarySearches() {
+        assertTrue(SearchRouter.isDeniedQuery("lolicon"))
+        assertTrue(SearchRouter.isDeniedQuery("shotacon"))
+        assertTrue(SearchRouter.isDeniedQuery("child porn"))
+        assertFalse(SearchRouter.isDeniedQuery("safe article"))
+    }
+
+    @Test fun httpSearxngIsLimitedToPrivateAndTailscaleHosts() {
+        assertEquals("http://100.64.12.34:8080",
+            SearchRouter.normalizeSearxngBase("http://100.64.12.34:8080/"))
+        assertEquals("http://192.168.1.20:8080",
+            SearchRouter.normalizeSearxngBase("http://192.168.1.20:8080"))
+        assertNull(SearchRouter.normalizeSearxngBase("http://example.org:8080"))
+        assertEquals("https://search.example.org",
+            SearchRouter.normalizeSearxngBase("https://search.example.org/"))
+    }
+
+    @Test fun searchWithoutConfiguredProvidersReturnsHonestError() {
+        val root = Files.createTempDirectory("ruri-search-no-provider").toFile()
+        try {
+            FileManager.init(root)
+            val parsed = JSONObject(SearchRouter.search(root, "ordinary query"))
+            assertTrue(parsed.has("error"))
+            assertEquals("Поиск недоступен: ни Serper, ни ноутбук не ответили", parsed.optString("error"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+}
 class UrlReaderExtractTest {
     @Test fun stripsScriptsStylesAndNavigationAndDecodesCommonEntities() {
         val html = "<html><head><style>bad css</style><script>secret()</script></head>" +
