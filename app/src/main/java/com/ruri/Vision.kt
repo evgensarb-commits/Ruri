@@ -17,11 +17,33 @@ object Vision {
         if (!NetState.online) return null
         val config = runCatching { JSONObject(SecretStore.readRuntimeConfig(root)) }.getOrElse { JSONObject() }
         val models = config.optJSONArray("models") ?: JSONArray()
-        val order = RouteSelector.orderedIndices(
+        return findVisionRoute(
             root = root,
             models = models,
             current = config.optInt("current", 0),
-            task = Task.VISION
+            online = NetState.online,
+            vpn = NetState.vpn,
+            probeRoute = ::probe
+        )
+    }
+
+    /** Injectable selection seam for unit tests; production always supplies the real network probe. */
+    internal fun findVisionRoute(
+        root: File,
+        models: JSONArray,
+        current: Int,
+        online: Boolean,
+        vpn: Boolean,
+        probeRoute: (JSONObject) -> Boolean,
+        now: Long = System.currentTimeMillis()
+    ): JSONObject? {
+        val order = RouteSelector.orderedIndices(
+            root = root,
+            models = models,
+            current = current,
+            task = Task.VISION,
+            online = online,
+            vpn = vpn
         )
         if (order.isEmpty()) return null
 
@@ -34,7 +56,6 @@ object Vision {
             if (caps.optBoolean("vision", false)) return JSONObject(model.toString())
         }
 
-        val now = System.currentTimeMillis()
         for (model in candidates) {
             val id = routeId(model)
             val meta = RouteMeta.route(root, id)
@@ -44,7 +65,7 @@ object Vision {
 
             // A capability probe is a real provider request and consumes the route's free quota.
             RouteMeta.recordAttempt(root, id)
-            val capable = probe(model)
+            val capable = runCatching { probeRoute(JSONObject(model.toString())) }.getOrDefault(false)
             RouteMeta.update(root, id) {
                 val updatedCaps = it.optJSONObject("caps") ?: JSONObject()
                 updatedCaps.put("vision", capable)
@@ -62,7 +83,7 @@ object Vision {
     internal fun isEligibleVisionModel(model: JSONObject): Boolean =
         model.optBoolean("free_tier", false) &&
             model.optBoolean("enabled", true) &&
-            model.optString("id").isNotBlank() &&
+            routeId(model).isNotBlank() &&
             model.optString("api_key").isNotBlank() &&
             model.optString("base_url").startsWith("https://", ignoreCase = true)
 
