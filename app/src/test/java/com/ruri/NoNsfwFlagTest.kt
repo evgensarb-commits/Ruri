@@ -74,7 +74,7 @@ class NoNsfwFlagTest {
     }
 
     @Test
-    fun runtimeConfigMigrationRemovesAllLegacyNsfwModelFields() {
+    fun legacyPlainConfigMigrationRemovesAllNsfwModelFields() {
         val root = Files.createTempDirectory("ruri-nsfw-config-migration").toFile()
         try {
             FileManager.init(root)
@@ -83,11 +83,11 @@ class NoNsfwFlagTest {
                     .put("nsfw_capable", false).put("nsfw_tested_at", 123L)
                     .put("nsfw_probe_status", "refused_or_disclaimer")
             ))
-            SecretStore.saveRuntimeConfig(root, config.toString())
+            FileManager.write(root, "core/config.json", config.toString())
 
             RouteMeta.migrateLegacyNsfwFlags(root)
 
-            val model = JSONObject(SecretStore.readRuntimeConfig(root))
+            val model = JSONObject(FileManager.read(root, "core/config.json"))
                 .getJSONArray("models").getJSONObject(0)
             assertFalse(model.has("nsfw_capable"))
             assertFalse(model.has("nsfw_tested_at"))
