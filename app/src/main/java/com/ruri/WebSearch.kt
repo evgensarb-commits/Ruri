@@ -12,12 +12,7 @@ import java.net.URLEncoder
 object WebSearch {
     fun search(query: String): String = search(File("."), query)
 
-    fun search(root: File, query: String): String {
-        val q = SecretRedactor.redactText(query.trim())
-        if (q.length < 2) return error("Введите поисковый запрос")
-        if (q.length > 300) return error("Запрос слишком длинный")
-        return SearchRouter.search(root, q)
-    }
+    fun search(root: File, query: String): String = SearchRouter.search(root, query)
 
     internal fun parseCseResponse(raw: String, query: String): String {
         val source = JSONObject(raw)
@@ -40,7 +35,7 @@ object WebSearch {
             return error("Поиск недоступен")
         }
         val results = JSONArray()
-        val anchors = Regex("(?is)<a[^>]+href=[\\\"']([^\\\"']+)[\\\"'][^>]*>(.*?)</a>").findAll(html)
+        val anchors = Regex("(?is)<a[^>]+href=[\\\\\\\"']([^\\\\\\\"']+)[\\\\\\\"'][^>]*>(.*?)</a>").findAll(html)
         for (anchor in anchors) {
             if (results.length() >= 7) break
             val href = decode(anchor.groupValues[1])
@@ -97,6 +92,6 @@ object WebSearch {
     private fun enc(value: String) = URLEncoder.encode(value, "UTF-8")
     private fun decode(value: String) = runCatching { java.net.URLDecoder.decode(value, "UTF-8") }.getOrDefault(value)
     private fun clean(value: String): String = decode(value).replace(Regex("<[^>]+>"), " ")
-        .replace("&amp;", "&").replace("&quot;", "\"").replace("&#39;", "'")
+        .replace("&amp;", "&").replace("&quot;", "\\").replace("&#39;", "'")
         .replace("&lt;", "<").replace("&gt;", ">").replace(Regex("\\s+"), " ").trim()
 }
