@@ -76,8 +76,8 @@ object Capabilities {
             append("• ").append(toolDescription).append("\n")
             append("""{"action":"search","query":"..."}; {"action":"list_shelf"}; {"action":"read_shelf","name":"..."}; {"action":"recall","query":"..."}; {"action":"remember_fact","text":"..."}; {"action":"read_url","url":"https://example.org"}.
 """)
-            append("read_url: открыть и прочитать страницу (или получить vision-описание картинки по URL).\n")
-            append("Изображения на полке и по URL ты видишь через vision-описание; если vision-маршрут недоступен — честно скажи, что видишь файл, но не разбираешь изображение.\n")
+            append("read_url: открыть и прочитать страницу; если URL — картинка, опишешь её через vision.\n")
+            append("Изображения на полке и прикреплённые в чате ты видишь через vision-описание (shelf/.desc). Если vision-маршрут недоступен — честно скажи, что видишь файл, но не разбираешь изображение; НЕ выдумывай содержимое.\n")
             append("Когда нужен инструмент, ответь одним JSON-объектом (один JSON-объект) только с этими шестью action. Дождись tool_result; если ok=false или результат пуст, честно сообщи о неудаче и не заявляй, что действие выполнено.\n")
             append("=== РУКИ 2: ЛОКАЛЬНАЯ АВТОНОМИЯ ===\n")
             append("• ").append(localDescription).append("\n")
