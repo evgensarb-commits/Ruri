@@ -27,20 +27,41 @@ object UrlReader {
             val mime = c.contentType?.substringBefore(';')?.trim().orEmpty()
             if (c.contentLengthLong > MAX_BYTES) return false to "Страница слишком большая"
             val bytes = readBounded(c, MAX_BYTES) ?: return false to "Страница слишком большая"
-            if (mime.startsWith("image/")) {
-                val desc = Vision.describe(root, bytes, mime, "Опиши изображение подробно: объекты, люди, текст, стиль.")
-                return if (desc != null) true to desc else false to "Изображение получено, но vision-маршрут недоступен"
-            }
-            val raw = bytes.toString(Charsets.UTF_8)
-            val text = if (mime.contains("html")) extractHtml(raw) else raw
-            val bounded = text.take(12000)
-            if (bounded.isBlank()) false to "Пустая страница (JS-оболочка или bot-блок)"
-            else true to SecretRedactor.redactText(bounded)
+            return contentResult(root, mime, bytes)
         } catch (e: Exception) {
             false to (e.message ?: "Ошибка чтения")
         } finally {
             c?.disconnect()
         }
+    }
+
+    /** Shared response handling; injectable Vision callback keeps image routing testable without network calls. */
+    internal fun contentResult(
+        root: File,
+        mime: String,
+        bytes: ByteArray,
+        describeImage: (File, ByteArray, String, String) -> String? =
+            { dir, data, type, prompt -> Vision.describe(dir, data, type, prompt) }
+    ): Pair<Boolean, String> {
+        val detectedMime = mime.takeIf { it.startsWith("image/", ignoreCase = true) }
+            ?: Vision.mimeOf(bytes)
+        if (detectedMime != null) {
+            val description = describeImage(
+                root, bytes, detectedMime,
+                "Опиши изображение подробно: объекты, люди, текст, стиль, настроение. Не выдумывай детали."
+            )
+            return if (!description.isNullOrBlank()) {
+                true to SecretRedactor.redactText(description).take(4000)
+            } else {
+                false to "Изображение получено, но vision-маршрут недоступен"
+            }
+        }
+
+        val raw = bytes.toString(Charsets.UTF_8)
+        val text = if (mime.contains("html", ignoreCase = true)) extractHtml(raw) else raw
+        val bounded = text.take(12000)
+        return if (bounded.isBlank()) false to "Пустая страница (JS-оболочка или bot-блок)"
+        else true to SecretRedactor.redactText(bounded)
     }
 
     private fun readBounded(connection: HttpURLConnection, maxBytes: Int): ByteArray? {
