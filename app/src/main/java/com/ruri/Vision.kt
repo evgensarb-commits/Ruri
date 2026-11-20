@@ -12,33 +12,62 @@ object Vision {
     private const val MAX_IMAGE_BYTES = 8 * 1024 * 1024
     private const val PROBE_TTL_MS = 24L * 60L * 60L * 1000L
 
+    /** Select only routes accepted by the shared free-route policy; no paid or disabled fallback. */
     fun visionRoute(root: File): JSONObject? {
+        if (!NetState.online) return null
         val config = runCatching { JSONObject(SecretStore.readRuntimeConfig(root)) }.getOrElse { JSONObject() }
         val models = config.optJSONArray("models") ?: JSONArray()
-        for (i in 0 until models.length()) {
-            val model = models.optJSONObject(i) ?: continue
-            if (!model.optBoolean("free_tier", true)) continue
-            val meta = RouteMeta.route(root, model.optString("id"))
-            if (meta.optJSONObject("caps")?.optBoolean("vision", false) == true) return JSONObject(model.toString())
+        val order = RouteSelector.orderedIndices(
+            root = root,
+            models = models,
+            current = config.optInt("current", 0),
+            task = Task.VISION
+        )
+        if (order.isEmpty()) return null
+
+        val candidates = order.mapNotNull { index ->
+            models.optJSONObject(index)?.takeIf(::isEligibleVisionModel)
         }
+        for (model in candidates) {
+            val id = routeId(model)
+            val caps = RouteMeta.route(root, id).optJSONObject("caps") ?: JSONObject()
+            if (caps.optBoolean("vision", false)) return JSONObject(model.toString())
+        }
+
         val now = System.currentTimeMillis()
-        for (i in 0 until models.length()) {
-            val model = models.optJSONObject(i) ?: continue
-            if (!model.optBoolean("free_tier", true)) continue
-            val id = model.optString("id")
+        for (model in candidates) {
+            val id = routeId(model)
             val meta = RouteMeta.route(root, id)
             val caps = meta.optJSONObject("caps") ?: JSONObject()
             if (caps.has("vision") && !caps.optBoolean("vision") &&
                 now - meta.optLong("vision_probe_at", 0L) < PROBE_TTL_MS) continue
+
+            // A capability probe is a real provider request and consumes the route's free quota.
+            RouteMeta.recordAttempt(root, id)
             val capable = probe(model)
             RouteMeta.update(root, id) {
                 val updatedCaps = it.optJSONObject("caps") ?: JSONObject()
                 updatedCaps.put("vision", capable)
                 it.put("caps", updatedCaps).put("vision_probe_at", now)
             }
-            if (capable) return JSONObject(model.toString())
+            if (capable) {
+                runCatching { RouteMeta.recordSuccess(root, id, Task.VISION) }
+                return JSONObject(model.toString())
+            }
+            runCatching { RouteMeta.recordFailure(root, id, "other", Task.VISION) }
         }
         return null
+    }
+
+    internal fun isEligibleVisionModel(model: JSONObject): Boolean =
+        model.optBoolean("free_tier", false) &&
+            model.optBoolean("enabled", true) &&
+            model.optString("id").isNotBlank() &&
+            model.optString("api_key").isNotBlank() &&
+            model.optString("base_url").startsWith("https://", ignoreCase = true)
+
+    private fun routeId(model: JSONObject): String = model.optString("id").ifBlank {
+        model.optString("name")
     }
 
     internal fun isUsableProbeResponse(response: String?): Boolean {
