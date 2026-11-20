@@ -152,7 +152,7 @@ object Vision {
         val bytes = runCatching { file.readBytes() }.getOrNull() ?: return null
         val mime = mimeOf(bytes) ?: return null
         return describe(root, bytes, mime,
-            "Опиши изображение с полки подробно: объекты, люди, текст, стиль, настроение.")
+            "Опиши изображение с полки подробно: объекты, люди и их позы, текст на картинке, стиль и настроение. Не выдумывай детали.")
     }
 
     fun mimeOf(bytes: ByteArray): String? = when {
