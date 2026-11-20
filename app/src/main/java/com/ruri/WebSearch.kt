@@ -92,6 +92,6 @@ object WebSearch {
     private fun enc(value: String) = URLEncoder.encode(value, "UTF-8")
     private fun decode(value: String) = runCatching { java.net.URLDecoder.decode(value, "UTF-8") }.getOrDefault(value)
     private fun clean(value: String): String = decode(value).replace(Regex("<[^>]+>"), " ")
-        .replace("&amp;", "&").replace("&quot;", "\\").replace("&#39;", "'")
+        .replace("&amp;", "&").replace("&quot;", "\"").replace("&#39;", "'")
         .replace("&lt;", "<").replace("&gt;", ">").replace(Regex("\\s+"), " ").trim()
 }
