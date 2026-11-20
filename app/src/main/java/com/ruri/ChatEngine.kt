@@ -43,7 +43,7 @@ object ChatEngine {
                 Probe.refreshReachability(root, models, topOnly = false, force = true)
             }
             val reachableOrder = RouteSelector.ordered(
-                root, models, current, Task.CHAT, needNsfw = false, online = true, vpn = NetState.vpn
+                root, models, current, Task.CHAT, online = true, vpn = NetState.vpn
             )
             if (reachableOrder.isNotEmpty()) return respondInternal(root, allowRecovery = false, assumeReachable = true)
             OfflineQueue.markPending(root)
