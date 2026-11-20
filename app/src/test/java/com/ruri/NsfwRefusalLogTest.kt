@@ -36,6 +36,7 @@ class NsfwRefusalLogTest {
             assertTrue(event.optString("snippet").contains("не могу обсуждать"))
             assertTrue(event.optString("snippet").length <= 300)
             assertFalse(RouteMeta.route(root, "routeway").optJSONObject("caps")?.has("nsfw") == true)
+            assertTrue(RouteMeta.available(root, "routeway"))
         } finally {
             root.deleteRecursively()
         }
