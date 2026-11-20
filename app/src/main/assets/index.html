@@ -101,7 +101,7 @@ button.action.secondary{background:transparent;color:var(--gold)}
 <div class="card" id="l0Journal">
 <b>ЖУРНАЛ L0</b>
 <div class="field"><label for="l0Filter">ТИП ЗАПИСИ</label><select id="l0Filter">
-<option value="all">Все</option><option value="message">message</option><option value="tool_call">tool_call</option><option value="tool_result">tool_result</option><option value="wake">wake</option><option value="phone_notification">phone_notification</option><option value="shelf_file_ingested">shelf_file_ingested</option><option value="recall_deep_used">recall_deep_used</option>
+<option value="all">Все</option><option value="message">message</option><option value="tool_call">tool_call</option><option value="tool_result">tool_result</option><option value="wake">wake</option><option value="phone_notification">phone_notification</option><option value="shelf_file_ingested">shelf_file_ingested</option><option value="shelf_image_described">shelf_image_described</option><option value="shelf_image_unreadable">shelf_image_unreadable</option><option value="recall_deep_used">recall_deep_used</option>
 </select></div>
 <button class="action secondary" id="loadL0">ЗАГРУЗИТЬ ПОСЛЕДНИЕ 100</button>
 <div id="l0List" style="margin-top:10px"></div>
@@ -218,7 +218,7 @@ if(b.dataset.pane==='l0')loadL0Pane();
 var l0FilterTypes=[
 {value:'all',label:'все'},{value:'message',label:'message'},{value:'tool_call',label:'tool_call'},
 {value:'tool_result',label:'tool_result'},{value:'wake',label:'wake'},{value:'phone_notification',label:'phone_notification'},
-{value:'shelf_file_ingested',label:'shelf_file_ingested'},{value:'facts_extracted',label:'facts_extracted'},{value:'nsfw_refusal',label:'nsfw_refusal'},{value:'error',label:'error'}
+{value:'shelf_file_ingested',label:'shelf_file_ingested'},{value:'shelf_image_described',label:'shelf_image_described'},{value:'shelf_image_unreadable',label:'shelf_image_unreadable'},{value:'facts_extracted',label:'facts_extracted'},{value:'nsfw_refusal',label:'nsfw_refusal'},{value:'error',label:'error'}
 ];
 var activeL0Filter='all';
 function renderL0Filters(){
