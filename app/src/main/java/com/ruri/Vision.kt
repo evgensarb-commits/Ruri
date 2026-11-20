@@ -128,14 +128,21 @@ object Vision {
     fun describe(root: File, bytes: ByteArray, mime: String, prompt: String): String? {
         if (bytes.isEmpty() || bytes.size > MAX_IMAGE_BYTES || !mime.startsWith("image/")) return null
         val model = visionRoute(root) ?: return null
+        val id = routeId(model)
+        RouteMeta.recordAttempt(root, id)
         val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
         val content = JSONArray()
             .put(JSONObject().put("type", "text").put("text", prompt))
             .put(JSONObject().put("type", "image_url").put("image_url",
                 JSONObject().put("url", "data:" + mime + ";base64," + base64)))
         val response = call(model, JSONArray().put(JSONObject().put("role", "user").put("content", content)))
-            ?: return null
-        return SecretRedactor.redactText(response).take(4000).takeIf { it.isNotBlank() }
+        val description = response?.let { SecretRedactor.redactText(it).take(4000).takeIf(String::isNotBlank) }
+        if (description.isNullOrBlank()) {
+            runCatching { RouteMeta.recordFailure(root, id, "other", Task.VISION) }
+            return null
+        }
+        runCatching { RouteMeta.recordSuccess(root, id, Task.VISION) }
+        return description
     }
 
     fun describeShelfFile(root: File, name: String): String? {
