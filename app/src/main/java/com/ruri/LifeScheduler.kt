@@ -83,7 +83,6 @@ class RuriLifeWorker(
                     )
                 }
                 Probe.heartbeat(root, routeConfig)
-                Probe.fullProbeIfDue(root, routeConfig)
             }
 
             // Do useful local work first; it does not require an API key or network.
