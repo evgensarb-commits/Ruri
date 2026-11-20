@@ -4,40 +4,145 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
+import java.net.URI
 import java.net.URL
 import java.net.URLEncoder
+import java.util.Locale
 
-/** Search through free configured providers, then public fallbacks. */
+/** Exactly two search providers: Serper, then the user's own SearXNG instance. */
 object SearchRouter {
     private const val CFG = "core/search.json"
+    private val deny = Regex("(?i)(lolicon|shotacon|child\\s*porn|underage\\s*sex|minor\\s*nude)")
 
-    private fun cfg(root: File) = runCatching { JSONObject(FileManager.read(root, CFG)) }.getOrElse { JSONObject() }
+    private fun cfg(root: File) =
+        runCatching { JSONObject(FileManager.read(root, CFG)) }.getOrElse { JSONObject() }
+
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
-    private fun get(url: String, headers: Map<String, String> = emptyMap()): String? {
-        var c: HttpURLConnection? = null
+    private fun ok(query: String, provider: String, results: JSONArray) =
+        JSONObject().put("query", query).put("provider", provider).put("results", results).toString()
+
+    private fun err(message: String) = JSONObject().put("error", message).toString()
+
+    private fun http(
+        address: String,
+        method: String,
+        headers: Map<String, String>,
+        body: String? = null
+    ): String? {
+        var connection: HttpURLConnection? = null
         return try {
-            c = URL(url).openConnection() as HttpURLConnection
-            c.requestMethod = "GET"
-            c.connectTimeout = 12000
-            c.readTimeout = 18000
-            c.instanceFollowRedirects = true
-            c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36")
-            c.setRequestProperty("Accept-Language", "ru,en;q=0.8")
-            headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
-            if (c.responseCode !in 200..299) null else c.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            connection = (URL(address).openConnection() as HttpURLConnection).apply {
+                requestMethod = method
+                connectTimeout = 12000
+                readTimeout = 18000
+                setRequestProperty(
+                    "User-Agent",
+                    "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
+                )
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty("Accept-Language", "ru,en;q=0.8")
+                headers.forEach { (name, value) -> setRequestProperty(name, value) }
+                if (body != null) doOutput = true
+            }
+            if (body != null) {
+                connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            }
+            if (connection.responseCode !in 200..299) null
+            else connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
         } catch (_: Exception) {
             null
         } finally {
-            c?.disconnect()
+            connection?.disconnect()
         }
     }
 
-    private fun ok(query: String, provider: String, arr: JSONArray) =
-        JSONObject().put("query", query).put("provider", provider).put("results", arr).toString()
+    private fun serper(root: File, query: String): String? {
+        val key = cfg(root).optString("serper_key").trim()
+        if (key.isBlank()) return null
 
-    private fun empty() = JSONObject().put("error", "Поиск недоступен").toString()
+        val raw = http(
+            "https://google.serper.dev/search",
+            "POST",
+            mapOf("X-API-KEY" to key, "Content-Type" to "application/json"),
+            JSONObject().put("q", query).put("num", 5).put("hl", "ru").toString()
+        ) ?: return null
 
+        val organic = JSONObject(raw).optJSONArray("organic") ?: return null
+        val results = JSONArray()
+        for (index in 0 until minOf(organic.length(), 5)) {
+            val item = organic.optJSONObject(index) ?: continue
+            val url = item.optString("link").trim()
+            if (!url.matches(Regex("(?i)^https?://.+"))) continue
+            results.put(
+                JSONObject()
+                    .put("title", item.optString("title"))
+                    .put("url", url)
+                    .put("snippet", item.optString("snippet"))
+            )
+        }
+        return if (results.length() > 0) ok(query, "serper", results) else null
+    }
+
+    /**
+     * Plain HTTP is intentionally limited to private/LAN/Tailscale addresses.
+     * Public SearXNG hosts must use HTTPS.
+     */
+    internal fun normalizeSearxngBase(raw: String): String? {
+        val value = raw.trim()
+        if (value.isBlank()) return null
+        val uri = runCatching { URI(value) }.getOrNull() ?: return null
+        val scheme = uri.scheme?.lowercase(Locale.ROOT) ?: return null
+        val host = uri.host ?: return null
+        if (host.isBlank() || uri.rawUserInfo != null || uri.rawQuery != null || uri.rawFragment != null) return null
+        if (scheme != "http" && scheme != "https") return null
+        if (scheme == "http" && !isPrivateHttpHost(host)) return null
+        return uri.toString().trimEnd('/').takeIf { it.isNotBlank() }
+    }
+
+    private fun isPrivateHttpHost(rawHost: String): Boolean {
+        val host = rawHost.trim().lowercase(Locale.ROOT)
+        if (host == "localhost" || host.endsWith(".local")) return true
+        val octets = host.split('.')
+        if (octets.size != 4) return false
+        val parts = octets.map { it.toIntOrNull() ?: return false }
+        if (parts.any { it !in 0..255 }) return false
+        val a = parts[0]
+        val b = parts[1]
+        return a == 10 ||
+            (a == 172 && b in 16..31) ||
+            (a == 192 && b == 168) ||
+            a == 127 ||
+            (a == 169 && b == 254) ||
+            (a == 100 && b in 64..127)
+    }
+
+    private fun searxng(root: File, query: String): String? {
+        val base = normalizeSearxngBase(cfg(root).optString("searxng_url")) ?: return null
+        val raw = http(
+            "$base/search?q=${enc(query)}&format=json&categories=general&safesearch=0&language=ru-RU",
+            "GET",
+            emptyMap()
+        ) ?: return null
+
+        val source = JSONObject(raw)
+        val items = source.optJSONArray("results") ?: return null
+        val results = JSONArray()
+        for (index in 0 until minOf(items.length(), 5)) {
+            val item = items.optJSONObject(index) ?: continue
+            val url = item.optString("url").trim()
+            if (!url.matches(Regex("(?i)^https?://.+"))) continue
+            results.put(
+                JSONObject()
+                    .put("title", item.optString("title"))
+                    .put("url", url)
+                    .put("snippet", item.optString("content"))
+            )
+        }
+        return if (results.length() > 0) ok(query, "searxng", results) else null
+    }
+
+    /** Returns the first non-empty, non-error search response. */
     internal fun firstSuccessful(providers: List<() -> String?>): String? {
         for (provider in providers) {
             val raw = runCatching { provider() }.getOrNull() ?: continue
@@ -48,83 +153,20 @@ object SearchRouter {
         return null
     }
 
-    private fun brave(root: File, q: String): String? {
-        val key = cfg(root).optString("brave_key").trim()
-        if (key.isBlank()) return null
-        val raw = get(
-            "https://api.search.brave.com/res/v1/web/search?q=" + enc(q) + "&count=5",
-            mapOf("X-Subscription-Token" to key)
-        ) ?: return null
-        val arr = JSONObject(raw).optJSONObject("web")?.optJSONArray("results") ?: return null
-        val out = JSONArray()
-        for (i in 0 until minOf(arr.length(), 5)) {
-            val o = arr.optJSONObject(i) ?: continue
-            val url = o.optString("url")
-            if (!url.matches(Regex("(?i)^https?://.+"))) continue
-            out.put(JSONObject().put("title", o.optString("title"))
-                .put("url", url).put("snippet", o.optString("description")))
-        }
-        return if (out.length() > 0) ok(q, "brave", out) else null
-    }
-
-    private fun yandex(root: File, q: String): String? {
-        val c = cfg(root)
-        val user = c.optString("yandex_user").trim()
-        val key = c.optString("yandex_key").trim()
-        if (user.isBlank() || key.isBlank()) return null
-        val raw = get(
-            "https://yandex.ru/search/xml?user=" + enc(user) + "&key=" + enc(key) +
-                "&query=" + enc(q) + "&l10n=ru&sortby=rlv&filter=moderate&groupby=attr%3D%22%22.mode%3Dflat.groups-on-page%3D5.docs-in-group%3D1"
-        ) ?: return null
-        val out = JSONArray()
-        for (m in Regex("(?is)<doc>(.*?)</doc>").findAll(raw)) {
-            val d = m.groupValues[1]
-            val url = Regex("(?is)<url>(.*?)</url>").find(d)?.groupValues?.get(1)?.trim().orEmpty()
-            val title = Regex("(?is)<title>(.*?)</title>").find(d)?.groupValues?.get(1)
-                ?.replace(Regex("<[^>]+>"), "")?.trim().orEmpty()
-            val snip = Regex("(?is)<passage>(.*?)</passage>").find(d)?.groupValues?.get(1)
-                ?.replace(Regex("<[^>]+>"), "")?.trim().orEmpty()
-            if (url.matches(Regex("(?i)^https?://.+"))) {
-                out.put(JSONObject().put("title", title).put("url", url).put("snippet", snip))
-            }
-            if (out.length() >= 5) break
-        }
-        return if (out.length() > 0) ok(q, "yandex", out) else null
-    }
-
-    private fun wikipedia(q: String): String? {
-        val raw = get(
-            "https://ru.wikipedia.org/w/api.php?action=query&list=search&srsearch=" +
-                enc(q) + "&format=json&srlimit=5&utf8=1"
-        ) ?: return null
-        val arr = JSONObject(raw).optJSONObject("query")?.optJSONArray("search") ?: return null
-        val out = JSONArray()
-        for (i in 0 until arr.length()) {
-            val o = arr.optJSONObject(i) ?: continue
-            val title = o.optString("title")
-            out.put(JSONObject().put("title", title)
-                .put("url", "https://ru.wikipedia.org/wiki/" + enc(title.replace(' ', '_')))
-                .put("snippet", o.optString("snippet").replace(Regex("<[^>]+>"), "")))
-        }
-        return if (out.length() > 0) ok(q, "wikipedia", out) else null
-    }
-
-    private fun googleScrape(q: String): String? {
-        val raw = runCatching { WebSearch.searchGooglePublic(q) }.getOrNull() ?: return null
-        val parsed = runCatching { JSONObject(raw) }.getOrNull() ?: return null
-        return raw.takeIf { !parsed.has("error") && (parsed.optJSONArray("results")?.length() ?: 0) > 0 }
-    }
+    internal fun isDeniedQuery(query: String): Boolean = deny.containsMatchIn(query)
 
     fun search(root: File, query: String): String {
         val q = SecretRedactor.redactText(query.trim())
-        if (q.length < 2) return empty()
-        if (q.length > 300) return JSONObject().put("error", "Запрос слишком длинный").toString()
-        val result = firstSuccessful(listOf(
-            { brave(root, q) },
-            { yandex(root, q) },
-            { wikipedia(q) },
-            { googleScrape(q) }
-        ))
-        return result ?: empty()
+        if (q.length < 2) return err("Слишком короткий запрос")
+        if (q.length > 300) return err("Запрос слишком длинный")
+        if (isDeniedQuery(q)) return err("Запрос заблокирован denylist")
+
+        val result = firstSuccessful(
+            listOf(
+                { serper(root, q) },
+                { searxng(root, q) }
+            )
+        )
+        return result ?: err("Поиск недоступен: ни Serper, ни ноутбук не ответили")
     }
 }
