@@ -59,6 +59,21 @@ class NoNsfwFlagTest {
     }
 
     @Test
+    fun routeMetaSaveCannotReintroduceCapsNsfw() {
+        val root = Files.createTempDirectory("ruri-no-nsfw-save").toFile()
+        try {
+            RouteMeta.update(root, "routeway") {
+                it.put("caps", JSONObject().put("nsfw", true).put("vision", true))
+            }
+            val route = RouteMeta.route(root, "routeway")
+            assertFalse(route.getJSONObject("caps").has("nsfw"))
+            assertTrue(route.getJSONObject("caps").getBoolean("vision"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun runtimeConfigMigrationRemovesAllLegacyNsfwModelFields() {
         val root = Files.createTempDirectory("ruri-nsfw-config-migration").toFile()
         try {
