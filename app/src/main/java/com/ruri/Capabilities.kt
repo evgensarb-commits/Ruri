@@ -23,7 +23,7 @@ object Capabilities {
             .put("L4 — моё текущее состояние: настроение, энергия, обиды, ожидания.")
             .put("Я помню между сессиями. Это не контекст одного диалога, это моя память."))
         .put("actions", JSONArray()
-            .put("ИНСТРУМЕНТЫ: только JSON-действия search, list_shelf, read_shelf, recall, remember_fact.")
+            .put("ИНСТРУМЕНТЫ: только JSON-действия search, read_url, list_shelf, read_shelf, recall, remember_fact.")
             .put("Умения без протокола: инициатива, дневник, смена настроения — обычным текстом ответа, не JSON."))
         .put("limits", JSONArray()
             .put("Я не выхожу за пределы своей песочницы: чужие приложения, системные файлы и процессы телефона мне недоступны.")
@@ -56,7 +56,7 @@ object Capabilities {
         val config = runCatching { JSONObject(FileManager.read(root, PATH)) }.getOrElse { defaults() }
         val actions = config.optJSONArray("actions") ?: defaults().optJSONArray("actions") ?: JSONArray()
         val toolDescription = actions.optString(0,
-            "Внешние инструменты: search, list_shelf, read_shelf, recall, remember_fact.")
+            "Внешние инструменты: search, read_url, list_shelf, read_shelf, recall, remember_fact.")
         val localDescription = actions.optString(1,
             "Локальная автономия: инициатива, дневник и поддержание текущего состояния.")
         fun lines(key: String): String {
@@ -69,9 +69,10 @@ object Capabilities {
             append("Ты помнишь между сессиями: это долговременная память, а не контекст одного диалога.\n")
             append("=== РУКИ 1: ВНЕШНИЕ ИНСТРУМЕНТЫ ===\n")
             append("• ").append(toolDescription).append("\n")
-            append("""{"action":"search","query":"..."}; {"action":"list_shelf"}; {"action":"read_shelf","name":"..."}; {"action":"recall","query":"..."}; {"action":"remember_fact","text":"..."}.
+            append("""{"action":"search","query":"..."}; {"action":"list_shelf"}; {"action":"read_shelf","name":"..."}; {"action":"recall","query":"..."}; {"action":"remember_fact","text":"..."}; {"action":"read_url","url":"https://example.org"}.
 """)
-            append("Когда нужен инструмент, ответь одним JSON-объектом (один JSON-объект) только с этими пятью action. Дождись tool_result; если ok=false или результат пуст, честно сообщи о неудаче и не заявляй, что действие выполнено.\n")
+            append("read_url: открыть и прочитать страницу (или получить vision-описание картинки по URL).\n")
+            append("Когда нужен инструмент, ответь одним JSON-объектом (один JSON-объект) только с этими шестью action. Дождись tool_result; если ok=false или результат пуст, честно сообщи о неудаче и не заявляй, что действие выполнено.\n")
             append("=== РУКИ 2: ЛОКАЛЬНАЯ АВТОНОМИЯ ===\n")
             append("• ").append(localDescription).append("\n")
             append("Инициатива, дневник, эмоциональная регуляция и осмысление событий выполняются обычной прозой, не JSON-инструментами. Не выдумывай действия телефона, которых нет в разрешённых возможностях.\n")
