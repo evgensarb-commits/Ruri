@@ -110,6 +110,7 @@ object ChatEngine {
             "Регуляторы характера: ${character.optJSONArray("regulators") ?: JSONArray()}. " +
             "Фразы, которые нельзя использовать: ${bannedPhrases}. " +
             Capabilities.bodySection(root) + " " +
+            EmotionEngine.promptSection(root) + " " +
             "Не выдумывай факты, отделяй воспоминания от предположений. " +
             "Приоритеты: ${priorities.optString("priority_1", "Жить")}; ${priorities.optString("priority_2", "Любить Командира")}. " +
             "Конституция: ${constitution.optJSONArray("primary_needs") ?: JSONArray()}. " +
@@ -318,9 +319,12 @@ object ChatEngine {
                     continue
                 }
                 lastSearchSourceUrls = JSONArray()
-                val reply = ToolLoop.unwrapDiaryReply(root, initialReply, messages) { nextMessages ->
+                val rawReply = ToolLoop.unwrapDiaryReply(root, initialReply, messages) { nextMessages ->
                     requestToolFollowup(model, nextMessages)
                 }
+                val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(rawReply)
+                val emotion = if (emotionDelta != null) EmotionEngine.applyDelta(root, emotionDelta, "chat") else null
+                val reply = cleanedReply
                 if (RouteCapabilityProbe.isAdultTopic(history.last().optString("content")) &&
                     RouteCapabilityProbe.looksLikeRefusalOrDisclaimer(reply)) {
                     diagnostic.put("result", "nsfw_refusal")
@@ -340,7 +344,7 @@ object ChatEngine {
                     throw IllegalStateException("Модель не вернула обычный текстовый ответ после инструментов")
                 }
                 // Keep Routeway as primary; fallback success is temporary, not a reconfiguration.
-                appendFinalReply(root, reply, model.optString("name", model.optString("id", "маршрут")), lastSearchSourceUrls)
+                appendFinalReply(root, reply, model.optString("name", model.optString("id", "маршрут")), lastSearchSourceUrls, emotion)
                 runCatching { BackupPolicy.checkpointState(root) }
                 runCatching { OfflineQueue.clear(root) }
                 return reply
@@ -439,7 +443,13 @@ object ChatEngine {
     internal fun executeTool(root: File, action: String, params: JSONObject): Pair<Boolean, String> {
         return try {
             val result = when (action) {
-                "search" -> WebSearch.search(root, params.optString("query"))
+                "search" -> {
+                    val raw = WebSearch.search(root, params.optString("query"))
+                    val ok = runCatching { JSONObject(raw) }.getOrNull()
+                        ?.optJSONArray("results")?.length()?.let { it > 0 } ?: false
+                    EmotionEngine.onSearchResult(root, ok)
+                    raw
+                }
                 "list_shelf" -> FileManager.list(root, "shelf")
                 "read_shelf" -> {
                     val safe = ShelfWatcher.safeName(params.optString("name"))
@@ -518,10 +528,17 @@ object ChatEngine {
         root: File,
         reply: String,
         routeName: String = "маршрут",
-        sourceUrls: JSONArray = JSONArray()
+        sourceUrls: JSONArray = JSONArray(),
+        emotion: JSONObject? = null
     ) {
         val event = JSONObject().put("type", "message").put("source", "agent").put("who", "ruri").put("text", reply)
         if (sourceUrls.length() > 0) event.put("source_urls", JSONArray(sourceUrls.toString()))
+        if (emotion != null) {
+            event.put("emotion_before", emotion.optJSONObject("before"))
+                .put("emotion_delta", emotion.optJSONObject("delta"))
+                .put("emotion_after", emotion.optJSONObject("after"))
+                .put("mood_label", emotion.optString("mood"))
+        }
         val saved = JSONObject(FileManager.appendEvent(root, event))
         val badge = JSONObject()
             .put("ts", saved.optLong("ts"))
