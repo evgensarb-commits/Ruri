@@ -6,7 +6,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 object UrlReader {
-    private val deny = Regex("(?i)(csam|child\\s*porn|underage\\s*sex|minor\\s*nude)")
+    private val deny = Regex("(?i)(csam|child[\\s_-]*porn|underage[\\s_-]*sex|minor[\\s_-]*nude)")
     private const val MAX_BYTES = 8 * 1024 * 1024
 
     internal fun isDeniedUrl(url: String): Boolean = deny.containsMatchIn(url)
