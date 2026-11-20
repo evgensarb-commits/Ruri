@@ -199,6 +199,7 @@ object Thinker {
         val notificationMessageId = if (initiative) {
             appendChatMessage(root, "ruri", safeReply, now, ChatEngine.sourceUrlsSnapshot())
         } else diaryEntryId
+        Receipts.delivered(root, notificationMessageId)
         if (initiative) {
             state.put("waiting_for_reply", true)
             state.put("initiative_sent_at", now)
@@ -227,7 +228,9 @@ object Thinker {
         val diary = readJson(root, "memory/L2_diary.json").optJSONArray("entries")
         val diaryText = StringBuilder()
         if (diary != null) for (i in maxOf(0, diary.length() - 5) until diary.length()) {
-            diaryText.append("— ").append(diary.optJSONObject(i)?.optString("text") ?: "").append("\n")
+            val entry = diary.optJSONObject(i) ?: continue
+            if (entry.optString("id").isNotBlank() && Tombstone.isDeleted(root, entry.optString("id"))) continue
+            diaryText.append("— ").append(entry.optString("text")).append("\n")
         }
         // Retrieve older episodes associated with the current wake reason and recent Commander messages.
         val recentCommanderContext = FileManager.readLastLines(
@@ -396,7 +399,10 @@ object Thinker {
             .put("source", if (who == "ruri") "agent" else "commander")
             .put("who", who).put("text", text)
         if (sourceUrls.length() > 0) event.put("source_urls", sourceUrls)
-        return JSONObject(FileManager.appendEvent(root, event)).optString("id").ifBlank { id }
+        val saved = JSONObject(FileManager.appendEvent(root, event))
+        val savedId = saved.optString("id").ifBlank { id }
+        if (who == "ruri") Receipts.delivered(root, savedId)
+        return savedId
     }
 
     private fun hoursSince(ts: Long, now: Long): Double = if (ts <= 0L) -1.0 else (now - ts) / 3600000.0

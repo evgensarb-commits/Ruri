@@ -91,6 +91,7 @@ object ChatEngine {
         val diaryContext = StringBuilder()
         for (index in maxOf(0, diary.length() - 6) until diary.length()) {
             val entry = diary.optJSONObject(index) ?: continue
+            if (entry.optString("id").isNotBlank() && Tombstone.isDeleted(root, entry.optString("id"))) continue
             val value = entry.optString("text").trim()
             if (value.isNotBlank()) diaryContext.append("- ").append(value.take(500)).append("\n")
         }
@@ -593,6 +594,7 @@ object ChatEngine {
         }
         val saved = JSONObject(FileManager.appendEvent(root, event))
         val savedId = saved.optString("id").ifBlank { id }
+        Receipts.delivered(root, savedId)
         lastFinalMessageId = savedId
         val lastCmd = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 500)
             .asReversed().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
