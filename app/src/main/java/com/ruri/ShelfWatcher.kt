@@ -72,16 +72,19 @@ object ShelfWatcher {
         if (mime != null) {
             val description = runCatching { describeImage(safe) }.getOrNull()?.trim()?.take(4000)
             if (!description.isNullOrBlank()) {
-                FileManager.write(root, "shelf/.desc/" + safe + ".txt", SecretRedactor.redactText(description))
+                val safeDescription = SecretRedactor.redactText(description).take(4000)
+                FileManager.write(root, "shelf/.desc/" + safe + ".txt", safeDescription)
                 FileManager.appendEvent(root, JSONObject()
                     .put("type", "shelf_image_described").put("source", "shelf")
                     .put("name", safe).put("size_bytes", bytes.size)
-                    .put("mime", mime).put("text", description).put("extractor", "vision"))
+                    .put("mime", mime).put("text", safeDescription).put("extractor", "vision")
+                    .put("ts", System.currentTimeMillis()))
             } else {
                 FileManager.appendEvent(root, JSONObject()
                     .put("type", "shelf_image_unreadable").put("source", "shelf")
                     .put("name", safe).put("size_bytes", bytes.size)
-                    .put("mime", mime).put("reason", "no vision route"))
+                    .put("mime", mime).put("reason", "vision route unavailable")
+                    .put("ts", System.currentTimeMillis()))
             }
             return null
         }
