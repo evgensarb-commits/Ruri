@@ -25,28 +25,72 @@ object RouteMeta {
             android.util.Log.w("Ruri", "Route metadata could not be read; starting with empty metadata", e)
             JSONObject()
         }
-        var changed = false
-        val routeIds = all.keys().asSequence().toList()
-        for (id in routeIds) {
-            val route = all.optJSONObject(id) ?: continue
-            val legacyKeys = route.keys().asSequence()
-                .filter { it.startsWith("nsfw_") || it == "last_full_probe_at" }
-                .toList()
-            legacyKeys.forEach { route.remove(it); changed = true }
+        var migrated = false
+        val ids = all.keys()
+        while (ids.hasNext()) {
+            val route = all.optJSONObject(ids.next()) ?: continue
+            listOf("nsfw_capable", "nsfw_tested_at", "nsfw_probe_status", "nsfw").forEach { key ->
+                if (route.has(key)) {
+                    route.remove(key)
+                    migrated = true
+                }
+            }
             val caps = route.optJSONObject("caps")
             if (caps?.has("nsfw") == true) {
                 caps.remove("nsfw")
-                if (caps.length() == 0) route.remove("caps")
-                changed = true
+                route.put("caps", caps)
+                migrated = true
             }
         }
-        if (changed) FileManager.write(root, PATH, all.toString(2))
+        if (migrated) FileManager.write(root, PATH, all.toString(2))
         return all
+    }
+
+    /** One-time cleanup for legacy model-config and route-metadata NSFW capability flags. */
+    fun migrateLegacyNsfwFlags(root: File) {
+        load(root) // Route metadata caps.nsfw is migrated and rewritten by load().
+
+        fun stripLegacyFlags(config: JSONObject): Boolean {
+            var changed = false
+            val models = config.optJSONArray("models") ?: return false
+            for (index in 0 until models.length()) {
+                val model = models.optJSONObject(index) ?: continue
+                listOf("nsfw_capable", "nsfw_tested_at", "nsfw_probe_status").forEach { key ->
+                    if (model.has(key)) {
+                        model.remove(key)
+                        changed = true
+                    }
+                }
+            }
+            return changed
+        }
+
+        runCatching {
+            val runtime = JSONObject(SecretStore.readRuntimeConfig(root))
+            if (stripLegacyFlags(runtime)) SecretStore.saveRuntimeConfig(root, runtime.toString(2))
+        }
+
+        runCatching {
+            val legacyFile = File(root, "core/config.json")
+            if (!legacyFile.isFile) return@runCatching
+            val legacy = JSONObject(legacyFile.readText(Charsets.UTF_8))
+            if (stripLegacyFlags(legacy)) FileManager.write(root, "core/config.json", legacy.toString(2))
+        }
     }
 
     @Synchronized
     fun save(root: File, value: JSONObject) {
-        FileManager.write(root, PATH, value.toString(2))
+        val sanitized = JSONObject(value.toString())
+        val ids = sanitized.keys()
+        while (ids.hasNext()) {
+            val route = sanitized.optJSONObject(ids.next()) ?: continue
+            listOf("nsfw_capable", "nsfw_tested_at", "nsfw_probe_status", "nsfw").forEach { key -> route.remove(key) }
+            route.optJSONObject("caps")?.let { caps ->
+                caps.remove("nsfw")
+                route.put("caps", caps)
+            }
+        }
+        FileManager.write(root, PATH, sanitized.toString(2))
     }
 
     private fun defaultRoute(): JSONObject {
@@ -103,7 +147,7 @@ object RouteMeta {
 
     fun setCapability(root: File, id: String, capability: String, capable: Boolean) {
         require(!capability.equals("nsfw", ignoreCase = true)) {
-            "NSFW capability flags are permanently disabled"
+            "NSFW route capabilities are not persisted"
         }
         update(root, id) {
             val caps = it.optJSONObject("caps") ?: JSONObject()
@@ -164,7 +208,7 @@ object RouteMeta {
                 it.put("ru_reachable", false)
                 it.put("reachable", false)
             }
-            "refusal" -> Unit // A refusal is per response; it never changes route capability or cooldown.
+            "refusal" -> Unit // Refusals are logged; they never permanently change route eligibility.
             else -> {
                 val streak = it.optInt("fail_streak", 0) + 1
                 it.put("fail_streak", streak)
