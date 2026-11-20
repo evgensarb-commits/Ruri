@@ -318,8 +318,9 @@ object ChatEngine {
                     allFailuresNetwork = false
                     continue
                 }
+                val meta = JSONObject()
                 lastSearchSourceUrls = JSONArray()
-                val rawReply = ToolLoop.unwrapDiaryReply(root, initialReply, messages) { nextMessages ->
+                val rawReply = ToolLoop.unwrapDiaryReply(root, initialReply, messages, meta) { nextMessages ->
                     requestToolFollowup(model, nextMessages)
                 }
                 val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(rawReply)
@@ -344,7 +345,10 @@ object ChatEngine {
                     throw IllegalStateException("Модель не вернула обычный текстовый ответ после инструментов")
                 }
                 // Keep Routeway as primary; fallback success is temporary, not a reconfiguration.
-                appendFinalReply(root, reply, model.optString("name", model.optString("id", "маршрут")), lastSearchSourceUrls, emotion)
+                appendFinalReply(
+                    root, reply, emotion, meta,
+                    model.optString("name", model.optString("id", "маршрут"))
+                )
                 runCatching { BackupPolicy.checkpointState(root) }
                 runCatching { OfflineQueue.clear(root) }
                 return reply
@@ -429,8 +433,9 @@ object ChatEngine {
         root: File,
         initialReply: String,
         messages: JSONArray,
+        meta: JSONObject? = null,
         requestNext: (JSONArray) -> String?
-    ): String = ToolLoop.runToolLoop(root, initialReply, messages, requestNext)
+    ): String = ToolLoop.runToolLoop(root, initialReply, messages, meta, requestNext = requestNext)
 
     internal fun captureSearchUrls(raw: String) {
         lastSearchSourceUrls = extractSourceUrls(raw)
@@ -440,27 +445,31 @@ object ChatEngine {
 
     internal fun sourceUrlsSnapshot(): JSONArray = JSONArray(lastSearchSourceUrls.toString())
 
+    internal fun isSuccessfulSearchResult(raw: String): Boolean {
+        val parsed = runCatching { JSONObject(raw) }.getOrNull() ?: return false
+        if (parsed.has("error")) return false
+        return (parsed.optJSONArray("results")?.length() ?: 0) > 0
+    }
+
     internal fun executeTool(root: File, action: String, params: JSONObject): Pair<Boolean, String> {
         return try {
-            val result = when (action) {
+            when (action) {
                 "search" -> {
                     val raw = WebSearch.search(root, params.optString("query"))
-                    val ok = runCatching { JSONObject(raw) }.getOrNull()
-                        ?.optJSONArray("results")?.length()?.let { it > 0 } ?: false
+                    val ok = isSuccessfulSearchResult(raw)
                     EmotionEngine.onSearchResult(root, ok)
-                    raw
+                    ok to SecretRedactor.redactText(raw)
                 }
-                "list_shelf" -> FileManager.list(root, "shelf")
+                "list_shelf" -> true to SecretRedactor.redactText(FileManager.list(root, "shelf"))
                 "read_shelf" -> {
                     val safe = ShelfWatcher.safeName(params.optString("name"))
                         ?: return false to "Недопустимое имя файла"
-                    FileManager.read(root, "shelf/" + safe).take(12000)
+                    true to SecretRedactor.redactText(FileManager.read(root, "shelf/" + safe).take(12000))
                 }
-                "recall" -> MemoryRetriever.recall(root, params.optString("query"), 5)
-                "remember_fact" -> rememberFact(root, params.optString("text"))
-                else -> return false to "Неизвестное действие"
+                "recall" -> true to SecretRedactor.redactText(MemoryRetriever.recall(root, params.optString("query"), 5))
+                "remember_fact" -> true to SecretRedactor.redactText(rememberFact(root, params.optString("text")))
+                else -> false to "Неизвестное действие"
             }
-            true to SecretRedactor.redactText(result)
         } catch (e: Exception) {
             false to SecretRedactor.redactText(e.message ?: "Ошибка инструмента")
         }
@@ -527,12 +536,43 @@ object ChatEngine {
     internal fun appendFinalReply(
         root: File,
         reply: String,
-        routeName: String = "маршрут",
+        emotion: JSONObject? = null,
+        meta: JSONObject? = null,
+        routeName: String = "маршрут"
+    ) {
+        val sourceUrls = meta?.optJSONArray("source_urls") ?: JSONArray()
+        val searchOk = meta?.takeIf { it.has("search_ok") }?.optBoolean("search_ok")
+        appendFinalReplyInternal(
+            root, reply, routeName, sourceUrls, emotion, searchOk,
+            includeEmptySources = meta?.has("source_urls") == true
+        )
+    }
+
+    /** Compatibility overload retained for existing source-link and route-badge callers. */
+    internal fun appendFinalReply(
+        root: File,
+        reply: String,
+        routeName: String,
         sourceUrls: JSONArray = JSONArray(),
         emotion: JSONObject? = null
     ) {
+        appendFinalReplyInternal(root, reply, routeName, sourceUrls, emotion, null)
+    }
+
+    private fun appendFinalReplyInternal(
+        root: File,
+        reply: String,
+        routeName: String,
+        sourceUrls: JSONArray,
+        emotion: JSONObject?,
+        searchOk: Boolean?,
+        includeEmptySources: Boolean = false
+    ) {
         val event = JSONObject().put("type", "message").put("source", "agent").put("who", "ruri").put("text", reply)
-        if (sourceUrls.length() > 0) event.put("source_urls", JSONArray(sourceUrls.toString()))
+        if (sourceUrls.length() > 0 || includeEmptySources) {
+            event.put("source_urls", JSONArray(sourceUrls.toString()))
+        }
+        if (searchOk != null) event.put("search_ok", searchOk)
         if (emotion != null) {
             event.put("emotion_before", emotion.optJSONObject("before"))
                 .put("emotion_delta", emotion.optJSONObject("delta"))

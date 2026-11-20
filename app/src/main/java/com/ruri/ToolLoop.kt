@@ -12,6 +12,8 @@ object ToolLoop {
         root: File,
         reply: String,
         messages: JSONArray,
+        meta: JSONObject? = null,
+        performTool: ((String, JSONObject) -> Pair<Boolean, String>)? = null,
         requestNext: (JSONArray) -> String?
     ): String {
         var current = reply
@@ -24,8 +26,26 @@ object ToolLoop {
             FileManager.appendEvent(root, SecretRedactor.redactEvent(
                 JSONObject().put("type", "tool_call").put("action", name).put("params", params)
             ))
-            val result = executeTool(root, name, action)
-            if (name == "search") ChatEngine.captureSearchUrls(result.second)
+            val result = performTool?.invoke(name, params) ?: executeTool(root, name, params)
+            if (name == "search") {
+                ChatEngine.captureSearchUrls(result.second)
+                if (meta != null) {
+                    val urls = JSONArray()
+                    runCatching {
+                        val results = JSONObject(result.second).optJSONArray("results") ?: JSONArray()
+                        val seen = LinkedHashSet<String>()
+                        for (i in 0 until results.length()) {
+                            val url = results.optJSONObject(i)?.optString("url").orEmpty()
+                            if ((url.startsWith("https://") || url.startsWith("http://")) && seen.add(url)) {
+                                urls.put(url)
+                                if (urls.length() >= 20) break
+                            }
+                        }
+                    }
+                    meta.put("search_ok", result.first)
+                    meta.put("source_urls", urls)
+                }
+            }
             val safeText = SecretRedactor.redactText(result.second).take(4000)
             FileManager.appendEvent(root, SecretRedactor.redactEvent(
                 JSONObject().put("type", "tool_result").put("action", name)
@@ -33,6 +53,10 @@ object ToolLoop {
             ))
             messages.put(JSONObject().put("role", "user")
                 .put("content", "[ИНСТРУМЕНТ ${name}]: ${safeText}"))
+            if (!result.first) {
+                messages.put(JSONObject().put("role", "system").put("content",
+                    "Инструмент ${name} вернул ошибку или пустой результат. НЕ утверждай, что действие выполнено успешно. Скажи честно, что не удалось, и предложи альтернативу."))
+            }
             hops++
             if (hops == 3) messages.put(JSONObject().put("role", "system")
                 .put("content", "Лимит инструментов исчерпан — ответь обычной прозой"))
@@ -47,6 +71,7 @@ object ToolLoop {
         root: File,
         initialReply: String,
         messages: JSONArray,
+        meta: JSONObject? = null,
         requestNext: (JSONArray) -> String?
     ): String {
         ChatEngine.clearSourceUrls()
@@ -58,7 +83,7 @@ object ToolLoop {
             val action = json.optString("action")
             if (action in allowed && ChatEngine.parseAction(reply) != null && !toolLoopRun) {
                 toolLoopRun = true
-                reply = runToolLoop(root, reply, messages, requestNext)
+                reply = runToolLoop(root, reply, messages, meta, requestNext = requestNext)
             } else if (json.has("text") && json.opt("text") is String) {
                 return SecretRedactor.redactText(json.optString("text").trim())
             } else {
