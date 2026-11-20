@@ -31,6 +31,9 @@ object SecretStore {
 
     fun readRuntimeConfig(root: File): String = synchronized(lock) {
         val config = JSONObject(FileManager.read(root, CONFIG_FILE).ifBlank { "{}" })
+        if (stripLegacyNsfwFields(config)) {
+            FileManager.write(root, CONFIG_FILE, config.toString(2))
+        }
         val secrets = readSecrets(root)
         val models = config.optJSONArray("models")
         if (models != null) {
@@ -45,6 +48,7 @@ object SecretStore {
 
     fun saveRuntimeConfig(root: File, rawConfig: String) = synchronized(lock) {
         val config = JSONObject(rawConfig)
+        stripLegacyNsfwFields(config)
         val models = config.optJSONArray("models")
             ?: throw IllegalArgumentException("В конфигурации отсутствует список моделей")
         val secrets = readSecrets(root)
@@ -69,6 +73,18 @@ object SecretStore {
         writeSecrets(root, secrets)
         FileManager.write(root, CONFIG_FILE, config.toString(2))
         Unit
+    }
+
+    /** Removes legacy persistent NSFW capability/probe fields from provider configuration. */
+    internal fun stripLegacyNsfwFields(config: JSONObject): Boolean {
+        var changed = false
+        val models = config.optJSONArray("models") ?: return false
+        for (index in 0 until models.length()) {
+            val model = models.optJSONObject(index) ?: continue
+            val legacyKeys = model.keys().asSequence().filter { it.startsWith("nsfw_") }.toList()
+            legacyKeys.forEach { model.remove(it); changed = true }
+        }
+        return changed
     }
 
     internal fun legacyKeys(config: JSONObject): JSONObject {
