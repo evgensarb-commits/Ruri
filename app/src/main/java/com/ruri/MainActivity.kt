@@ -186,7 +186,6 @@ class MainActivity : AppCompatActivity() {
                     val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
                     val models = config.optJSONArray("models") ?: org.json.JSONArray()
                     Probe.refreshReachability(filesDir, models, topOnly = false, force = true)
-                    RouteCapabilityProbe.refreshIfDue(filesDir, config, force = true)
                     mainHandler.post { if (::web.isInitialized) web.evaluateJavascript("window.refreshRouteCards && window.refreshRouteCards()", null) }
                 }.onFailure { android.util.Log.w("Ruri", "Manual route refresh failed", it) }
             }
