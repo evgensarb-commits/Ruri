@@ -207,18 +207,18 @@ class RuriLifeWorker(
             catch (_: Exception) { JSONObject() }
         val now = System.currentTimeMillis()
         val lastSeen = state.optLong("last_seen_commander", 0L)
-        val quietHours = if (lastSeen <= 0L) 0.0 else (now - lastSeen).coerceAtLeast(0L) / 3_600_000.0
         val lastInitiative = state.optLong("last_initiative", 0L)
-        val initiativeDue = lastSeen > 0L &&
-            quietHours >= 3.5 &&
-            !state.optBoolean("waiting_for_reply", false) &&
-            (lastInitiative == 0L || now - lastInitiative >= 3L * 60L * 60L * 1000L)
+        val initiativeDue = EmotionEngine.initiativeGate(
+            root, lastSeen, now, state.optBoolean("waiting_for_reply", false), lastInitiative
+        )
 
         val notificationEvent = reason.contains("phone_notification")
         val explicitSelfTask = reason.contains("research_task") ||
             reason.contains("self_reflection") ||
             reason.contains("capability_gap")
-        val reflectionDue = now - state.optLong("last_thought", 0L) >= 6L * 60L * 60L * 1000L
+        val th = EmotionEngine.thresholds(root)
+        val reflectionDue = now - state.optLong("last_thought", 0L) >=
+            (th.optDouble("reflection_h", 6.0) * 3_600_000.0).toLong()
 
         if (!initiativeDue && !notificationEvent && !explicitSelfTask && !reflectionDue) return false
         if (BatteryLevel.get(context) <= 12 && !initiativeDue) return false
