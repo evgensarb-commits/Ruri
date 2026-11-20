@@ -1,24 +1,19 @@
 package com.ruri
 
 import org.json.JSONArray
+import java.io.File
 
 /** Keeps provider selection strictly inside explicitly enabled free routes. */
 internal object FreeModelRouter {
     fun orderedIndices(
         models: JSONArray,
-        primaryIndex: Int,
-        requireNsfw: Boolean = false
+        primaryIndex: Int
     ): List<Int> {
         val eligible = (0 until models.length()).filter { index ->
             val model = models.optJSONObject(index)
             model != null &&
                 model.optBoolean("free_tier", false) &&
-                model.optBoolean("enabled", true) &&
-                (!requireNsfw || (
-                    model.optBoolean("nsfw_capable", false) &&
-                        model.optLong("nsfw_tested_at", 0L) > 0L &&
-                        model.optString("nsfw_probe_status") == "passed"
-                    ))
+                model.optBoolean("enabled", true)
         }
         return eligible.sortedWith(
             compareBy<Int> { if (it == primaryIndex) 0 else 1 }
@@ -27,16 +22,14 @@ internal object FreeModelRouter {
     }
 
     fun orderedIndices(
-        root: java.io.File,
+        root: File,
         models: JSONArray,
         primaryIndex: Int,
-        requireNsfw: Boolean = false,
-        task: Task = Task.CHAT
-    ): List<Int> = RouteSelector.ordered(
+        task: Task
+    ): List<Int> = RouteSelector.orderedIndices(
         root = root,
         models = models,
         current = primaryIndex,
-        task = task,
-        needNsfw = requireNsfw
+        task = task
     )
 }
