@@ -755,9 +755,6 @@ object FileManager {
 
             ensureProvider("requesty", JSONObject()
                 .put("id", "requesty")
-                .put("nsfw_capable", false)
-                .put("nsfw_tested_at", 0L)
-                .put("nsfw_probe_status", "untested")
                 .put("name", "Requesty · Google Gemma 4 Free")
                 .put("base_url", "https://router.requesty.ai/v1")
                 .put("api_key", "")
@@ -765,6 +762,13 @@ object FileManager {
                 .put("priority", 3)
                 .put("free_tier", true)
                 .put("enabled", true))
+
+            // Remove any legacy NSFW probe keys after all provider defaults have been merged.
+            for (i in 0 until models.length()) {
+                val model = models.optJSONObject(i) ?: continue
+                val legacyNsfwKeys = model.keys().asSequence().filter { it.startsWith("nsfw_") }.toList()
+                legacyNsfwKeys.forEach { model.remove(it); changed = true }
+            }
 
             ensureProvider("gemini", JSONObject()
                 .put("id", "gemini").put("name", "Gemini (legacy, disabled)")
