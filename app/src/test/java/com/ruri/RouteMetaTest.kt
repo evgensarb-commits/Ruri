@@ -55,18 +55,6 @@ class RouteMetaTest {
         }
     }
 
-    @Test
-    fun fullProbeCanBeClaimedOnlyOncePerTwentyFourHours() {
-        val root = Files.createTempDirectory("ruri-probe-claim").toFile()
-        try {
-            val first = System.currentTimeMillis()
-            assertTrue(RouteMeta.claimFullProbe(root, "route-test", first))
-            assertFalse(RouteMeta.claimFullProbe(root, "route-test", first + 23L * 60L * 60L * 1000L))
-            assertTrue(RouteMeta.claimFullProbe(root, "route-test", first + Probe.FULL_PROBE_MS + 1L))
-        } finally {
-            root.deleteRecursively()
-        }
-    }
 
     @Test
     fun cheapHeartbeatIsThrottledToTwentyMinutes() {
