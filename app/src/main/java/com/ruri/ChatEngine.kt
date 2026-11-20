@@ -42,7 +42,7 @@ object ChatEngine {
             if (allowRecovery && Probe.claimRecoveryRefresh()) {
                 Probe.refreshReachability(root, models, topOnly = false, force = true)
             }
-            val reachableOrder = RouteSelector.ordered(
+            val reachableOrder = RouteSelector.orderedIndices(
                 root, models, current, Task.CHAT, online = true, vpn = NetState.vpn
             )
             if (reachableOrder.isNotEmpty()) return respondInternal(root, allowRecovery = false, assumeReachable = true)
@@ -157,10 +157,11 @@ object ChatEngine {
         if (history.isEmpty() || history.last().optString("role") != "user") {
             throw IllegalStateException("Не найдено последнее сообщение командира")
         }
-        val task = RouteSelector.detectTask(history.last().optString("content"))
+        val commanderText = history.last().optString("content")
+        val task = RouteSelector.detectTask(commanderText)
         val exclusiveRoute = config.optBoolean("exclusive_route", false)
         fun selectOrder(online: Boolean): List<Int> = RouteRecovery.applyExclusive(
-            RouteSelector.ordered(root, models, current, task, online, NetState.vpn),
+            RouteSelector.orderedIndices(root, models, current, task, online, NetState.vpn),
             current, exclusiveRoute
         )
         var order = selectOrder(NetState.online || assumeReachable)
@@ -340,12 +341,16 @@ object ChatEngine {
                 val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(rawReply)
                 val emotion = if (emotionDelta != null) EmotionEngine.applyDelta(root, emotionDelta, "chat") else null
                 val reply = cleanedReply
-                if (RouteSelector.isAdultTopic(history.last().optString("content")) &&
-                    RouteSelector.looksLikeRefusalOrDisclaimer(reply)) {
-                    recordNsfwRefusal(root, routeId, reply, diagnostic, task)
+                if (recordAdultRefusal(
+                        root = root,
+                        routeId = routeId,
+                        task = task,
+                        commanderText = commanderText,
+                        reply = reply,
+                        diagnostic = diagnostic
+                    )) {
                     lastError = "Маршрут ${model.optString("name", model.optString("id"))} отклонил взрослую тему"
                     allFailuresNetwork = false
-                    retryableModels.remove(index)
                     continue
                 }
                 diagnostic.put("stage", "COMPLETE")
@@ -462,27 +467,33 @@ object ChatEngine {
 
     internal fun sourceUrlsSnapshot(): JSONArray = JSONArray(lastSearchSourceUrls.toString())
 
-    internal fun recordNsfwRefusal(
+    internal fun isSuccessfulSearchResult(raw: String): Boolean {
+        val parsed = runCatching { JSONObject(raw) }.getOrNull() ?: return false
+        if (parsed.has("error")) return false
+        return (parsed.optJSONArray("results")?.length() ?: 0) > 0
+    }
+
+    internal fun recordAdultRefusal(
         root: File,
         routeId: String,
+        task: Task,
+        commanderText: String,
         reply: String,
         diagnostic: JSONObject,
-        task: Task
-    ) {
+        now: Long = System.currentTimeMillis()
+    ): Boolean {
+        if (!RouteSelector.isAdultTopic(commanderText) ||
+            !RouteSelector.looksLikeRefusalOrDisclaimer(reply)) return false
+
         diagnostic.put("result", "nsfw_refusal")
         NetworkDiagnostics.record(root, diagnostic)
         FileManager.appendEvent(root, JSONObject()
             .put("type", "nsfw_refusal")
             .put("route", routeId)
             .put("snippet", SecretRedactor.redactText(reply).take(300))
-            .put("ts", System.currentTimeMillis()))
-        RouteMeta.recordFailure(root, routeId, "refusal", task)
-    }
-
-    internal fun isSuccessfulSearchResult(raw: String): Boolean {
-        val parsed = runCatching { JSONObject(raw) }.getOrNull() ?: return false
-        if (parsed.has("error")) return false
-        return (parsed.optJSONArray("results")?.length() ?: 0) > 0
+            .put("ts", now))
+        runCatching { RouteMeta.recordFailure(root, routeId, "refusal", task) }
+        return true
     }
 
     internal fun executeTool(root: File, action: String, params: JSONObject): Pair<Boolean, String> {
