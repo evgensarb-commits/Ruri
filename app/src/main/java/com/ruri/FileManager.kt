@@ -280,7 +280,8 @@ object FileManager {
     fun readLastEvents(root: File, filter: String = "all", limit: Int = 100): JSONArray {
         val bounded = limit.coerceIn(1, 100)
         val allowed = setOf("message", "tool_call", "tool_result", "wake", "phone_notification",
-            "shelf_file_ingested", "shelf_image_described", "shelf_image_unreadable", "recall_deep_used", "facts_extracted", "error")
+            "shelf_file_ingested", "shelf_image_described", "shelf_image_unreadable", "recall_deep_used", "facts_extracted",
+            "nsfw_refusal", "error")
         val requested = filter.takeIf { it == "all" || it in allowed } ?: "all"
         val result = JSONArray()
         readLastLines(root, L0_PATH, maxLines = 500, maxBytes = 2 * 1024 * 1024)
