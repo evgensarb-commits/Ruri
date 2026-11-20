@@ -264,9 +264,7 @@ object MemoryConsolidator {
         val models = config.optJSONArray("models") ?: return null
         if (models.length() == 0) return null
         val current = config.optInt("current", 0)
-        val order = FreeModelRouter.orderedIndices(
-            root, models, current, requireNsfw = false, task = Task.REASON
-        )
+        val order = FreeModelRouter.orderedIndices(root, models, current, Task.REASON)
         for (index in order) {
             val model = models.optJSONObject(index) ?: continue
             // L1/L2/L3 content is personal memory; minimal-context routes are ineligible here.
