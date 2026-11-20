@@ -97,7 +97,8 @@ class RuriLifeWorker(
             if (NetState.online && OfflineQueue.hasPending(root)) {
                 try {
                     val reply = ChatEngine.respond(root)
-                    if (reply != ChatEngine.OFFLINE_REPLY) Notifier.thought(appContext, reply)
+                    val messageId = ChatEngine.lastSavedReplyId()
+                    if (reply != ChatEngine.OFFLINE_REPLY) Notifier.thought(appContext, reply, messageId)
                 } catch (drainError: Exception) {
                     Log.w("Ruri", "Offline reply remains queued until a route is available", drainError)
                 }
