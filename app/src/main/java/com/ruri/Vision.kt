@@ -27,6 +27,25 @@ object Vision {
         )
     }
 
+    /** Returns a previously verified route without issuing a network request from the UI thread. */
+    fun cachedVisionRoute(root: File): JSONObject? {
+        val config = runCatching { JSONObject(SecretStore.readRuntimeConfig(root)) }.getOrElse { JSONObject() }
+        val models = config.optJSONArray("models") ?: JSONArray()
+        val current = config.optInt("current", 0)
+        val ordered = (0 until models.length()).sortedWith(
+            compareBy<Int> { if (it == current) 0 else 1 }
+                .thenBy { models.optJSONObject(it)?.optInt("priority", 100) ?: 100 }
+        )
+        for (index in ordered) {
+            val model = models.optJSONObject(index) ?: continue
+            if (!isEligibleVisionModel(model)) continue
+            val id = routeId(model)
+            val caps = RouteMeta.route(root, id).optJSONObject("caps") ?: JSONObject()
+            if (caps.optBoolean("vision", false)) return JSONObject(model.toString())
+        }
+        return null
+    }
+
     /** Injectable selection seam for unit tests; production always supplies the real network probe. */
     internal fun findVisionRoute(
         root: File,
