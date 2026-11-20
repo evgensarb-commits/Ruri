@@ -84,7 +84,7 @@ object RouteMeta {
         val ids = sanitized.keys()
         while (ids.hasNext()) {
             val route = sanitized.optJSONObject(ids.next()) ?: continue
-            listOf("nsfw_capable", "nsfw_tested_at", "nsfw_probe_status", "nsfw").forEach(route::remove)
+            listOf("nsfw_capable", "nsfw_tested_at", "nsfw_probe_status", "nsfw").forEach { key -> route.remove(key) }
             route.optJSONObject("caps")?.let { caps ->
                 caps.remove("nsfw")
                 route.put("caps", caps)
