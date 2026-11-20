@@ -125,16 +125,6 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    override fun onResume() {
-        super.onResume()
-        activityResumed = true
-    }
-
-    override fun onPause() {
-        activityResumed = false
-        super.onPause()
-    }
-
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == importFileRequestCode) {
@@ -150,6 +140,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        activityResumed = true
         NetState.refresh(this)
         if (OfflineQueue.hasPending(filesDir) && NetState.online) {
             LifeScheduler.enqueueEvent(this, "offline_drain")
@@ -161,6 +152,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
+        activityResumed = false
         try { BackupPolicy.maybeRolling(this, "pause") }
         catch (e: Exception) { android.util.Log.w("Ruri", "Pause rolling backup failed", e) }
         super.onPause()
