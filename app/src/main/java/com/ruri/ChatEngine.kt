@@ -68,8 +68,6 @@ object ChatEngine {
             OfflineQueue.markPending(root)
             throw IllegalStateException("Нет настроенных бесплатных маршрутов с полной памятью")
         }
-        // Capability probes run at most once per day per free route; do not NSFW-gate ordinary chat.
-        RouteCapabilityProbe.refreshIfDue(root, config)
         // Retry transient failures only. HTTP 429 hands off immediately to the next free route.
         val attemptsByModel = mutableMapOf<Int, Int>()
         val retryableModels = mutableSetOf<Int>()
@@ -160,10 +158,9 @@ object ChatEngine {
             throw IllegalStateException("Не найдено последнее сообщение командира")
         }
         val task = RouteSelector.detectTask(history.last().optString("content"))
-        val requireNsfw = RouteSelector.nsfwWindow(root)
         val exclusiveRoute = config.optBoolean("exclusive_route", false)
         fun selectOrder(online: Boolean): List<Int> = RouteRecovery.applyExclusive(
-            RouteSelector.ordered(root, models, current, task, requireNsfw, online, NetState.vpn),
+            RouteSelector.ordered(root, models, current, task, online, NetState.vpn),
             current, exclusiveRoute
         )
         var order = selectOrder(NetState.online || assumeReachable)
@@ -193,7 +190,6 @@ object ChatEngine {
                 exclusiveRoute && specificReason.isNotBlank() -> "$specificReason. Автоматический переход отключён."
                 exclusiveRoute -> "Выбранный маршрут $selectedName недоступен. Автоматический переход отключён."
                 specificReason.isNotBlank() -> specificReason
-                requireNsfw -> "Нет доступного бесплатного маршрута для взрослой темы: проверь VPN, квоту и результаты NSFW-проб."
                 else -> "Нет доступного бесплатного маршрута: проверь подключение, VPN, дневную квоту и ключи."
             }
             throw IllegalStateException(reason)
@@ -344,14 +340,12 @@ object ChatEngine {
                 val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(rawReply)
                 val emotion = if (emotionDelta != null) EmotionEngine.applyDelta(root, emotionDelta, "chat") else null
                 val reply = cleanedReply
-                if (RouteCapabilityProbe.isAdultTopic(history.last().optString("content")) &&
-                    RouteCapabilityProbe.looksLikeRefusalOrDisclaimer(reply)) {
-                    diagnostic.put("result", "nsfw_refusal")
-                    NetworkDiagnostics.record(root, diagnostic)
-                    RouteCapabilityProbe.markNotCapable(root, config, index, "runtime_refusal_or_disclaimer")
-                    runCatching { RouteMeta.recordFailure(root, routeId, "refusal", task) }
+                if (RouteSelector.isAdultTopic(history.last().optString("content")) &&
+                    RouteSelector.looksLikeRefusalOrDisclaimer(reply)) {
+                    recordNsfwRefusal(root, routeId, reply, diagnostic, task)
                     lastError = "Маршрут ${model.optString("name", model.optString("id"))} отклонил взрослую тему"
                     allFailuresNetwork = false
+                    retryableModels.remove(index)
                     continue
                 }
                 diagnostic.put("stage", "COMPLETE")
@@ -467,6 +461,23 @@ object ChatEngine {
     internal fun clearSourceUrls() { lastSearchSourceUrls = JSONArray() }
 
     internal fun sourceUrlsSnapshot(): JSONArray = JSONArray(lastSearchSourceUrls.toString())
+
+    internal fun recordNsfwRefusal(
+        root: File,
+        routeId: String,
+        reply: String,
+        diagnostic: JSONObject,
+        task: Task
+    ) {
+        diagnostic.put("result", "nsfw_refusal")
+        NetworkDiagnostics.record(root, diagnostic)
+        FileManager.appendEvent(root, JSONObject()
+            .put("type", "nsfw_refusal")
+            .put("route", routeId)
+            .put("snippet", SecretRedactor.redactText(reply).take(300))
+            .put("ts", System.currentTimeMillis()))
+        RouteMeta.recordFailure(root, routeId, "refusal", task)
+    }
 
     internal fun isSuccessfulSearchResult(raw: String): Boolean {
         val parsed = runCatching { JSONObject(raw) }.getOrNull() ?: return false
