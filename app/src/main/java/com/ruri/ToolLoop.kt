@@ -6,7 +6,24 @@ import java.io.File
 
 /** Shared action protocol and prose guard for interactive and autonomous model turns. */
 object ToolLoop {
-    private val allowed = setOf("search", "list_shelf", "read_shelf", "recall", "remember_fact")
+    private val allowed = setOf("search", "list_shelf", "read_shelf", "recall", "remember_fact", "read_url")
+
+    private val actionBlock = Regex("\\{[^{}]*?\\\"action\\\"\\s*:\\s*\\\"[a-z_]+\\\"[^{}]*?\\}")
+
+    fun stripActions(reply: String): Triple<String, List<String>, List<JSONObject>> {
+        val diary = mutableListOf<String>(); val tools = mutableListOf<JSONObject>()
+        var cleaned = reply
+        for (match in actionBlock.findAll(reply)) {
+            val action = runCatching { JSONObject(match.value) }.getOrNull() ?: continue
+            when (action.optString("action")) {
+                "write_diary", "diary" -> action.optString("text").trim().takeIf { it.isNotBlank() }?.let(diary::add)
+                "search", "list_shelf", "read_shelf", "recall", "remember_fact", "read_url" -> tools.add(action)
+                else -> Unit
+            }
+            cleaned = cleaned.replace(match.value, "")
+        }
+        return Triple(cleaned.replace(Regex("\\n{3,}"), "\\n\\n").trim(), diary, tools)
+    }
 
     fun runToolLoop(
         root: File,
