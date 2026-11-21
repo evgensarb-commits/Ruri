@@ -61,6 +61,12 @@ class LivingNoGatesTest {
         assertEquals(listOf(0, 1), ordered)
     }
 
+    @Test fun PrimaryRouteFirstThenFallbackByScoreTest() {
+        val root = root(); repeat(12) { RouteMeta.recordSuccess(root, "backup", Task.CHAT) }
+        val ordered = RouteSelector.orderedIndices(root, models("primary", "backup"), 0, Task.CHAT, online = true, vpn = false)
+        assertEquals(0, ordered.first())
+    }
+
     @Test fun NoBatteryGateTest() {
         val root = root()
         assertEquals(listOf(0), RouteSelector.orderedIndices(root, models("free"), 0, Task.CHAT, online = true, vpn = false))
@@ -109,6 +115,6 @@ class LivingNoGatesTest {
             .put("text", "целую тебя").put("ts", System.currentTimeMillis()))
         val before = EmotionEngine.readValues(root).optDouble("desire")
         EmotionEngine.onCommanderMessage(root, "целую тебя")
-        assertTrue(EmotionEngine.readValues(root).optDouble("desire") > before)
+        assertEquals(before + 20.0, EmotionEngine.readValues(root).optDouble("desire"), 0.001)
     }
 }
