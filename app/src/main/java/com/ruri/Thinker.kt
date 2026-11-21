@@ -335,7 +335,7 @@ object Thinker {
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val text = stream?.bufferedReader()?.use { it.readText() } ?: return null
+            val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             if (code !in 200..299) {
                 val errorUsage = runCatching { JSONObject(text).optJSONObject("usage") }.getOrNull()
                 val errorTokens = errorUsage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
