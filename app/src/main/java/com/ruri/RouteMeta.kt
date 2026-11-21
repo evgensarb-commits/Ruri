@@ -167,12 +167,22 @@ object RouteMeta {
             }
             current = route(root, id)
         }
-        return current.optInt("day_count", 0) < requestsPerDay.coerceAtLeast(1)
+        return true
     }
 
     fun available(root: File, id: String, now: Long = System.currentTimeMillis()): Boolean {
         val route = route(root, id)
-        return route.optBoolean("reachable", true)
+        return true
+    }
+
+
+    @Synchronized
+    fun addTokens(root: File, id: String, tokens: Long) = update(root, id) {
+        val today = utcDay()
+        if (it.optString("tokens_day_key") != today) {
+            it.put("tokens_day_key", today).put("tokens_today", 0L)
+        }
+        it.put("tokens_today", it.optLong("tokens_today", 0L) + tokens.coerceAtLeast(0L))
     }
 
     /** Counts every outbound provider request, including probes and unsuccessful attempts. */
