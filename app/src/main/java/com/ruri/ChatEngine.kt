@@ -360,7 +360,7 @@ object ChatEngine {
                 // Keep Routeway as primary; fallback success is temporary, not a reconfiguration.
                 appendFinalReply(
                     root, reply, emotion, meta,
-                    model.optString("id", model.optString("name", "маршрут"))
+                    routeId
                 )
                 runCatching { BackupPolicy.checkpointState(root) }
                 runCatching { OfflineQueue.clear(root) }
