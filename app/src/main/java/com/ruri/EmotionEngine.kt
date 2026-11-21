@@ -35,6 +35,9 @@ object EmotionEngine {
             .put("search_ok_interest", 8).put("search_ok_joy", 4)
             .put("search_fail_anger", 6).put("search_fail_anxiety", 3)
             .put("cycle_fatigue", 1)
+            .put("desire_flirt_commander", 12).put("desire_intimate_word", 8)
+            .put("desire_evening_per_h", 1.5).put("desire_from_affection_per_h", 1.0)
+            .put("desire_nsfw_window", 10)
             .put("rest_relief_fatigue", 5).put("rest_h", 2)
             .put("ignored_hurt", 15).put("ignored_anger", 5)
             .put("reply_hurt_relief", 10).put("reply_anxiety_relief", 5).put("reply_joy", 5)
@@ -182,6 +185,9 @@ object EmotionEngine {
         val d = drift(root); val delta = JSONObject()
         if (dtH > 0) {
             delta.put("boredom", d.optDouble("idle_boredom_per_h", 2.0) * dtH)
+            val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+            if (hour in 20..23 || hour in 0..4) delta.put("desire", delta.optDouble("desire", 0.0) + d.optDouble("desire_evening_per_h", 1.5) * dtH)
+            if (readValues(root).optDouble("affection", 0.0) > 70) delta.put("desire", delta.optDouble("desire", 0.0) + d.optDouble("desire_from_affection_per_h", 1.0) * dtH)
             val silenceH = if (lastSeenCommander > 0) (now - lastSeenCommander) / HOUR else 0.0
             if (silenceH > 4) delta.put("anxiety", d.optDouble("silence_anxiety_per_h_after_4h", 1.0) * dtH)
         }
@@ -215,6 +221,16 @@ object EmotionEngine {
     fun onIgnored(root: File) {
         val d = drift(root)
         applyDelta(root, JSONObject().put("hurt", d.optDouble("ignored_hurt", 15.0)).put("anger", d.optDouble("ignored_anger", 5.0)), "ignored")
+    }
+
+    fun onCommanderMessage(root: File, text: String) {
+        val d = drift(root); val q = text.lowercase(); val delta = JSONObject()
+        val lex = config(root).optJSONObject("lexicon")?.optJSONArray("desire") ?: JSONArray()
+        var hit = false
+        for (i in 0 until lex.length()) if (q.contains(lex.optString(i).lowercase())) { hit = true; break }
+        if (hit) delta.put("desire", d.optDouble("desire_flirt_commander", 12.0))
+        if (RouteSelector.nsfwWindow(root)) delta.put("desire", delta.optDouble("desire", 0.0) + d.optDouble("desire_nsfw_window", 10.0))
+        if (delta.length() > 0) applyDelta(root, delta, "commander_message")
     }
 
     fun onCommanderReply(root: File) {
