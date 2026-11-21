@@ -26,7 +26,7 @@ class AutonomyPackageIntegrationTest {
         assertTrue(html.contains("data-pane=" + "\"diary\""))
         assertFalse(html.contains("data-pane=" + "\"search\""))
         assertFalse(html.contains("data-pane=" + "\"shelf\""))
-        assertTrue(html.contains("e.kind==='thought'"))
+        assertTrue(html.contains("e.kind==='said'"))
     }
 
     @Test
