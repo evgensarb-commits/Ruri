@@ -54,12 +54,6 @@ object ChatEngine {
             val reason = when {
                 selected == null -> "Нет доступного маршрута: список бесплатных моделей пуст"
                 selected.optString("api_key").isBlank() -> "Маршрут $name: API-ключ не задан"
-                meta.optBoolean("needs_vpn", selected.optBoolean("needs_vpn", false)) && !NetState.vpn ->
-                    "Маршрут $name: требуется VPN"
-                !RouteMeta.quotaLeft(root, id, selected.optInt("rpd", 200)) ->
-                    "Маршрут $name: дневная квота исчерпана"
-                !meta.optBoolean("reachable", true) ->
-                    "Маршрут $name: DNS или сервер недоступен при последней проверке"
                 else -> "Маршрут $name: Android сообщает, что сетевого подключения нет"
             }
             return reason
@@ -176,12 +170,6 @@ object ChatEngine {
             val specificReason = when {
                 selected != null && selected.optString("api_key").isBlank() ->
                     "Маршрут $selectedName: API-ключ не задан"
-                selectedMeta.optBoolean("needs_vpn", selected?.optBoolean("needs_vpn", false) ?: false) && !NetState.vpn ->
-                    "Маршрут $selectedName: требуется VPN"
-                selected != null && !RouteMeta.quotaLeft(root, selectedId, selected.optInt("rpd", 200)) ->
-                    "Маршрут $selectedName: дневная квота исчерпана"
-                !selectedMeta.optBoolean("reachable", true) ->
-                    "Маршрут $selectedName: последняя проверка сети не прошла (DNS/доступность)"
                 else -> ""
             }
             val reason = when {
