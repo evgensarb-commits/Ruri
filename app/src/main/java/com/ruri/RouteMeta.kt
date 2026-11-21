@@ -216,7 +216,7 @@ object RouteMeta {
         it.put("success_streak", 0)
         updateTaskScore(it, task, false)
         when (kind) {
-            "quota" -> Unit // No cooldowns: quota limits are enforced by quotaLeft().
+            "quota", "rate_limit" -> Unit // Provider limits are telemetry/scoring only; never block eligibility.
             "network", "timeout" -> {
                 it.put("reachable", false)
                 if (!NetState.vpn) it.put("ru_reachable", false)
