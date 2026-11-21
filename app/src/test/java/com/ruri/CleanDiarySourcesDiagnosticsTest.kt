@@ -14,7 +14,9 @@ class InvalidActionUnwrapTest {
         val result = ToolLoop.unwrapDiaryReply(root,
             """{"action":"write_diary","text":"Сегодня я многое поняла."}""",
             messages) { requested = true; "проза" }
-        assertEquals("Сегодня я многое поняла.", result)
+        val (_, diaryTexts, tools) = ToolLoop.stripActions(result)
+        assertEquals(listOf("Сегодня я многое поняла."), diaryTexts)
+        assertTrue(tools.isEmpty())
         assertFalse(requested)
     }
 }
