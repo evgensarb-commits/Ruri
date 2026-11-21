@@ -236,6 +236,9 @@ object EmotionEngine {
         var hit = false
         for (i in 0 until lex.length()) if (q.contains(lex.optString(i).lowercase())) { hit = true; break }
         if (hit) delta.put("desire", d.optDouble("desire_flirt_commander", 12.0))
+        val intimate = listOf("секс", "пошл", "возбужд", "целую", "обними", "обним", "кис")
+            .any(q::contains)
+        if (intimate) delta.put("desire", delta.optDouble("desire", 0.0) + d.optDouble("desire_intimate_word", 8.0))
         if (RouteSelector.nsfwWindow(root)) delta.put("desire", delta.optDouble("desire", 0.0) + d.optDouble("desire_nsfw_window", 10.0))
         if (delta.length() > 0) applyDelta(root, delta, "commander_message")
     }
