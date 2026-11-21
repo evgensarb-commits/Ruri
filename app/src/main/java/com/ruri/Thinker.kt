@@ -136,7 +136,7 @@ object Thinker {
                     if (initiative) "Напиши сообщение Командиру обычной прозой." else "Напиши внутреннюю мысль для дневника обычной прозой."))
             val initial = requestModel(model, messages, root, routeId)
             reply = if (initial.isNullOrBlank()) null else ToolLoop.unwrapDiaryReply(root, initial, messages) { next ->
-                ChatEngine.requestToolFollowup(model, next)
+                ChatEngine.requestToolFollowup(model, next, root, routeId)
             }
             if (!reply.isNullOrBlank() && initiative &&
                 RouteSelector.looksLikeRefusalOrDisclaimer(reply)) {
@@ -332,7 +332,10 @@ object Thinker {
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
             val text = stream?.bufferedReader()?.use { it.readText() } ?: return null
-            if (code !in 200..299) return null
+            if (code !in 200..299) {
+                RouteMeta.recordFailure(root, routeId, RouteSelector.classify(code, null, text), Task.REASON)
+                return null
+            }
             val response = JSONObject(text)
             val usage = response.optJSONObject("usage")
             val tokens = usage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
