@@ -93,7 +93,7 @@ object RouteSelector {
     fun classify(code: Int?, error: Exception?, responseBody: String = ""): String {
         val body = responseBody.lowercase()
         return when {
-            code == 429 && listOf("rate", "retry", "rpm", "per-minute", "requests per minute").any(body::contains) -> "rate_limit"
+            code == 429 && listOf("rate", "retry", "rpm", "per-minute", "per minute").any(body::contains) -> "rate_limit"
             code == 429 && listOf("quota", "token", "limit reached", "exhausted").any(body::contains) -> "quota"
             code == 429 -> "rate_limit"
             (code == 403 || code == 451) &&
