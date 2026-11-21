@@ -296,6 +296,10 @@ object ChatEngine {
                 val responseText = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
                 diagnostic.put("response_body_ms", SystemClock.elapsedRealtime() - bodyReadStart)
                 if (code !in 200..299) {
+                    val errorUsage = runCatching { JSONObject(responseText).optJSONObject("usage") }.getOrNull()
+                    val errorTokens = errorUsage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
+                        ?: ((errorUsage?.optLong("prompt_tokens", 0L) ?: 0L) + (errorUsage?.optLong("completion_tokens", 0L) ?: 0L))
+                    if (errorTokens > 0) RouteMeta.addTokens(root, routeId, errorTokens)
                     diagnostic.put("stage", "HTTP")
                     diagnostic.put("result", "http_error")
                     val failureKind = RouteSelector.classify(code, null, responseText)
