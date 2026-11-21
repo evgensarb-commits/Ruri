@@ -322,7 +322,7 @@ object ChatEngine {
                 val meta = JSONObject()
                 lastSearchSourceUrls = JSONArray()
                 val rawReply = ToolLoop.unwrapDiaryReply(root, initialReply, messages, meta) { nextMessages ->
-                    requestToolFollowup(model, nextMessages, root, routeId)
+                    requestToolFollowup(model, nextMessages, root, routeId, task)
                 }
                 val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(rawReply)
                 val emotion = if (emotionDelta != null) EmotionEngine.applyDelta(root, emotionDelta, "chat") else null
@@ -339,7 +339,7 @@ object ChatEngine {
                         FileManager.appendEvent(root, SecretRedactor.redactEvent(JSONObject().put("type", "tool_result").put("action", name).put("ok", toolResult.first).put("text", toolResult.second.take(4000))))
                         messages.put(JSONObject().put("role", "user").put("content", "[ИНСТРУМЕНТ $name]: ${toolResult.second.take(4000)}"))
                     }
-                    finalReply = requestToolFollowup(model, messages, root, routeId) ?: clean
+                    finalReply = requestToolFollowup(model, messages, root, routeId, task) ?: clean
                     guard++
                 }
                 val (cleanFinal, tailDiary, _) = ToolLoop.stripActions(finalReply)
@@ -570,11 +570,10 @@ object ChatEngine {
         return "Факт записан в твою L1-память с confidence 0.6."
     }
 
-    internal fun requestToolFollowup(model: JSONObject, messages: JSONArray, root: File? = null, routeId: String = ""): String? {
+    internal fun requestToolFollowup(model: JSONObject, messages: JSONArray, root: File? = null, routeId: String = "", task: Task? = null): String? {
         val base = model.optString("base_url").trimEnd('/')
         if (!base.startsWith("https://")) return null
         var connection: HttpURLConnection? = null
-        if (root != null && routeId.isNotBlank()) RouteMeta.recordAttempt(root, routeId)
         return try {
             connection = (URL(base + "/chat/completions").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
@@ -586,6 +585,7 @@ object ChatEngine {
                 if (key.isNotBlank()) setRequestProperty("Authorization", "Bearer " + key)
             }
             val safeMessages = providerMessagesWithFullMemory(messages) ?: return null
+            if (root != null && routeId.isNotBlank()) RouteMeta.recordAttempt(root, routeId)
             val body = JSONObject().put("model", model.optString("model"))
                 .put("messages", safeMessages).put("temperature", 0.85)
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
@@ -598,7 +598,7 @@ object ChatEngine {
                 val failedTokens = failedUsage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
                     ?: ((failedUsage?.optLong("prompt_tokens", 0L) ?: 0L) + (failedUsage?.optLong("completion_tokens", 0L) ?: 0L))
                 if (root != null && routeId.isNotBlank() && failedTokens > 0) RouteMeta.addTokens(root, routeId, failedTokens)
-                if (root != null && routeId.isNotBlank()) RouteMeta.recordFailure(root, routeId, RouteSelector.classify(code, null, raw))
+                if (root != null && routeId.isNotBlank()) RouteMeta.recordFailure(root, routeId, RouteSelector.classify(code, null, raw), task)
                 return null
             }
             val usage = response.optJSONObject("usage")
