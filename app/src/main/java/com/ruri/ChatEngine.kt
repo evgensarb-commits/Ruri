@@ -39,9 +39,6 @@ object ChatEngine {
         val models = config.optJSONArray("models") ?: JSONArray()
         val current = config.optInt("current", -1)
         if (!NetState.online && !assumeReachable) {
-            if (allowRecovery && Probe.claimRecoveryRefresh()) {
-                Probe.refreshReachability(root, models, topOnly = false, force = true)
-            }
             val reachableOrder = RouteSelector.orderedIndices(
                 root, models, current, Task.CHAT, online = true, vpn = NetState.vpn
             )
@@ -156,11 +153,6 @@ object ChatEngine {
         val task = RouteSelector.detectTask(commanderText)
         fun selectOrder(online: Boolean): List<Int> = RouteSelector.orderedIndices(root, models, current, task, online, NetState.vpn)
         var order = selectOrder(NetState.online || assumeReachable)
-        if (order.isEmpty() && allowRecovery && Probe.claimRecoveryRefresh()) {
-            Probe.refreshReachability(root, models, topOnly = false, force = true)
-            order = selectOrder(online = true)
-            if (order.isNotEmpty()) return respondInternal(root, allowRecovery = false, assumeReachable = true)
-        }
         if (order.isEmpty()) {
             OfflineQueue.markPending(root)
             val selected = models.optJSONObject(current)
