@@ -65,10 +65,7 @@ object RouteSelector {
                 RouteMeta.setNeedsVpn(root, id, true)
             }
             val needsVpn = RouteMeta.route(root, id).optBoolean("needs_vpn", false)
-            if (needsVpn && !vpn) continue
-            if (!vpn && !RouteMeta.route(root, id).optBoolean("ru_reachable", true)) continue
-            if (!RouteMeta.available(root, id, now)) continue
-            if (!RouteMeta.quotaLeft(root, id, model.optInt("rpd", 200))) continue
+            // Reachability and quota are telemetry/scoring only: always retain eligible free routes.
             candidates += index to score(meta, task)
         }
         return candidates.sortedWith(
@@ -87,7 +84,9 @@ object RouteSelector {
     fun classify(code: Int?, error: Exception?, responseBody: String = ""): String {
         val body = responseBody.lowercase()
         return when {
-            code == 429 -> "quota"
+            code == 429 && listOf("rate", "retry", "rpm", "per-minute", "requests per minute").any(body::contains) -> "rate_limit"
+            code == 429 && listOf("quota", "token", "limit reached", "exhausted").any(body::contains) -> "quota"
+            code == 429 -> "rate_limit"
             (code == 403 || code == 451) &&
                 listOf("region", "country", "location", "not available in your", "unsupported territory")
                     .any(body::contains) -> "region"
