@@ -339,7 +339,7 @@ object ChatEngine {
                         FileManager.appendEvent(root, SecretRedactor.redactEvent(JSONObject().put("type", "tool_result").put("action", name).put("ok", toolResult.first).put("text", toolResult.second.take(4000))))
                         messages.put(JSONObject().put("role", "user").put("content", "[ИНСТРУМЕНТ $name]: ${toolResult.second.take(4000)}"))
                     }
-                    finalReply = requestToolFollowup(model, messages) ?: clean
+                    finalReply = requestToolFollowup(model, messages, root, routeId) ?: clean
                     guard++
                 }
                 val (cleanFinal, tailDiary, _) = ToolLoop.stripActions(finalReply)
@@ -574,6 +574,7 @@ object ChatEngine {
         val base = model.optString("base_url").trimEnd('/')
         if (!base.startsWith("https://")) return null
         var connection: HttpURLConnection? = null
+        if (root != null && routeId.isNotBlank()) RouteMeta.recordAttempt(root, routeId)
         return try {
             connection = (URL(base + "/chat/completions").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
@@ -588,9 +589,18 @@ object ChatEngine {
             val body = JSONObject().put("model", model.optString("model"))
                 .put("messages", safeMessages).put("temperature", 0.85)
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-            if (connection.responseCode !in 200..299) return null
-            val raw = connection.inputStream.bufferedReader().use { it.readText() }
-            val response = JSONObject(raw)
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val raw = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            val response = runCatching { JSONObject(raw) }.getOrNull() ?: JSONObject()
+            if (code !in 200..299) {
+                val failedUsage = response.optJSONObject("usage")
+                val failedTokens = failedUsage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
+                    ?: ((failedUsage?.optLong("prompt_tokens", 0L) ?: 0L) + (failedUsage?.optLong("completion_tokens", 0L) ?: 0L))
+                if (root != null && routeId.isNotBlank() && failedTokens > 0) RouteMeta.addTokens(root, routeId, failedTokens)
+                if (root != null && routeId.isNotBlank()) RouteMeta.recordFailure(root, routeId, RouteSelector.classify(code, null, raw))
+                return null
+            }
             val usage = response.optJSONObject("usage")
             val tokens = usage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
                 ?: ((usage?.optLong("prompt_tokens", 0L) ?: 0L) + (usage?.optLong("completion_tokens", 0L) ?: 0L))
