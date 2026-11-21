@@ -9,7 +9,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LivingNoGatesTest {
-    private fun root() = Files.createTempDirectory("ruri-living-no-gates").toFile().also(FileManager::init)
+    private fun root() = Files.createTempDirectory("ruri-living-no-gates").toFile().also { FileManager.init(it) }
     private fun models(vararg ids: String) = JSONArray().also { arr ->
         ids.forEachIndexed { i, id -> arr.put(JSONObject().put("id", id).put("name", id)
             .put("api_key", "test-key").put("free_tier", true).put("enabled", true).put("priority", i)) }
