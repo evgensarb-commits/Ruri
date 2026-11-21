@@ -333,6 +333,10 @@ object Thinker {
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
             val text = stream?.bufferedReader()?.use { it.readText() } ?: return null
             if (code !in 200..299) {
+                val errorUsage = runCatching { JSONObject(text).optJSONObject("usage") }.getOrNull()
+                val errorTokens = errorUsage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
+                    ?: ((errorUsage?.optLong("prompt_tokens", 0L) ?: 0L) + (errorUsage?.optLong("completion_tokens", 0L) ?: 0L))
+                if (errorTokens > 0) RouteMeta.addTokens(root, routeId, errorTokens)
                 RouteMeta.recordFailure(root, routeId, RouteSelector.classify(code, null, text), Task.REASON)
                 return null
             }
