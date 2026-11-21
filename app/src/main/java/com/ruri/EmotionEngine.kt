@@ -50,7 +50,7 @@ object EmotionEngine {
             .put("anger", JSONArray().put("зл").put("бесит").put("раздраж").put("достал"))
             .put("anxiety", JSONArray().put("тревож").put("боюсь").put("страш").put("беспоко"))
             .put("affection", JSONArray().put("люблю").put("нежн").put("скучаю").put("обним"))
-            .put("desire", JSONArray().put("хочу тебя").put("томн").put("возбужд")))
+            .put("desire", JSONArray().put("хочу тебя").put("томн").put("возбужд").put("целую").put("обними").put("люблю").put("моя").put("малыш").put("пошл").put("секс").put("скучаю по тебе").put("кис").put("обним")))
 
     fun ensure(root: File) {
         if (!FileManager.exists(root, CONFIG)) FileManager.write(root, CONFIG, defaults().toString(2))
@@ -58,6 +58,13 @@ object EmotionEngine {
         val defDrift = defaults().optJSONObject("drift") ?: JSONObject()
         val curDrift = cfg.optJSONObject("drift") ?: JSONObject().also { cfg.put("drift", it) }
         for (k in defDrift.keys()) if (!curDrift.has(k)) curDrift.put(k, defDrift.get(k))
+        val defaultsLex = defaults().optJSONObject("lexicon") ?: JSONObject()
+        val lex = cfg.optJSONObject("lexicon") ?: JSONObject()
+        val defaultDesire = defaultsLex.optJSONArray("desire") ?: JSONArray()
+        val currentDesire = lex.optJSONArray("desire") ?: JSONArray()
+        val existingWords = (0 until currentDesire.length()).map { currentDesire.optString(it) }.toSet()
+        for (i in 0 until defaultDesire.length()) if (defaultDesire.optString(i) !in existingWords) currentDesire.put(defaultDesire.optString(i))
+        lex.put("desire", currentDesire); cfg.put("lexicon", lex)
         FileManager.write(root, CONFIG, cfg.toString(2))
         if (!FileManager.exists(root, STATE)) {
             val values = JSONObject()
