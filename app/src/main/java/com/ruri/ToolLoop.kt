@@ -101,6 +101,8 @@ object ToolLoop {
             if (action in allowed && ChatEngine.parseAction(reply) != null && !toolLoopRun) {
                 toolLoopRun = true
                 reply = runToolLoop(root, reply, messages, meta, requestNext = requestNext)
+            } else if (action == "write_diary" || action == "diary") {
+                return reply.trim()
             } else if (json.has("text") && json.opt("text") is String) {
                 return SecretRedactor.redactText(json.optString("text").trim())
             } else {
