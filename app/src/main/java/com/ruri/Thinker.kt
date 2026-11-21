@@ -111,6 +111,7 @@ object Thinker {
         }
         var reply: String? = null
         var successfulIndex = -1
+        var successfulRouteId = ""
         for (index in order) {
             val model = models.optJSONObject(index) ?: continue
             // All cognition routes must carry the full memory context.
@@ -121,7 +122,7 @@ object Thinker {
                 .put(JSONObject().put("role", "system").put("content", prompt))
                 .put(JSONObject().put("role", "user").put("content",
                     if (initiative) "Напиши сообщение Командиру обычной прозой." else "Напиши внутреннюю мысль для дневника обычной прозой."))
-            val initial = requestModel(model, messages)
+            val initial = requestModel(model, messages, root, routeId)
             reply = if (initial.isNullOrBlank()) null else ToolLoop.unwrapDiaryReply(root, initial, messages) { next ->
                 ChatEngine.requestToolFollowup(model, next)
             }
@@ -144,6 +145,7 @@ object Thinker {
             if (!reply.isNullOrBlank()) {
                 runCatching { RouteMeta.recordSuccess(root, routeId, task) }
                 successfulIndex = index
+                successfulRouteId = routeId
                 break
             }
             runCatching { RouteMeta.recordFailure(root, routeId, "other", task) }
@@ -161,45 +163,22 @@ object Thinker {
         }
         val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(reply)
         val emotion = if (emotionDelta != null) EmotionEngine.applyDelta(root, emotionDelta, "thought") else null
-        val safeReply = SecretRedactor.redactText(cleanedReply.trim())
+        val (cleanThought, diaryTexts, _) = ToolLoop.stripActions(cleanedReply)
+        val diaryText = cleanThought.ifBlank { diaryTexts.firstOrNull().orEmpty() }
+        val safeReply = SecretRedactor.redactText(diaryText.trim())
         if (safeReply.isBlank() || ToolLoop.isActionJson(safeReply)) {
             state.put("last_thought", now)
             persistStatePreservingTurnInFlight(root, state)
             return
         }
 
-        val diary = readJson(root, "memory/L2_diary.json")
-        val entries = diary.optJSONArray("entries") ?: JSONArray()
-        if (!initiative && !shouldAppendDiaryEntry(entries, safeReply)) {
-            state.put("last_thought", now)
-            state.put("mood", EmotionEngine.moodLabel(EmotionEngine.readValues(root)))
-            state.put("energy", energyFor())
-            persistStatePreservingTurnInFlight(root, state)
-            return
-        }
-        val diaryEntryId = java.util.UUID.randomUUID().toString()
-        // Use a monotonic sequence independent of the rolling 500-entry window.
-        val totalEntries = maxOf(diary.optLong("total_entries", entries.length().toLong()), entries.length().toLong()) + 1L
-        entries.put(
-            JSONObject()
-                .put("id", diaryEntryId)
-                .put("sequence", totalEntries)
-                .put("ts", now)
-                .put("text", safeReply)
-                .put("trigger", reason)
-                .put("kind", "thought")
-                .put("emotion_before", emotion?.optJSONObject("before"))
-                .put("emotion_delta", emotion?.optJSONObject("delta"))
-                .put("emotion_after", emotion?.optJSONObject("after"))
-                .put("mood_label", emotion?.optString("mood") ?: EmotionEngine.moodLabel(EmotionEngine.readValues(root)))
-        )
-        while (entries.length() > 500) entries.remove(0)
-        diary.put("entries", entries)
-        diary.put("total_entries", totalEntries)
-        diary.put("updated_at", now)
-        FileManager.write(root, "memory/L2_diary.json", diary.toString(2))
+        Diary.append(root, safeReply, reason, emotion, if (initiative) "said" else "thought")
+        val diaryEntryId = runCatching {
+            val entries = readJson(root, "memory/L2_diary.json").optJSONArray("entries") ?: JSONArray()
+            entries.optJSONObject(entries.length() - 1)?.optString("id")
+        }.getOrNull().orEmpty()
         val notificationMessageId = if (initiative) {
-            appendChatMessage(root, "ruri", safeReply, now, ChatEngine.sourceUrlsSnapshot())
+            appendChatMessage(root, "ruri", safeReply, now, ChatEngine.sourceUrlsSnapshot(), successfulRouteId)
         } else diaryEntryId
         Receipts.delivered(root, notificationMessageId)
         if (initiative) {
@@ -319,7 +298,7 @@ object Thinker {
         return SecretRedactor.redactText(prompt)
     }
 
-    private fun requestModel(model: JSONObject, messages: JSONArray): String? {
+    private fun requestModel(model: JSONObject, messages: JSONArray, root: File, routeId: String): String? {
         var connection: HttpURLConnection? = null
         return try {
             val baseUrl = model.optString("base_url").trimEnd('/')
@@ -342,7 +321,12 @@ object Thinker {
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
             val text = stream?.bufferedReader()?.use { it.readText() } ?: return null
             if (code !in 200..299) return null
-            JSONObject(text).getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
+            val response = JSONObject(text)
+            val usage = response.optJSONObject("usage")
+            val tokens = usage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
+                ?: ((usage?.optLong("prompt_tokens", 0L) ?: 0L) + (usage?.optLong("completion_tokens", 0L) ?: 0L))
+            if (tokens > 0) RouteMeta.addTokens(root, routeId, tokens)
+            response.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
         } catch (e: Exception) {
             Log.w("Ruri", "Model request failed", e)
             null
@@ -395,11 +379,12 @@ object Thinker {
         )
     }
 
-    private fun appendChatMessage(root: File, who: String, text: String, ts: Long, sourceUrls: JSONArray = JSONArray()): String {
+    private fun appendChatMessage(root: File, who: String, text: String, ts: Long, sourceUrls: JSONArray = JSONArray(), routeId: String = ""): String {
         val id = java.util.UUID.randomUUID().toString()
         val event = JSONObject().put("id", id).put("ts", ts).put("type", "message")
             .put("source", if (who == "ruri") "agent" else "commander")
             .put("who", who).put("text", text)
+        if (routeId.isNotBlank()) event.put("route", routeId)
         if (sourceUrls.length() > 0) event.put("source_urls", sourceUrls)
         val saved = JSONObject(FileManager.appendEvent(root, event))
         val savedId = saved.optString("id").ifBlank { id }
