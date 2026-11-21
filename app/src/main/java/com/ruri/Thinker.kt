@@ -184,14 +184,17 @@ object Thinker {
             return
         }
 
-        Diary.append(root, safeReply, reason, emotion, if (initiative) "said" else "thought")
-        val diaryEntryId = runCatching {
-            val entries = readJson(root, "memory/L2_diary.json").optJSONArray("entries") ?: JSONArray()
-            entries.optJSONObject(entries.length() - 1)?.optString("id")
-        }.getOrNull().orEmpty()
         val notificationMessageId = if (initiative) {
-            appendChatMessage(root, "ruri", safeReply, now, ChatEngine.sourceUrlsSnapshot(), successfulRouteId)
-        } else diaryEntryId
+            val messageId = appendChatMessage(root, "ruri", safeReply, now, ChatEngine.sourceUrlsSnapshot(), successfulRouteId)
+            Diary.append(root, safeReply, "инициатива", emotion, "said")
+            messageId
+        } else {
+            Diary.append(root, safeReply, reason, emotion, "thought")
+            runCatching {
+                val entries = readJson(root, "memory/L2_diary.json").optJSONArray("entries") ?: JSONArray()
+                entries.optJSONObject(entries.length() - 1)?.optString("id")
+            }.getOrNull().orEmpty()
+        }
         Receipts.delivered(root, notificationMessageId)
         if (initiative) {
             state.put("waiting_for_reply", true)
