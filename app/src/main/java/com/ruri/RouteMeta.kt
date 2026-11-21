@@ -167,12 +167,30 @@ object RouteMeta {
             }
             current = route(root, id)
         }
-        return current.optInt("day_count", 0) < requestsPerDay.coerceAtLeast(1)
+        return true
     }
 
-    fun available(root: File, id: String, now: Long = System.currentTimeMillis()): Boolean {
-        val route = route(root, id)
-        return route.optBoolean("reachable", true)
+    fun available(root: File, id: String, now: Long = System.currentTimeMillis()): Boolean = true
+
+    /** Records provider quota metadata for display/scoring only; never affects eligibility. */
+    fun markQuotaExhausted(root: File, id: String, until: Long = 0L) = update(root, id) {
+        it.put("quota_exhausted_until", until)
+    }
+
+
+    private fun tokenDay(root: File): String {
+        val resetHour = runCatching { JSONObject(SecretStore.readRuntimeConfig(root)).optInt("reset_hour_utc", 0) }.getOrDefault(0).coerceIn(0, 23)
+        val shifted = Date(System.currentTimeMillis() - resetHour * 3600000L)
+        return SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(shifted)
+    }
+
+    @Synchronized
+    fun addTokens(root: File, id: String, tokens: Long) = update(root, id) {
+        val today = tokenDay(root)
+        if (it.optString("tokens_day_key") != today) {
+            it.put("tokens_day_key", today).put("tokens_today", 0L)
+        }
+        it.put("tokens_today", it.optLong("tokens_today", 0L) + tokens.coerceAtLeast(0L))
     }
 
     /** Counts every outbound provider request, including probes and unsuccessful attempts. */
@@ -198,7 +216,7 @@ object RouteMeta {
         it.put("success_streak", 0)
         updateTaskScore(it, task, false)
         when (kind) {
-            "quota" -> Unit // No cooldowns: quota limits are enforced by quotaLeft().
+            "quota", "rate_limit" -> Unit // Provider limits are telemetry/scoring only; never block eligibility.
             "network", "timeout" -> {
                 it.put("reachable", false)
                 if (!NetState.vpn) it.put("ru_reachable", false)

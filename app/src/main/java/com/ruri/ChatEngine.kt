@@ -39,9 +39,6 @@ object ChatEngine {
         val models = config.optJSONArray("models") ?: JSONArray()
         val current = config.optInt("current", -1)
         if (!NetState.online && !assumeReachable) {
-            if (allowRecovery && Probe.claimRecoveryRefresh()) {
-                Probe.refreshReachability(root, models, topOnly = false, force = true)
-            }
             val reachableOrder = RouteSelector.orderedIndices(
                 root, models, current, Task.CHAT, online = true, vpn = NetState.vpn
             )
@@ -54,15 +51,9 @@ object ChatEngine {
             val reason = when {
                 selected == null -> "Нет доступного маршрута: список бесплатных моделей пуст"
                 selected.optString("api_key").isBlank() -> "Маршрут $name: API-ключ не задан"
-                meta.optBoolean("needs_vpn", selected.optBoolean("needs_vpn", false)) && !NetState.vpn ->
-                    "Маршрут $name: требуется VPN"
-                !RouteMeta.quotaLeft(root, id, selected.optInt("rpd", 200)) ->
-                    "Маршрут $name: дневная квота исчерпана"
-                !meta.optBoolean("reachable", true) ->
-                    "Маршрут $name: DNS или сервер недоступен при последней проверке"
                 else -> "Маршрут $name: Android сообщает, что сетевого подключения нет"
             }
-            return if (config.optBoolean("exclusive_route", false)) "$reason. Автоматический переход отключён." else reason
+            return reason
         }
         if (models.length() == 0) {
             OfflineQueue.markPending(root)
@@ -158,18 +149,10 @@ object ChatEngine {
             throw IllegalStateException("Не найдено последнее сообщение командира")
         }
         val commanderText = history.last().optString("content")
+        EmotionEngine.onCommanderMessage(root, commanderText)
         val task = RouteSelector.detectTask(commanderText)
-        val exclusiveRoute = config.optBoolean("exclusive_route", false)
-        fun selectOrder(online: Boolean): List<Int> = RouteRecovery.applyExclusive(
-            RouteSelector.orderedIndices(root, models, current, task, online, NetState.vpn),
-            current, exclusiveRoute
-        )
+        fun selectOrder(online: Boolean): List<Int> = RouteSelector.orderedIndices(root, models, current, task, online, NetState.vpn)
         var order = selectOrder(NetState.online || assumeReachable)
-        if (order.isEmpty() && allowRecovery && Probe.claimRecoveryRefresh()) {
-            Probe.refreshReachability(root, models, topOnly = false, force = true)
-            order = selectOrder(online = true)
-            if (order.isNotEmpty()) return respondInternal(root, allowRecovery = false, assumeReachable = true)
-        }
         if (order.isEmpty()) {
             OfflineQueue.markPending(root)
             val selected = models.optJSONObject(current)
@@ -179,19 +162,11 @@ object ChatEngine {
             val specificReason = when {
                 selected != null && selected.optString("api_key").isBlank() ->
                     "Маршрут $selectedName: API-ключ не задан"
-                selectedMeta.optBoolean("needs_vpn", selected?.optBoolean("needs_vpn", false) ?: false) && !NetState.vpn ->
-                    "Маршрут $selectedName: требуется VPN"
-                selected != null && !RouteMeta.quotaLeft(root, selectedId, selected.optInt("rpd", 200)) ->
-                    "Маршрут $selectedName: дневная квота исчерпана"
-                !selectedMeta.optBoolean("reachable", true) ->
-                    "Маршрут $selectedName: последняя проверка сети не прошла (DNS/доступность)"
                 else -> ""
             }
             val reason = when {
-                exclusiveRoute && specificReason.isNotBlank() -> "$specificReason. Автоматический переход отключён."
-                exclusiveRoute -> "Выбранный маршрут $selectedName недоступен. Автоматический переход отключён."
                 specificReason.isNotBlank() -> specificReason
-                else -> "Нет доступного бесплатного маршрута: проверь подключение, VPN, дневную квоту и ключи."
+                else -> "Нет настроенного бесплатного маршрута с API-ключом."
             }
             throw IllegalStateException(reason)
         }
@@ -225,13 +200,7 @@ object ChatEngine {
                 continue
             }
             val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
-            val routeMeta = RouteMeta.route(root, routeId)
-            if (!RouteMeta.available(root, routeId) ||
-                !RouteMeta.quotaLeft(root, routeId, model.optInt("rpd", 200)) ||
-                (routeMeta.optBoolean("needs_vpn", false) && !NetState.vpn) ||
-                (!NetState.vpn && !routeMeta.optBoolean("ru_reachable", true))) {
-                continue
-            }
+            // No preflight gates: attempt every configured free route; telemetry only.
             // Every provider receives the same complete memory/history context.
             val safeProviderMessages = providerMessagesWithFullMemory(messages)
                 ?: run {
@@ -307,6 +276,10 @@ object ChatEngine {
                 val responseText = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
                 diagnostic.put("response_body_ms", SystemClock.elapsedRealtime() - bodyReadStart)
                 if (code !in 200..299) {
+                    val errorUsage = runCatching { JSONObject(responseText).optJSONObject("usage") }.getOrNull()
+                    val errorTokens = errorUsage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
+                        ?: ((errorUsage?.optLong("prompt_tokens", 0L) ?: 0L) + (errorUsage?.optLong("completion_tokens", 0L) ?: 0L))
+                    if (errorTokens > 0) RouteMeta.addTokens(root, routeId, errorTokens)
                     diagnostic.put("stage", "HTTP")
                     diagnostic.put("result", "http_error")
                     val failureKind = RouteSelector.classify(code, null, responseText)
@@ -324,7 +297,12 @@ object ChatEngine {
                 }
                 stage = "PARSE_RESPONSE"
                 diagnostic.put("stage", stage)
-                val initialReply = JSONObject(responseText).getJSONArray("choices")
+                val responseJson = JSONObject(responseText)
+            val usage = responseJson.optJSONObject("usage")
+            val tokenCount = usage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
+                ?: ((usage?.optLong("prompt_tokens", 0L) ?: 0L) + (usage?.optLong("completion_tokens", 0L) ?: 0L))
+            if (tokenCount > 0) RouteMeta.addTokens(root, routeId, tokenCount)
+            val initialReply = responseJson.getJSONArray("choices")
                     .getJSONObject(0).getJSONObject("message").getString("content").trim()
                 if (initialReply.isBlank()) {
                     diagnostic.put("result", "empty_reply")
@@ -336,11 +314,29 @@ object ChatEngine {
                 val meta = JSONObject()
                 lastSearchSourceUrls = JSONArray()
                 val rawReply = ToolLoop.unwrapDiaryReply(root, initialReply, messages, meta) { nextMessages ->
-                    requestToolFollowup(model, nextMessages)
+                    requestToolFollowup(model, nextMessages, root, routeId, task)
                 }
                 val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(rawReply)
                 val emotion = if (emotionDelta != null) EmotionEngine.applyDelta(root, emotionDelta, "chat") else null
-                val reply = cleanedReply
+                var finalReply = cleanedReply
+                var guard = 0
+                while (guard < 2) {
+                    val (clean, diaryTexts, toolActions) = ToolLoop.stripActions(finalReply)
+                    diaryTexts.forEach { Diary.append(root, it, "chat_write_diary", emotion, "thought") }
+                    if (toolActions.isEmpty()) { finalReply = clean; break }
+                    toolActions.forEach { action ->
+                        val name = action.optString("action")
+                        val toolResult = executeTool(root, name, action)
+                        FileManager.appendEvent(root, SecretRedactor.redactEvent(JSONObject().put("type", "tool_call").put("action", name).put("params", action)))
+                        FileManager.appendEvent(root, SecretRedactor.redactEvent(JSONObject().put("type", "tool_result").put("action", name).put("ok", toolResult.first).put("text", toolResult.second.take(4000))))
+                        messages.put(JSONObject().put("role", "user").put("content", "[ИНСТРУМЕНТ $name]: ${toolResult.second.take(4000)}"))
+                    }
+                    finalReply = requestToolFollowup(model, messages, root, routeId, task) ?: clean
+                    guard++
+                }
+                val (cleanFinal, tailDiary, _) = ToolLoop.stripActions(finalReply)
+                tailDiary.forEach { Diary.append(root, it, "chat_write_diary", emotion, "thought") }
+                val reply = cleanFinal.ifBlank { finalReply }
                 if (recordAdultRefusal(
                         root = root,
                         routeId = routeId,
@@ -364,7 +360,7 @@ object ChatEngine {
                 // Keep Routeway as primary; fallback success is temporary, not a reconfiguration.
                 appendFinalReply(
                     root, reply, emotion, meta,
-                    model.optString("name", model.optString("id", "маршрут"))
+                    routeId
                 )
                 runCatching { BackupPolicy.checkpointState(root) }
                 runCatching { OfflineQueue.clear(root) }
@@ -566,7 +562,7 @@ object ChatEngine {
         return "Факт записан в твою L1-память с confidence 0.6."
     }
 
-    internal fun requestToolFollowup(model: JSONObject, messages: JSONArray): String? {
+    internal fun requestToolFollowup(model: JSONObject, messages: JSONArray, root: File? = null, routeId: String = "", task: Task? = null): String? {
         val base = model.optString("base_url").trimEnd('/')
         if (!base.startsWith("https://")) return null
         var connection: HttpURLConnection? = null
@@ -581,12 +577,27 @@ object ChatEngine {
                 if (key.isNotBlank()) setRequestProperty("Authorization", "Bearer " + key)
             }
             val safeMessages = providerMessagesWithFullMemory(messages) ?: return null
+            if (root != null && routeId.isNotBlank()) RouteMeta.recordAttempt(root, routeId)
             val body = JSONObject().put("model", model.optString("model"))
                 .put("messages", safeMessages).put("temperature", 0.85)
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-            if (connection.responseCode !in 200..299) return null
-            val raw = connection.inputStream.bufferedReader().use { it.readText() }
-            JSONObject(raw).getJSONArray("choices").getJSONObject(0)
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val raw = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            val response = runCatching { JSONObject(raw) }.getOrNull() ?: JSONObject()
+            if (code !in 200..299) {
+                val failedUsage = response.optJSONObject("usage")
+                val failedTokens = failedUsage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
+                    ?: ((failedUsage?.optLong("prompt_tokens", 0L) ?: 0L) + (failedUsage?.optLong("completion_tokens", 0L) ?: 0L))
+                if (root != null && routeId.isNotBlank() && failedTokens > 0) RouteMeta.addTokens(root, routeId, failedTokens)
+                if (root != null && routeId.isNotBlank()) RouteMeta.recordFailure(root, routeId, RouteSelector.classify(code, null, raw), task)
+                return null
+            }
+            val usage = response.optJSONObject("usage")
+            val tokens = usage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
+                ?: ((usage?.optLong("prompt_tokens", 0L) ?: 0L) + (usage?.optLong("completion_tokens", 0L) ?: 0L))
+            if (root != null && routeId.isNotBlank() && tokens > 0) RouteMeta.addTokens(root, routeId, tokens)
+            response.getJSONArray("choices").getJSONObject(0)
                 .getJSONObject("message").getString("content").trim()
         } catch (_: Exception) {
             null
@@ -627,7 +638,7 @@ object ChatEngine {
     ): String {
         val id = java.util.UUID.randomUUID().toString()
         val event = JSONObject().put("id", id).put("type", "message")
-            .put("source", "agent").put("who", "ruri").put("text", reply)
+            .put("source", "agent").put("who", "ruri").put("text", reply).put("route", routeName)
         if (sourceUrls.length() > 0 || includeEmptySources) event.put("source_urls", JSONArray(sourceUrls.toString()))
         if (searchOk != null) event.put("search_ok", searchOk)
         if (emotion != null) {
@@ -637,6 +648,7 @@ object ChatEngine {
                 .put("mood_label", emotion.optString("mood"))
         }
         val saved = JSONObject(FileManager.appendEvent(root, event))
+        Diary.append(root, reply, "ответ_командиру", emotion, "said")
         val savedId = saved.optString("id").ifBlank { id }
         Receipts.delivered(root, savedId)
         lastFinalMessageId = savedId

@@ -8,15 +8,15 @@ import javax.net.ssl.SSLException
 internal object RouteRecovery {
     const val THROTTLE_MS = 60_000L
     fun shouldRefresh(lastRefreshAt: Long, now: Long): Boolean = now - lastRefreshAt >= THROTTLE_MS
-    fun applyExclusive(order: List<Int>, current: Int, exclusive: Boolean): List<Int> =
-        if (exclusive) order.filter { it == current } else order
     fun isNetworkFailure(kind: String): Boolean = kind == "network" || kind == "timeout"
     fun describeHttpError(route: String, code: Int, kind: String): String {
         val reason = when {
             code == 401 -> "ключ отсутствует или отклонён"
             code == 403 && kind == "region" -> "доступ ограничен регионом; проверь VPN"
             code == 403 -> "сервер запретил доступ (403)"
-            code == 429 || kind == "quota" -> "квота исчерпана или действует лимит запросов"
+            code == 429 && kind == "quota" -> "дневная квота провайдера исчерпана"
+            code == 429 || kind == "rate_limit" -> "ограничение частоты запросов (429)"
+            kind == "quota" -> "квота провайдера исчерпана"
             code in 500..599 -> "ошибка сервера провайдера"
             else -> "HTTP $code"
         }

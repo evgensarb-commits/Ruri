@@ -6,7 +6,24 @@ import java.io.File
 
 /** Shared action protocol and prose guard for interactive and autonomous model turns. */
 object ToolLoop {
-    private val allowed = setOf("search", "list_shelf", "read_shelf", "recall", "remember_fact")
+    private val allowed = setOf("search", "list_shelf", "read_shelf", "recall", "remember_fact", "read_url")
+
+    private val actionBlock = Regex("\\{[^{}]*?\\\"action\\\"\\s*:\\s*\\\"[a-z_]+\\\"[^{}]*?\\}")
+
+    fun stripActions(reply: String): Triple<String, List<String>, List<JSONObject>> {
+        val diary = mutableListOf<String>(); val tools = mutableListOf<JSONObject>()
+        var cleaned = reply
+        for (match in actionBlock.findAll(reply)) {
+            cleaned = cleaned.replace(match.value, "")
+            val action = runCatching { JSONObject(match.value) }.getOrNull() ?: continue
+            when (action.optString("action")) {
+                "write_diary", "diary" -> action.optString("text").trim().takeIf { it.isNotBlank() }?.let(diary::add)
+                "search", "list_shelf", "read_shelf", "recall", "remember_fact", "read_url" -> tools.add(action)
+                else -> Unit
+            }
+        }
+        return Triple(cleaned.replace(Regex("\\n{3,}"), "\\n\\n").trim(), diary, tools)
+    }
 
     fun runToolLoop(
         root: File,
@@ -84,6 +101,8 @@ object ToolLoop {
             if (action in allowed && ChatEngine.parseAction(reply) != null && !toolLoopRun) {
                 toolLoopRun = true
                 reply = runToolLoop(root, reply, messages, meta, requestNext = requestNext)
+            } else if (action == "write_diary" || action == "diary") {
+                return reply.trim()
             } else if (json.has("text") && json.opt("text") is String) {
                 return SecretRedactor.redactText(json.optString("text").trim())
             } else {

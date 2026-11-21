@@ -30,10 +30,13 @@ class ErrorSurfaceTest {
     }
 }
 
-class PinAndExclusiveRouteTest {
-    @Test fun exclusiveModeKeepsOnlyCommanderSelectedRoute() {
-        assertEquals(listOf(2), RouteRecovery.applyExclusive(listOf(0, 2, 1), 2, true))
-        assertEquals(listOf(0, 2, 1), RouteRecovery.applyExclusive(listOf(0, 2, 1), 2, false))
+class PrimaryRouteFailoverTest {
+    @Test fun selectedPrimaryIsFirstAndFallbackRoutesRemainAvailable() {
+        val models = JSONArray()
+            .put(JSONObject().put("id", "first").put("free_tier", true).put("priority", 1))
+            .put(JSONObject().put("id", "backup-a").put("free_tier", true).put("priority", 3))
+            .put(JSONObject().put("id", "backup-b").put("free_tier", true).put("priority", 2))
+        assertEquals(listOf(2, 0, 1), FreeModelRouter.orderedIndices(models, 2))
     }
 }
 

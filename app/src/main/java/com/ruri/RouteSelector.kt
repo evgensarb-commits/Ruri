@@ -10,7 +10,7 @@ import javax.net.ssl.SSLException
 
 enum class Task { CHAT, WARMTH, REASON, CREATIVE, VISION, TOOLS }
 
-/** Selects explicitly free routes using reachability, quota, VPN, and task score only. */
+/** Selects free routes: configured primary first, then score-ranked failover routes. */
 object RouteSelector {
     fun detectTask(text: String, hasImage: Boolean = false): Task = when {
         hasImage -> Task.VISION
@@ -19,6 +19,15 @@ object RouteSelector {
         Regex("(?i)(плохо|тяжело|больно|устал|хуев|грустно|обними|рядом|одиноко)").containsMatchIn(text) -> Task.WARMTH
         Regex("(?i)(найди в интернет|погугли|search|инструмент|tool)").containsMatchIn(text) -> Task.TOOLS
         else -> Task.CHAT
+    }
+
+    fun nsfwWindow(root: File, now: Long = System.currentTimeMillis()): Boolean {
+        val latest = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 300)
+            .asReversed().asSequence().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+            .firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" }
+            ?: return false
+        val ts = latest.optLong("ts", latest.optLong("timestamp", 0L))
+        return ts > 0L && now >= ts && now - ts <= 6L * 60L * 60L * 1000L && isAdultTopic(latest.optString("text"))
     }
 
     fun isAdultTopic(text: String): Boolean {
@@ -65,15 +74,12 @@ object RouteSelector {
                 RouteMeta.setNeedsVpn(root, id, true)
             }
             val needsVpn = RouteMeta.route(root, id).optBoolean("needs_vpn", false)
-            if (needsVpn && !vpn) continue
-            if (!vpn && !RouteMeta.route(root, id).optBoolean("ru_reachable", true)) continue
-            if (!RouteMeta.available(root, id, now)) continue
-            if (!RouteMeta.quotaLeft(root, id, model.optInt("rpd", 200))) continue
+            // Reachability and quota are telemetry/scoring only: always retain eligible free routes.
             candidates += index to score(meta, task)
         }
         return candidates.sortedWith(
-            compareByDescending<Pair<Int, Double>> { it.second }
-                .thenBy { if (it.first == current) 0 else 1 }
+            compareBy<Pair<Int, Double>> { if (it.first == current) 0 else 1 }
+                .thenByDescending { it.second }
                 .thenBy { models.optJSONObject(it.first)?.optInt("priority", 100) ?: 100 }
                 .thenByDescending {
                     val model = models.optJSONObject(it.first)
@@ -87,7 +93,9 @@ object RouteSelector {
     fun classify(code: Int?, error: Exception?, responseBody: String = ""): String {
         val body = responseBody.lowercase()
         return when {
-            code == 429 -> "quota"
+            code == 429 && listOf("rate", "retry", "rpm", "per-minute", "requests per minute").any(body::contains) -> "rate_limit"
+            code == 429 && listOf("quota", "token", "limit reached", "exhausted").any(body::contains) -> "quota"
+            code == 429 -> "rate_limit"
             (code == 403 || code == 451) &&
                 listOf("region", "country", "location", "not available in your", "unsupported territory")
                     .any(body::contains) -> "region"
