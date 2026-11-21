@@ -109,6 +109,11 @@ class LivingNoGatesTest {
         assertEquals("rate_limit", RouteSelector.classify(429, null, "too many requests"))
     }
 
+    @Test fun DesirePromptPreservesFlirtDeltaGuidanceTest() {
+        val root = root()
+        assertTrue(EmotionEngine.promptSection(root).contains("до +20 уместно"))
+    }
+
     @Test fun DesireTriggersTest() {
         val root = root()
         FileManager.appendEvent(root, JSONObject().put("type", "message").put("who", "commander")
