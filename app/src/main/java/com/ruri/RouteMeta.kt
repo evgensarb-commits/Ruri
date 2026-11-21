@@ -176,9 +176,15 @@ object RouteMeta {
     }
 
 
+    private fun tokenDay(root: File): String {
+        val resetHour = runCatching { JSONObject(SecretStore.readRuntimeConfig(root)).optInt("reset_hour_utc", 0) }.getOrDefault(0).coerceIn(0, 23)
+        val shifted = Date(System.currentTimeMillis() - resetHour * 3600000L)
+        return SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(shifted)
+    }
+
     @Synchronized
     fun addTokens(root: File, id: String, tokens: Long) = update(root, id) {
-        val today = utcDay()
+        val today = tokenDay(root)
         if (it.optString("tokens_day_key") != today) {
             it.put("tokens_day_key", today).put("tokens_today", 0L)
         }
