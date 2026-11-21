@@ -134,7 +134,7 @@ object Thinker {
                 .put(JSONObject().put("role", "system").put("content", prompt))
                 .put(JSONObject().put("role", "user").put("content",
                     if (initiative) "Напиши сообщение Командиру обычной прозой." else "Напиши внутреннюю мысль для дневника обычной прозой."))
-            val initial = requestModel(model, messages, root, routeId)
+            val initial = requestModel(model, messages, root, routeId, task)
             reply = if (initial.isNullOrBlank()) null else ToolLoop.unwrapDiaryReply(root, initial, messages) { next ->
                 ChatEngine.requestToolFollowup(model, next, root, routeId)
             }
@@ -310,7 +310,7 @@ object Thinker {
         return SecretRedactor.redactText(prompt)
     }
 
-    private fun requestModel(model: JSONObject, messages: JSONArray, root: File, routeId: String): String? {
+    private fun requestModel(model: JSONObject, messages: JSONArray, root: File, routeId: String, task: Task): String? {
         var connection: HttpURLConnection? = null
         return try {
             val baseUrl = model.optString("base_url").trimEnd('/')
@@ -337,7 +337,7 @@ object Thinker {
                 val errorTokens = errorUsage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
                     ?: ((errorUsage?.optLong("prompt_tokens", 0L) ?: 0L) + (errorUsage?.optLong("completion_tokens", 0L) ?: 0L))
                 if (errorTokens > 0) RouteMeta.addTokens(root, routeId, errorTokens)
-                RouteMeta.recordFailure(root, routeId, RouteSelector.classify(code, null, text), Task.REASON)
+                RouteMeta.recordFailure(root, routeId, RouteSelector.classify(code, null, text), task)
                 return null
             }
             val response = JSONObject(text)
