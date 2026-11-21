@@ -9,7 +9,7 @@ import org.junit.Test
 
 class RouteSelectorTest {
     @Test
-    fun prefersHigherPerTaskScoreAndNeverSelectsPaidRoutes() {
+    fun keepsConfiguredPrimaryAndScoreRanksFallbacksWithoutPaidRoutes() {
         val root = Files.createTempDirectory("ruri-route-selector").toFile()
         try {
             val models = JSONArray()
@@ -26,7 +26,11 @@ class RouteSelectorTest {
             val order = RouteSelector.orderedIndices(
                 root, models, current = 0, task = Task.WARMTH, online = true, vpn = false
             )
-            assertEquals(listOf(1, 0), order)
+            assertEquals(listOf(0, 1), order)
+            val fallbackScores = RouteSelector.orderedIndices(
+                root, models, current = -1, task = Task.WARMTH, online = true, vpn = false
+            )
+            assertEquals(listOf(1, 0), fallbackScores)
             assertTrue(order.none { models.getJSONObject(it).optString("id") == "paid" })
         } finally {
             root.deleteRecursively()
@@ -34,7 +38,7 @@ class RouteSelectorTest {
     }
 
     @Test
-    fun vpnDownUsesOnlyRoutesKnownToBeReachableWithoutVpn() {
+    fun vpnAndReachabilityMetadataNeverBlockConfiguredFreeRoutes() {
         val root = Files.createTempDirectory("ruri-vpn-routes").toFile()
         try {
             val models = JSONArray()
@@ -46,7 +50,7 @@ class RouteSelectorTest {
             RouteMeta.update(root, "vpn-only") { it.put("ru_reachable", false) }
 
             assertEquals(
-                listOf(1),
+                listOf(0, 1),
                 RouteSelector.orderedIndices(root, models, 0, Task.CHAT, online = true, vpn = false)
             )
             assertEquals(
