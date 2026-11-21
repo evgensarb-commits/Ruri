@@ -10,7 +10,7 @@ import javax.net.ssl.SSLException
 
 enum class Task { CHAT, WARMTH, REASON, CREATIVE, VISION, TOOLS }
 
-/** Selects explicitly free routes using reachability, quota, VPN, and task score only. */
+/** Selects free routes: configured primary first, then score-ranked failover routes. */
 object RouteSelector {
     fun detectTask(text: String, hasImage: Boolean = false): Task = when {
         hasImage -> Task.VISION
