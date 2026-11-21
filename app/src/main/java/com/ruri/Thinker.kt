@@ -89,6 +89,18 @@ object Thinker {
             return
         }
 
+        if (originalReason == "online_after_offline" && OfflineQueue.hasPending(root)) {
+            val latestMessages = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 300)
+                .asReversed().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+                .filter { it.optString("type") == "message" && !Tombstone.isDeleted(root, it.optString("id")) }
+            val latest = latestMessages.firstOrNull()
+            if (latest?.optString("who") == "commander") {
+                val answer = runCatching { ChatEngine.respond(root) }.getOrNull()
+                if (!answer.isNullOrBlank()) Notifier.thought(ctx, answer, ChatEngine.lastSavedReplyId().orEmpty())
+                return
+            }
+        }
+
         val config = try { JSONObject(SecretStore.readRuntimeConfig(root)) } catch (e: Exception) {
             Log.e("Ruri", "Could not load model configuration", e)
             readJson(root, "core/config.json")
