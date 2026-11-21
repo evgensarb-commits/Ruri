@@ -15,7 +15,8 @@ class RouteMetaTest {
             RouteMeta.recordAttempt(root, "route-test")
             assertTrue(RouteMeta.quotaLeft(root, "route-test", 2))
             RouteMeta.recordAttempt(root, "route-test")
-            assertFalse(RouteMeta.quotaLeft(root, "route-test", 2))
+            assertTrue(RouteMeta.quotaLeft(root, "route-test", 2))
+            assertEquals(2, RouteMeta.route(root, "route-test").optInt("day_count"))
         } finally {
             root.deleteRecursively()
         }
