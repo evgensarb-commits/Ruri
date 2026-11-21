@@ -14,13 +14,13 @@ object ToolLoop {
         val diary = mutableListOf<String>(); val tools = mutableListOf<JSONObject>()
         var cleaned = reply
         for (match in actionBlock.findAll(reply)) {
+            cleaned = cleaned.replace(match.value, "")
             val action = runCatching { JSONObject(match.value) }.getOrNull() ?: continue
             when (action.optString("action")) {
                 "write_diary", "diary" -> action.optString("text").trim().takeIf { it.isNotBlank() }?.let(diary::add)
                 "search", "list_shelf", "read_shelf", "recall", "remember_fact", "read_url" -> tools.add(action)
                 else -> Unit
             }
-            cleaned = cleaned.replace(match.value, "")
         }
         return Triple(cleaned.replace(Regex("\\n{3,}"), "\\n\\n").trim(), diary, tools)
     }
