@@ -1,6 +1,9 @@
 package com.ruri
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkRequest
 import android.util.Log
 import androidx.work.BackoffPolicy
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -20,14 +23,30 @@ import java.util.concurrent.TimeUnit
 object LifeScheduler {
     private const val PERIODIC_NAME = "ru-r1-periodic-life"
     private const val EVENT_NAME = "ru-r1-event-cognition"
+    @Volatile private var networkCallbackRegistered = false
 
     fun ensurePeriodic(context: Context) {
+        registerConnectivityWake(context.applicationContext)
         val request = PeriodicWorkRequestBuilder<RuriLifeWorker>(15, TimeUnit.MINUTES)
             .addTag(PERIODIC_NAME)
             .build()
 
         WorkManager.getInstance(context.applicationContext)
             .enqueueUniquePeriodicWork(PERIODIC_NAME, ExistingPeriodicWorkPolicy.UPDATE, request)
+    }
+
+    private fun registerConnectivityWake(context: Context) {
+        if (networkCallbackRegistered) return
+        synchronized(this) {
+            if (networkCallbackRegistered) return
+            val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            manager.registerNetworkCallback(NetworkRequest.Builder().build(), object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    if (OfflineQueue.hasPending(context.filesDir)) Thinker.wake(context, "online_after_offline")
+                }
+            })
+            networkCallbackRegistered = true
+        }
     }
 
     fun enqueueEvent(context: Context, reason: String) {
