@@ -330,7 +330,7 @@ object ChatEngine {
                 val meta = JSONObject()
                 lastSearchSourceUrls = JSONArray()
                 val rawReply = ToolLoop.unwrapDiaryReply(root, initialReply, messages, meta) { nextMessages ->
-                    requestToolFollowup(model, nextMessages)
+                    requestToolFollowup(model, nextMessages, root, routeId)
                 }
                 val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(rawReply)
                 val emotion = if (emotionDelta != null) EmotionEngine.applyDelta(root, emotionDelta, "chat") else null
@@ -578,7 +578,7 @@ object ChatEngine {
         return "Факт записан в твою L1-память с confidence 0.6."
     }
 
-    internal fun requestToolFollowup(model: JSONObject, messages: JSONArray): String? {
+    internal fun requestToolFollowup(model: JSONObject, messages: JSONArray, root: File? = null, routeId: String = ""): String? {
         val base = model.optString("base_url").trimEnd('/')
         if (!base.startsWith("https://")) return null
         var connection: HttpURLConnection? = null
@@ -598,7 +598,12 @@ object ChatEngine {
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             if (connection.responseCode !in 200..299) return null
             val raw = connection.inputStream.bufferedReader().use { it.readText() }
-            JSONObject(raw).getJSONArray("choices").getJSONObject(0)
+            val response = JSONObject(raw)
+            val usage = response.optJSONObject("usage")
+            val tokens = usage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
+                ?: ((usage?.optLong("prompt_tokens", 0L) ?: 0L) + (usage?.optLong("completion_tokens", 0L) ?: 0L))
+            if (root != null && routeId.isNotBlank() && tokens > 0) RouteMeta.addTokens(root, routeId, tokens)
+            response.getJSONArray("choices").getJSONObject(0)
                 .getJSONObject("message").getString("content").trim()
         } catch (_: Exception) {
             null
