@@ -321,7 +321,7 @@ class MainActivity : AppCompatActivity() {
                     val id = model.optString("id").ifBlank { model.optString("name") }
                     val meta = RouteMeta.route(filesDir, id)
                     val requests = meta.optInt("day_count", 0)
-                    val tokens = meta.optLong("tokens_today", 0L)
+                    val tokens = RouteMeta.tokensToday(filesDir, id)
                     val limit = model.optLong("token_limit_daily", model.optLong("tokens_per_day", 0L))
                     val until = meta.optLong("quota_exhausted_until", 0L)
                     val tokenText = if (limit > 0) " · токены $tokens/$limit" else " · токены $tokens/лимит не задан"
