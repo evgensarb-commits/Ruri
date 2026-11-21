@@ -190,6 +190,13 @@ object Thinker {
             Diary.append(root, safeReply, "инициатива", emotion, "said")
             messageId
         } else {
+            if (Diary.isDuplicate(root, safeReply, "thought")) {
+                state.put("last_thought", now)
+                state.put("mood", EmotionEngine.moodLabel(EmotionEngine.readValues(root)))
+                state.put("energy", energyFor())
+                persistStatePreservingTurnInFlight(root, state)
+                return
+            }
             Diary.append(root, safeReply, reason, emotion, "thought")
             runCatching {
                 val entries = readJson(root, "memory/L2_diary.json").optJSONArray("entries") ?: JSONArray()
