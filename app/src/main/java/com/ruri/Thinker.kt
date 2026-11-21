@@ -136,7 +136,7 @@ object Thinker {
                     if (initiative) "Напиши сообщение Командиру обычной прозой." else "Напиши внутреннюю мысль для дневника обычной прозой."))
             val initial = requestModel(model, messages, root, routeId, task)
             reply = if (initial.isNullOrBlank()) null else ToolLoop.unwrapDiaryReply(root, initial, messages) { next ->
-                ChatEngine.requestToolFollowup(model, next, root, routeId)
+                ChatEngine.requestToolFollowup(model, next, root, routeId, task)
             }
             if (!reply.isNullOrBlank() && initiative &&
                 RouteSelector.looksLikeRefusalOrDisclaimer(reply)) {
