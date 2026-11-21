@@ -27,7 +27,7 @@ object RouteSelector {
             .firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" }
             ?: return false
         val ts = latest.optLong("ts", latest.optLong("timestamp", 0L))
-        return ts > 0L && now - ts in 0..(6L * 60L * 60L * 1000L) && isAdultTopic(latest.optString("text"))
+        return ts > 0L && now >= ts && now - ts <= 6L * 60L * 60L * 1000L && isAdultTopic(latest.optString("text"))
     }
 
     fun isAdultTopic(text: String): Boolean {
