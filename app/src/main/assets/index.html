@@ -155,7 +155,7 @@ var box=$('#chat');box.innerHTML='';var badges=routeBadges();
 var events=read('memory/L0_raw.jsonl').split('\n').map(function(line){try{return JSON.parse(line);}catch(_){return null;}}).filter(function(e){return e&&e.type==='message'&&e.who&&!Ruri.isMessageDeleted(e.id||'');});
 events.forEach(function(e){if(e.who==='ruri'&&e.id)Ruri.markReadByCommander(e.id);});
 refreshMessageReceipts();
-events.forEach(function(e){var b=badges[String(e.ts)];box.appendChild(messageNode(e.who,e.text,e.ts,e,b&&b.route));});
+events.forEach(function(e){var b=badges[String(e.ts)];box.appendChild(messageNode(e.who,e.text,e.ts,e,e.route||(b&&b.route)));});
 box.scrollTop=box.scrollHeight;
 }
 function loadDiary(){
