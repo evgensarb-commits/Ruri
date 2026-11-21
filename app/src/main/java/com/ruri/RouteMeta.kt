@@ -170,9 +170,11 @@ object RouteMeta {
         return true
     }
 
-    fun available(root: File, id: String, now: Long = System.currentTimeMillis()): Boolean {
-        val route = route(root, id)
-        return true
+    fun available(root: File, id: String, now: Long = System.currentTimeMillis()): Boolean = true
+
+    /** Records provider quota metadata for display/scoring only; never affects eligibility. */
+    fun markQuotaExhausted(root: File, id: String, until: Long = 0L) = update(root, id) {
+        it.put("quota_exhausted_until", until)
     }
 
 
