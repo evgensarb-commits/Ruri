@@ -21,6 +21,15 @@ object RouteSelector {
         else -> Task.CHAT
     }
 
+    fun nsfwWindow(root: File, now: Long = System.currentTimeMillis()): Boolean {
+        val latest = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 300)
+            .asReversed().asSequence().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+            .firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" }
+            ?: return false
+        val ts = latest.optLong("ts", latest.optLong("timestamp", 0L))
+        return ts > 0L && now - ts in 0..(6L * 60L * 60L * 1000L) && isAdultTopic(latest.optString("text"))
+    }
+
     fun isAdultTopic(text: String): Boolean {
         val value = text.lowercase()
         return listOf(
