@@ -78,8 +78,8 @@ object RouteSelector {
             candidates += index to score(meta, task)
         }
         return candidates.sortedWith(
-            compareByDescending<Pair<Int, Double>> { it.second }
-                .thenBy { if (it.first == current) 0 else 1 }
+            compareBy<Pair<Int, Double>> { if (it.first == current) 0 else 1 }
+                .thenByDescending { it.second }
                 .thenBy { models.optJSONObject(it.first)?.optInt("priority", 100) ?: 100 }
                 .thenByDescending {
                     val model = models.optJSONObject(it.first)
