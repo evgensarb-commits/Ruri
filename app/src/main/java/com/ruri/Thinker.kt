@@ -134,7 +134,8 @@ object Thinker {
                 .put(JSONObject().put("role", "system").put("content", prompt))
                 .put(JSONObject().put("role", "user").put("content",
                     if (initiative) "Напиши сообщение Командиру обычной прозой." else "Напиши внутреннюю мысль для дневника обычной прозой."))
-            val initial = requestModel(model, messages, root, routeId, task)
+            var requestFailureClassified = false
+            val initial = requestModel(model, messages, root, routeId, task) { requestFailureClassified = true }
             reply = if (initial.isNullOrBlank()) null else ToolLoop.unwrapDiaryReply(root, initial, messages) { next ->
                 ChatEngine.requestToolFollowup(model, next, root, routeId, task)
             }
@@ -160,7 +161,7 @@ object Thinker {
                 successfulRouteId = routeId
                 break
             }
-            runCatching { RouteMeta.recordFailure(root, routeId, "other", task) }
+            if (!requestFailureClassified) runCatching { RouteMeta.recordFailure(root, routeId, "other", task) }
             appendEvent(root, "model_error", JSONObject().put("model", model.optString("name", "unknown")))
         }
 
@@ -313,7 +314,7 @@ object Thinker {
         return SecretRedactor.redactText(prompt)
     }
 
-    private fun requestModel(model: JSONObject, messages: JSONArray, root: File, routeId: String, task: Task): String? {
+    private fun requestModel(model: JSONObject, messages: JSONArray, root: File, routeId: String, task: Task, onClassifiedFailure: () -> Unit): String? {
         var connection: HttpURLConnection? = null
         return try {
             val baseUrl = model.optString("base_url").trimEnd('/')
@@ -341,6 +342,7 @@ object Thinker {
                     ?: ((errorUsage?.optLong("prompt_tokens", 0L) ?: 0L) + (errorUsage?.optLong("completion_tokens", 0L) ?: 0L))
                 if (errorTokens > 0) RouteMeta.addTokens(root, routeId, errorTokens)
                 RouteMeta.recordFailure(root, routeId, RouteSelector.classify(code, null, text), task)
+                onClassifiedFailure()
                 return null
             }
             val response = JSONObject(text)
@@ -350,6 +352,8 @@ object Thinker {
             if (tokens > 0) RouteMeta.addTokens(root, routeId, tokens)
             response.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
         } catch (e: Exception) {
+            RouteMeta.recordFailure(root, routeId, RouteSelector.classify(null, e), task)
+            onClassifiedFailure()
             Log.w("Ruri", "Model request failed", e)
             null
         } finally { connection?.disconnect() }
