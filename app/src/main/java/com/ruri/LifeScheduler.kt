@@ -240,7 +240,6 @@ class RuriLifeWorker(
             (th.optDouble("reflection_h", 6.0) * 3_600_000.0).toLong()
 
         if (!initiativeDue && !notificationEvent && !explicitSelfTask && !reflectionDue) return false
-        if (BatteryLevel.get(context) <= 12 && !initiativeDue) return false
 
         val config = try { JSONObject(SecretStore.readRuntimeConfig(root)) } catch (_: Exception) { return false }
         if (!NetState.online) return false
