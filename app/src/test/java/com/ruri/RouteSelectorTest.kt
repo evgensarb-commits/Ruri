@@ -38,6 +38,14 @@ class RouteSelectorTest {
     }
 
     @Test
+    fun classifiesPerMinute429AsRateLimitAndQuota429AsQuota() {
+        assertEquals("rate_limit", RouteSelector.classify(429, null, "Too many requests per minute"))
+        assertEquals("rate_limit", RouteSelector.classify(429, null, "RPM limit"))
+        assertEquals("quota", RouteSelector.classify(429, null, "token quota exhausted"))
+        assertEquals("rate_limit", RouteSelector.classify(429, null, "Too many requests"))
+    }
+
+    @Test
     fun vpnAndReachabilityMetadataNeverBlockConfiguredFreeRoutes() {
         val root = Files.createTempDirectory("ruri-vpn-routes").toFile()
         try {
