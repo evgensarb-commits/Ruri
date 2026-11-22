@@ -58,13 +58,10 @@ object LifeStateEngine {
         val quietHours = if (lastSeen <= 0L) 0.0 else
             ((now - lastSeen).coerceAtLeast(0L) / 3_600_000.0)
 
-        // The live need has a stable baseline; battery is sensor context, not a cognitive gate.
-        // Personal energy is calculated from time-of-day in Thinker.energyFor().
-        val liveNeed = 0.38
-        val connectionNeed = min(0.95, 0.35 + (quietHours / 18.0) * 0.5)
+        val calculatedNeeds = calculateNeeds(lastSeen, now)
         val needs = state.optJSONObject("needs") ?: JSONObject()
-        needs.put("live", liveNeed)
-        needs.put("love_commander", connectionNeed)
+        needs.put("live", calculatedNeeds.optDouble("live"))
+        needs.put("love_commander", calculatedNeeds.optDouble("love_commander"))
         needs.put("updated_at", now)
         state.put("needs", needs)
 
@@ -145,6 +142,15 @@ object LifeStateEngine {
         }
         updateSelfModel(root, state, reason, now)
         return state
+    }
+
+    internal fun calculateNeeds(lastSeenCommander: Long, now: Long): JSONObject {
+        val quietHours = if (lastSeenCommander <= 0L) 0.0 else
+            ((now - lastSeenCommander).coerceAtLeast(0L) / 3_600_000.0)
+        return JSONObject()
+            .put("live", 0.38)
+            .put("love_commander", min(0.95, 0.35 + (quietHours / 18.0) * 0.5))
+            .put("updated_at", now)
     }
 
     internal fun applyCommanderActivity(state: JSONObject, newEvents: List<JSONObject>): Boolean {
