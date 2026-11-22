@@ -291,6 +291,20 @@ class MainActivity : AppCompatActivity() {
             FileManager.readLastEvents(filesDir, filter, limit).toString()
 
         @JavascriptInterface
+        fun readMemoryLayer(layer: String): String = when (layer) {
+            "L0" -> JSONArray(FileManager.readLastLines(filesDir, "memory/L0_raw.jsonl", maxLines = 100).map {
+                runCatching { JSONObject(it) }.getOrNull() ?: JSONObject()
+            }).toString()
+            "L1" -> FileManager.read(filesDir, "memory/L1_facts.json")
+            "L2" -> FileManager.read(filesDir, "memory/L2_diary.json")
+            "L3" -> FileManager.read(filesDir, "memory/L3_summary.json")
+            "L4" -> FileManager.read(filesDir, "memory/L4_state.json")
+            "EMO" -> FileManager.read(filesDir, "memory/emotions.json")
+            "SELF" -> FileManager.read(filesDir, "memory/self_model.json")
+            else -> "{}"
+        }
+
+        @JavascriptInterface
         fun readReceipts(): String = Receipts.export(filesDir)
 
         @JavascriptInterface
