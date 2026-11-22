@@ -273,15 +273,35 @@ class EmotionRedesignTest {
         }
     }
 
-    @Test fun oldHurtAndCalmAreNotLiveChannelsAfterMigration() {
+    @Test fun oldHurtAndCalmValuesAreMigratedAndRetired() {
         val root = packageFRoot("ruri-emotion-redesign-migration")
         try {
             val config = JSONObject(FileManager.read(root, "core/emotions.json"))
             val channels = config.getJSONObject("channels")
-            assertFalse(channels.has("hurt"))
-            assertFalse(channels.has("calm"))
-            assertTrue(channels.has("longing"))
-            assertEquals(2, config.optInt("schema_version"))
+                .put("hurt", JSONObject().put("min", 0).put("max", 100).put("base", 10).put("half_life_h", 24))
+                .put("calm", JSONObject().put("min", 0).put("max", 100).put("base", 60).put("half_life_h", 6))
+            config.put("schema_version", 1)
+            FileManager.write(root, "core/emotions.json", config.toString(2))
+
+            val state = JSONObject(FileManager.read(root, "memory/emotions.json"))
+            state.getJSONObject("values")
+                .put("hurt", 40.0)
+                .put("calm", 75.0)
+            FileManager.write(root, "memory/emotions.json", state.toString(2))
+
+            EmotionEngine.ensure(root)
+
+            val migratedConfig = JSONObject(FileManager.read(root, "core/emotions.json"))
+            val migratedValues = EmotionEngine.readValues(root)
+            val migratedChannels = migratedConfig.getJSONObject("channels")
+            assertFalse(migratedChannels.has("hurt"))
+            assertFalse(migratedChannels.has("calm"))
+            assertFalse(migratedValues.has("hurt"))
+            assertFalse(migratedValues.has("calm"))
+            assertEquals(30.0, migratedValues.getDouble("anger"), 0.0)
+            assertEquals(40.0, migratedValues.getDouble("sadness"), 0.0)
+            assertTrue(migratedChannels.has("longing"))
+            assertEquals(2, migratedConfig.optInt("schema_version"))
         } finally {
             root.deleteRecursively()
         }
