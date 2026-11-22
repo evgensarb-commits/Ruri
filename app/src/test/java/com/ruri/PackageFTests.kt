@@ -81,3 +81,209 @@ class DiaryThoughtsOnlyTest {
         assertEquals(listOf("мысль", "старая запись без kind"), selected.map { it.optString("text") })
     }
 }
+
+
+class LastSeenSuccessfulOnlyTest {
+    @Test fun recoveryDoesNotInferLastSeenButSuccessfulReplyMaySetIt() {
+        val root = packageFRoot("ruri-last-seen-success")
+        try {
+            val commanderTs = 1_790_000_000_000L
+            FileManager.appendEvent(root, JSONObject()
+                .put("type", "message").put("who", "commander")
+                .put("text", "Привет").put("timestamp", commanderTs))
+            val recovered = LifeStateEngine.recoverStateFromHistory(root, "{broken")
+            assertEquals(0L, recovered.optLong("last_seen_commander"))
+
+            ChatEngine.appendFinalReply(root, "Ответила.", "test-route")
+            val saved = JSONObject(FileManager.read(root, "memory/L4_state.json"))
+            assertEquals(commanderTs, saved.optLong("last_seen_commander"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+}
+
+class VisionProbeLoggedTest {
+    @Test fun everyCapabilityProbeIsStoredAndUpdatesSelfModelLimitations() {
+        val root = packageFRoot("ruri-vision-probe-log")
+        try {
+            val models = JSONArray().put(
+                JSONObject()
+                    .put("id", "vision-route")
+                    .put("name", "Vision route")
+                    .put("base_url", "https://provider.example/v1")
+                    .put("api_key", "test-key")
+                    .put("free_tier", true)
+                    .put("enabled", true)
+            )
+            assertNull(Vision.findVisionRoute(
+                root, models, 0, online = true, vpn = false,
+                probeRoute = { false }, now = 1_800_000_000_000L
+            ))
+            val probe = FileManager.readLastLines(root, "memory/L0_raw.jsonl", 50)
+                .mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+                .last { it.optString("type") == "vision_probe_result" }
+            assertEquals("vision-route", probe.optString("route"))
+            assertFalse(probe.optBoolean("capable"))
+            assertTrue(probe.optString("snippet").isNotBlank())
+            val self = JSONObject(FileManager.read(root, "memory/self_model.json"))
+            assertTrue(self.optJSONArray("limitations").toString().contains("vision_probe:"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+}
+
+class ThinkerShelfDescTest {
+    @Test fun imageShelfEntryUsesDescriptionSidecarInsteadOfBinaryBytes() {
+        val root = packageFRoot("ruri-thinker-shelf-desc")
+        try {
+            val shelf = File(root, "shelf")
+            val desc = File(shelf, ".desc")
+            desc.mkdirs()
+            File(shelf, "photo.png").writeBytes(
+                byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00)
+            )
+            File(desc, "photo.png.txt").writeText("На фото красный велосипед.", Charsets.UTF_8)
+            assertEquals("На фото красный велосипед.", Thinker.shelfContextText(root, "photo.png"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+}
+
+class L3ThoughtOnlyTest {
+    @Test fun saidEntriesNeverEnterTheL3SourcePage() {
+        val selected = MemoryConsolidator.thoughtEntries(
+            listOf(
+                JSONObject().put("sequence", 1).put("kind", "said").put("text", "ответ"),
+                JSONObject().put("sequence", 2).put("kind", "thought").put("text", "мысль")
+            )
+        )
+        assertEquals(1, selected.size)
+        assertEquals("thought", selected.single().optString("kind"))
+    }
+}
+
+class OutcomeDigestTest {
+    @Test fun digestCapsFailureLinesAndIncludesPreviousTurnOutcome() {
+        val root = packageFRoot("ruri-outcome-digest")
+        try {
+            FileManager.appendEvent(root, JSONObject()
+                .put("type", "message").put("who", "commander").put("text", "Найди страницу"))
+            FileManager.appendEvent(root, JSONObject()
+                .put("type", "tool_result").put("action", "search").put("ok", false).put("text", "timeout"))
+            FileManager.appendEvent(root, JSONObject()
+                .put("type", "tool_result").put("action", "read_url").put("ok", true).put("text", "page text"))
+            FileManager.appendEvent(root, JSONObject()
+                .put("type", "vision_probe_result").put("route", "route-a").put("capable", false).put("snippet", "no vision"))
+            FileManager.appendEvent(root, JSONObject().put("type", "shelf_image_unreadable").put("text", "not an image"))
+            FileManager.appendEvent(root, JSONObject().put("type", "nsfw_refusal").put("snippet", "refused"))
+            FileManager.appendEvent(root, JSONObject().put("type", "thinker_error").put("message", "cycle failed"))
+            FileManager.appendEvent(root, JSONObject()
+                .put("id", "answer-123").put("ts", 123456L).put("type", "message").put("who", "ruri").put("text", "Готово"))
+
+            val digest = OutcomeDigest.build(root)
+            val failureLines = digest.lines().count { it.startsWith("- ") }
+            assertTrue(failureLines <= 5)
+            assertTrue(digest.contains("answer-123"))
+            assertTrue(digest.contains("123456"))
+            assertTrue(digest.contains("инструменты ok=1, failed=1"))
+            assertTrue(digest.contains("vision=не подтверждено маршрутом route-a"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test fun contradictorySearchAndReadClaimsBecomePendingCorrection() {
+        val root = packageFRoot("ruri-outcome-correction")
+        try {
+            FileManager.appendEvent(root, JSONObject()
+                .put("type", "message").put("who", "commander").put("text", "Проверь страницу"))
+            val correction = OutcomeDigest.verifyClaims(
+                root, "Я поискала в интернете и прочитала документ."
+            )
+            assertNotNull(correction)
+            assertTrue(correction!!.optString("message").contains("поиск"))
+            val state = JSONObject(FileManager.read(root, "memory/L4_state.json"))
+            assertTrue(state.optJSONObject("pending_correction") != null)
+            assertTrue(OutcomeDigest.build(root).contains("ОБЯЗАТЕЛЬНОЕ ИСПРАВЛЕНИЕ"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+}
+
+class SelfCheckTest {
+    @Test fun selfCheckIsWhitelistedAndReturnsCompactOutcomeDigest() {
+        val root = packageFRoot("ruri-self-check")
+        try {
+            FileManager.appendEvent(root, JSONObject().put("type", "model_error").put("model", "route-a"))
+            val action = ChatEngine.parseAction("""{"action":"self_check"}""")
+            assertNotNull(action)
+            val (ok, result) = ChatEngine.executeTool(root, "self_check", action!!)
+            assertTrue(ok)
+            assertTrue(result.contains("model_error"))
+            val reply = ChatEngine.runToolLoop(root, """{"action":"self_check"}""", JSONArray()) {
+                "Проверка завершена."
+            }
+            assertEquals("Проверка завершена.", reply)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+}
+
+class NotifierUniqueIdTest {
+    @Test fun thoughtNotificationsUseMessageSpecificIds() {
+        val first = Notifier.notificationIdFor("thought-message-one")
+        val second = Notifier.notificationIdFor("thought-message-two")
+        assertNotEquals(first, second)
+        assertNotEquals(Notifier.THOUGHT_NOTIFICATION_ID, first)
+        assertNotEquals(Notifier.THOUGHT_NOTIFICATION_ID, second)
+    }
+}
+
+class EmotionRedesignTest {
+    @Test fun longingRisesDuringSilence() {
+        val root = packageFRoot("ruri-longing-silence")
+        try {
+            val now = System.currentTimeMillis()
+            val state = JSONObject(FileManager.read(root, "memory/emotions.json"))
+                .put("updated_at", now - 3_600_000L)
+                .put("last_tick_at", now - 3_600_000L)
+            FileManager.write(root, "memory/emotions.json", state.toString())
+            val before = EmotionEngine.readValues(root).optDouble("longing")
+            EmotionEngine.tick(root, now, now - 3L * 3_600_000L, now - 3_600_000L)
+            assertTrue(EmotionEngine.readValues(root).optDouble("longing") > before)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test fun cyclePairsFatigueGrowthWithBoredomRelief() {
+        val root = packageFRoot("ruri-fatigue-boredom-coupling")
+        try {
+            EmotionEngine.onCycle(root)
+            val values = EmotionEngine.readValues(root)
+            assertEquals(22.0, values.getDouble("fatigue"), 0.0)
+            assertEquals(16.0, values.getDouble("boredom"), 0.0)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test fun oldHurtAndCalmAreNotLiveChannelsAfterMigration() {
+        val root = packageFRoot("ruri-emotion-redesign-migration")
+        try {
+            val config = JSONObject(FileManager.read(root, "core/emotions.json"))
+            val channels = config.getJSONObject("channels")
+            assertFalse(channels.has("hurt"))
+            assertFalse(channels.has("calm"))
+            assertTrue(channels.has("longing"))
+            assertEquals(2, config.optInt("schema_version"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+}
