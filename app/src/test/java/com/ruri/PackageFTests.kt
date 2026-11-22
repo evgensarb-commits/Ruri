@@ -195,6 +195,24 @@ class OutcomeDigestTest {
         }
     }
 
+    @Test fun staleToolSuccessBeforeLatestWakeDoesNotValidateNewClaim() {
+        val root = packageFRoot("ruri-outcome-stale-tool")
+        try {
+            FileManager.appendEvent(root, JSONObject()
+                .put("type", "message").put("who", "commander").put("text", "Старый ход"))
+            FileManager.appendEvent(root, JSONObject().put("type", "wake").put("reason", "old_cycle"))
+            FileManager.appendEvent(root, JSONObject()
+                .put("type", "tool_result").put("action", "search").put("ok", true).put("text", "old results"))
+            FileManager.appendEvent(root, JSONObject().put("type", "wake").put("reason", "new_cycle"))
+
+            val correction = OutcomeDigest.verifyClaims(root, "Я поискала в интернете.")
+            assertNotNull(correction)
+            assertTrue(correction!!.optString("message").contains("поиск"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
     @Test fun contradictorySearchAndReadClaimsBecomePendingCorrection() {
         val root = packageFRoot("ruri-outcome-correction")
         try {
