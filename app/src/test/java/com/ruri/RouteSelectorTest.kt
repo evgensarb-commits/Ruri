@@ -128,6 +128,18 @@ class MinimaxFreeIdTest {
 }
 
 class VisionGemmaOnlyTest {
+    @Test fun cachedVisionRouteNeverReturnsMiniMax() {
+        val root = Files.createTempDirectory("ruri-cached-vision-meromero").toFile()
+        try {
+            FileManager.init(root)
+            RouteMeta.setCapability(root, "routeway-minimax", "vision", true)
+            RouteMeta.setCapability(root, "routeway", "vision", false)
+            assertEquals(null, Vision.cachedVisionRoute(root))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
     @Test fun visionOrderContainsOnlyMeroMeroEvenWhenItsTokenBudgetIsSpent() {
         val root = Files.createTempDirectory("ruri-vision-meromero-only").toFile()
         try {
