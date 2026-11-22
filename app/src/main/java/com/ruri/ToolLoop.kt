@@ -50,7 +50,7 @@ object ToolLoop {
             cleaned = cleaned.replace(objectText, "")
             when (action.optString("action")) {
                 "write_diary", "diary" -> action.optString("text").trim().takeIf { it.isNotBlank() }?.let(diary::add)
-                "search", "list_shelf", "read_shelf", "recall", "remember_fact", "read_url" -> tools.add(action)
+                "search", "list_shelf", "read_shelf", "recall", "remember_fact", "read_url", "self_check" -> tools.add(action)
                 else -> Unit
             }
         }
