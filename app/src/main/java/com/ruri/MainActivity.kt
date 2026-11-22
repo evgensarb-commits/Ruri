@@ -355,6 +355,45 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
+        fun reprobeVision(): String {
+            routeExecutor.execute {
+                runCatching {
+                    val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
+                    val models = config.optJSONArray("models") ?: org.json.JSONArray()
+                    for (index in 0 until models.length()) {
+                        val model = models.optJSONObject(index) ?: continue
+                        val id = model.optString("id").ifBlank { model.optString("name") }
+                        if (id.isBlank()) continue
+                        RouteMeta.update(filesDir, id) { route ->
+                            val caps = route.optJSONObject("caps") ?: JSONObject()
+                            caps.remove("vision")
+                            route.put("caps", caps)
+                            route.remove("vision_probe_at")
+                        }
+                    }
+                    NetState.refresh(applicationContext)
+                    val selected = Vision.visionRoute(filesDir)
+                    val status = selected?.optString("name")?.ifBlank { selected.optString("id") }
+                        ?: if (NetState.online) "none" else "нет сети"
+                    mainHandler.post {
+                        if (::web.isInitialized) web.evaluateJavascript(
+                            "window.setVisionStatus && window.setVisionStatus(" + JSONObject.quote(status) + ")", null
+                        )
+                    }
+                }.onFailure { error ->
+                    android.util.Log.w("Ruri", "Manual vision probe failed", error)
+                    mainHandler.post {
+                        if (::web.isInitialized) web.evaluateJavascript(
+                            "window.setVisionStatus && window.setVisionStatus(" +
+                                JSONObject.quote("ошибка: " + (error.message ?: "vision probe")) + ")", null
+                        )
+                    }
+                }
+            }
+            return "OK"
+        }
+
+        @JavascriptInterface
         fun readNetworkDiagnostics(): String = NetworkDiagnostics.latest(filesDir)
 
         @JavascriptInterface
@@ -424,12 +463,15 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun markCommanderSeen(): String {
             return try {
-                val state = JSONObject(FileManager.read(filesDir, "memory/L4_state.json"))
-                state.put("waiting_for_reply", false)
-                state.put("ignored_count", 0)
-                FileManager.write(filesDir, "memory/L4_state.json", state.toString(2))
+                val latestReply = FileManager.readLastLines(
+                    filesDir, "memory/L0_raw.jsonl", maxLines = 500
+                ).asReversed().asSequence()
+                    .mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+                    .firstOrNull { it.optString("type") == "message" && it.optString("who") == "ruri" }
+                val id = latestReply?.optString("id").orEmpty()
+                if (id.isNotBlank()) Receipts.readByCommander(filesDir, id)
                 "OK"
-            } catch (e: Exception) { "ERROR: " + e.message }
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "receipt update failed") }
         }
 
         @JavascriptInterface
