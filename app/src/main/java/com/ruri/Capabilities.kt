@@ -60,7 +60,18 @@ object Capabilities {
         val selfModel = runCatching { JSONObject(FileManager.read(root, "memory/self_model.json")) }
             .getOrElse { JSONObject() }
         selfModel.put("known_capabilities", known)
-        selfModel.put("limitations", JSONArray(limits.toString()))
+        val mergedLimitations = JSONArray()
+        val seenLimitations = HashSet<String>()
+        val previousLimitations = selfModel.optJSONArray("limitations") ?: JSONArray()
+        for (source in listOf(limits, previousLimitations)) {
+            for (i in 0 until source.length()) {
+                val limitation = source.optString(i).trim()
+                if (limitation.isNotBlank() && seenLimitations.add(limitation)) {
+                    mergedLimitations.put(limitation)
+                }
+            }
+        }
+        selfModel.put("limitations", mergedLimitations)
         selfModel.put("updated_at", System.currentTimeMillis())
         FileManager.write(root, "memory/self_model.json", selfModel.toString(2))
     }
