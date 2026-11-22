@@ -149,6 +149,25 @@ object ToolLoop {
 
     internal fun isActionJson(raw: String): Boolean = parseJsonAction(raw) != null
 
+    internal fun isJsonOnly(raw: String): Boolean {
+        val trimmed = raw.trim()
+        val fenced = Regex("(?is)^\x60\x60\x60(?:json)?\\s*(.*?)\\s*\x60\x60\x60$").find(trimmed)
+            ?.groupValues?.get(1)?.trim()
+        val candidate = fenced ?: trimmed
+        if (!candidate.startsWith("{") && !candidate.startsWith("[")) return false
+        return runCatching { JSONObject(candidate); true }.getOrElse {
+            runCatching { JSONArray(candidate); true }.getOrDefault(false)
+        }
+    }
+
+    /** Visible prose only; JSON-only/action-only responses are not user-facing answers. */
+    internal fun proseCandidate(raw: String): String? {
+        if (raw.isBlank()) return null
+        val cleaned = stripActions(raw).first.trim()
+        if (cleaned.isBlank() || isActionJson(cleaned) || isJsonOnly(cleaned)) return null
+        return cleaned
+    }
+
     private fun parseJsonAction(raw: String): JSONObject? {
         val trimmed = raw.trim()
         val fenced = Regex("(?is)^\\x60\\x60\\x60(?:json)?\\s*(\\{.*\\})\\s*\\x60\\x60\\x60$").find(trimmed)
