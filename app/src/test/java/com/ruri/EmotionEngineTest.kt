@@ -222,4 +222,4 @@ class FatigueResetV1Test : EmotionEngineTestBase() {
         assertEquals(67.0, EmotionEngine.readValues(root).getDouble("fatigue"), 0.0)
     }
 }
-\n
+
