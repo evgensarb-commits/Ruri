@@ -139,15 +139,17 @@ object Thinker {
             reply = if (initial.isNullOrBlank()) null else ToolLoop.unwrapDiaryReply(root, initial, messages) { next ->
                 ChatEngine.requestToolFollowup(model, next, root, routeId, task)
             }
-            if (ToolLoop.proseCandidate(reply.orEmpty()).isNullOrBlank()) {
+            if (reply.isNullOrBlank()) {
                 messages.put(JSONObject().put("role", "system")
-                    .put("content", "Предыдущий ответ был пустым или содержал только JSON. Ответь обычной прозой без JSON и без action."))
+                    .put("content", "Предыдущий ответ был действительно пустым. Ответь обычной русской прозой или верни write_diary с непустым полем text."))
                 val retry = ChatEngine.requestToolFollowup(model, messages, root, routeId, task)
-                reply = ToolLoop.proseCandidate(retry.orEmpty())
+                reply = if (retry.isNullOrBlank()) null else ToolLoop.unwrapDiaryReply(root, retry, messages) { next ->
+                    ChatEngine.requestToolFollowup(model, next, root, routeId, task)
+                }
                 if (reply.isNullOrBlank()) {
                     appendEvent(root, "thought_lost", JSONObject()
                         .put("route", routeId)
-                        .put("reason", "empty_or_json_only_after_prose_retry"))
+                        .put("reason", "truly_empty_after_retry"))
                     runCatching { RouteMeta.recordFailure(root, routeId, "other", task) }
                     continue
                 }
@@ -190,11 +192,13 @@ object Thinker {
         val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(reply)
         val emotion = if (emotionDelta != null) EmotionEngine.applyDelta(root, emotionDelta, "thought") else null
         val (cleanThought, diaryTexts, _) = ToolLoop.stripActions(cleanedReply)
-        val diaryText = cleanThought.ifBlank { diaryTexts.firstOrNull().orEmpty() }
+        val diaryText = cleanThought.ifBlank {
+            diaryTexts.firstOrNull() ?: ToolLoop.diaryActionText(cleanedReply).orEmpty()
+        }
         val safeReply = SecretRedactor.redactText(diaryText.trim())
-        if (ToolLoop.proseCandidate(safeReply).isNullOrBlank()) {
+        if (safeReply.isBlank()) {
             appendEvent(root, "thought_lost", JSONObject()
-                .put("reason", "empty_or_json_only_after_prose_retry")
+                .put("reason", "truly_empty")
                 .put("route", successfulRouteId))
             state.put("last_thought", now)
             persistStatePreservingTurnInFlight(root, state)
