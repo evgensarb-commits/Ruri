@@ -63,12 +63,14 @@ object Capabilities {
         val mergedLimitations = JSONArray()
         val seenLimitations = HashSet<String>()
         val previousLimitations = selfModel.optJSONArray("limitations") ?: JSONArray()
-        for (source in listOf(limits, previousLimitations)) {
-            for (i in 0 until source.length()) {
-                val limitation = source.optString(i).trim()
-                if (limitation.isNotBlank() && seenLimitations.add(limitation)) {
-                    mergedLimitations.put(limitation)
-                }
+        for (i in 0 until limits.length()) {
+            val limitation = limits.optString(i).trim()
+            if (limitation.isNotBlank() && seenLimitations.add(limitation)) mergedLimitations.put(limitation)
+        }
+        for (i in 0 until previousLimitations.length()) {
+            val limitation = previousLimitations.optString(i).trim()
+            if (limitation.startsWith("vision_probe:") && seenLimitations.add(limitation)) {
+                mergedLimitations.put(limitation)
             }
         }
         selfModel.put("limitations", mergedLimitations)
