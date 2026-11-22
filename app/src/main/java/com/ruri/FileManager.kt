@@ -193,8 +193,8 @@ object FileManager {
         """.trimIndent())
 
         migrateCharacterIdentity(root)
-        // Import every legacy key before route pruning so removing Kilo/minimal routes
-        // never discards credentials from the encrypted SecretStore.
+        // Import every existing key before route pruning so obsolete routes
+        // never discard credentials from the encrypted SecretStore.
         SecretStore.migrateLegacyApiKeys(root)
         migrateModelConfig(root)
         val configuredModels = runCatching {
