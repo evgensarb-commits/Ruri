@@ -160,3 +160,66 @@ class LegacyEmotionMigrationTest : EmotionEngineTestBase() {
         assertEquals(40.0, migratedValues.getDouble("sadness"), 0.0)
     }
 }
+
+class EmotionOncePerMessageTest : EmotionEngineTestBase() {
+    @Test fun repeatedCommanderMessageIdDoesNotApplyEmotionDeltaAgain() {
+        val before = EmotionEngine.readValues(root)
+        EmotionEngine.onCommanderMessage(root, "Привет, Рури", "commander-message-42")
+        val afterFirst = EmotionEngine.readValues(root)
+
+        assertEquals(before.getDouble("fatigue") + 3.0, afterFirst.getDouble("fatigue"), 0.0)
+        assertEquals(before.getDouble("boredom") - 6.0, afterFirst.getDouble("boredom"), 0.0)
+        assertEquals(before.getDouble("longing") - 10.0, afterFirst.getDouble("longing"), 0.0)
+
+        EmotionEngine.onCommanderMessage(root, "Привет, Рури", "commander-message-42")
+        val afterRetry = EmotionEngine.readValues(root)
+        for (channel in listOf("fatigue", "boredom", "longing", "desire")) {
+            assertEquals(afterFirst.getDouble(channel), afterRetry.getDouble(channel), 0.0)
+        }
+    }
+}
+
+class ReplyReliefOnceTest : EmotionEngineTestBase() {
+    @Test fun repeatedCommanderReplyIdDoesNotApplyReliefAgain() {
+        EmotionEngine.applyDelta(
+            root,
+            JSONObject().put("anger", 20.0).put("sadness", 20.0).put("longing", 20.0),
+            "test_seed"
+        )
+        val before = EmotionEngine.readValues(root)
+        EmotionEngine.onCommanderReply(root, "commander-reply-42")
+        val afterFirst = EmotionEngine.readValues(root)
+
+        assertEquals(before.getDouble("anger") - 8.0, afterFirst.getDouble("anger"), 0.0)
+        assertEquals(before.getDouble("sadness") - 6.0, afterFirst.getDouble("sadness"), 0.0)
+        assertEquals(before.getDouble("joy") + 5.0, afterFirst.getDouble("joy"), 0.0)
+        assertEquals(before.getDouble("longing") - 20.0, afterFirst.getDouble("longing"), 0.0)
+
+        EmotionEngine.onCommanderReply(root, "commander-reply-42")
+        val afterRetry = EmotionEngine.readValues(root)
+        for (channel in listOf("anger", "sadness", "joy", "longing")) {
+            assertEquals(afterFirst.getDouble(channel), afterRetry.getDouble(channel), 0.0)
+        }
+    }
+}
+
+class FatigueResetV1Test : EmotionEngineTestBase() {
+    @Test fun fatigueIsResetTo50OnceAndNotOnLaterEnsureCalls() {
+        val config = JSONObject(FileManager.read(root, "core/emotions.json"))
+            .put("fatigue_reset_v1", false)
+        FileManager.write(root, "core/emotions.json", config.toString(2))
+        val state = JSONObject(FileManager.read(root, "memory/emotions.json"))
+        state.getJSONObject("values").put("fatigue", 91.0)
+        FileManager.write(root, "memory/emotions.json", state.toString(2))
+
+        EmotionEngine.ensure(root)
+
+        assertEquals(50.0, EmotionEngine.readValues(root).getDouble("fatigue"), 0.0)
+        assertTrue(JSONObject(FileManager.read(root, "core/emotions.json")).optBoolean("fatigue_reset_v1"))
+
+        EmotionEngine.applyDelta(root, JSONObject().put("fatigue", 17.0), "test_after_reset")
+        EmotionEngine.ensure(root)
+        assertEquals(67.0, EmotionEngine.readValues(root).getDouble("fatigue"), 0.0)
+    }
+}
+\n
