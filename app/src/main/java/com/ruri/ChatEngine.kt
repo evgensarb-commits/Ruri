@@ -118,6 +118,7 @@ object ChatEngine {
             "Фразы, которые нельзя использовать: ${bannedPhrases}. " +
             Capabilities.bodySection(root) + " " +
             EmotionEngine.promptSection(root) + " " +
+            OutcomeDigest.build(root) + " " +
             "Не выдумывай факты, отделяй воспоминания от предположений. " +
             "Приоритеты: ${priorities.optString("priority_1", "Жить")}; ${priorities.optString("priority_2", "Любить Командира")}. " +
             "Конституция: ${constitution.optJSONArray("primary_needs") ?: JSONArray()}. " +
@@ -336,7 +337,16 @@ object ChatEngine {
                 }
                 val (cleanFinal, tailDiary, _) = ToolLoop.stripActions(finalReply)
                 tailDiary.forEach { Diary.append(root, it, "chat_write_diary", emotion, "thought") }
-                val reply = cleanFinal.ifBlank { finalReply }
+                var proseReply = ToolLoop.proseCandidate(cleanFinal)
+                if (proseReply.isNullOrBlank()) {
+                    messages.put(JSONObject().put("role", "system")
+                        .put("content", "Предыдущий ответ был пустым или содержал только JSON. Ответь обычной прозой без JSON, без markdown-блока и без action."))
+                    val retry = requestToolFollowup(model, messages, root, routeId, task).orEmpty()
+                    val (retryClean, retryDiary, _) = ToolLoop.stripActions(retry)
+                    retryDiary.forEach { Diary.append(root, it, "chat_write_diary", emotion, "thought") }
+                    proseReply = ToolLoop.proseCandidate(retryClean)
+                }
+                val reply = proseReply?.takeIf { it.isNotBlank() } ?: "(не смогла сформулировать ответ)"
                 if (recordAdultRefusal(
                         root = root,
                         routeId = routeId,
@@ -354,9 +364,7 @@ object ChatEngine {
                 NetworkDiagnostics.record(root, diagnostic)
                 runCatching { RouteMeta.recordSuccess(root, routeId, task) }
                 // Never persist a raw action object as a chat message.
-                if (reply.isBlank() || ToolLoop.isActionJson(reply)) {
-                    throw IllegalStateException("Модель не вернула обычный текстовый ответ после инструментов")
-                }
+                OutcomeDigest.verifyClaims(root, reply)
                 // Keep Routeway as primary; fallback success is temporary, not a reconfiguration.
                 appendFinalReply(
                     root, reply, emotion, meta,
@@ -418,6 +426,10 @@ object ChatEngine {
         return hasMemoryLayers && hasRecallTool && hasConversation
     }
 
+    internal fun diaryMirrorSaid(root: File): Boolean =
+        runCatching { JSONObject(SecretStore.readRuntimeConfig(root)).optBoolean("diary_mirror_said", false) }
+            .getOrDefault(false)
+
     internal fun parseAction(reply: String): JSONObject? {
         val trimmed = reply.trim()
         val fenced = Regex("(?is)^```(?:json)?\\s*(\\{.*\\})\\s*```$").find(trimmed)
@@ -431,6 +443,7 @@ object ChatEngine {
             "list_shelf" -> setOf("action")
             "read_shelf" -> setOf("action", "name")
             "remember_fact" -> setOf("action", "text")
+            "self_check" -> setOf("action")
             else -> return null
         }
         val keys = action.keys()
@@ -443,6 +456,7 @@ object ChatEngine {
                 if (url.length > 2048 || !url.matches(Regex("(?i)^https?://.+"))) return null
             }
             "remember_fact" -> if (action.optString("text").trim().length !in 5..300) return null
+            "self_check" -> Unit
         }
         return action
     }
@@ -513,6 +527,7 @@ object ChatEngine {
                 }
                 "recall" -> true to SecretRedactor.redactText(MemoryRetriever.recall(root, params.optString("query"), 5))
                 "remember_fact" -> true to SecretRedactor.redactText(rememberFact(root, params.optString("text")))
+                "self_check" -> true to OutcomeDigest.build(root)
                 else -> false to "Неизвестное действие"
             }
         } catch (e: Exception) {
@@ -648,7 +663,7 @@ object ChatEngine {
                 .put("mood_label", emotion.optString("mood"))
         }
         val saved = JSONObject(FileManager.appendEvent(root, event))
-        Diary.append(root, reply, "ответ_командиру", emotion, "said")
+        if (diaryMirrorSaid(root)) Diary.append(root, reply, "ответ_командиру", emotion, "said")
         val savedId = saved.optString("id").ifBlank { id }
         Receipts.delivered(root, savedId)
         lastFinalMessageId = savedId
