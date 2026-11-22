@@ -170,7 +170,7 @@ object MemoryConsolidator {
                     "\n\nВажно для точности автобиографии: до первой доступной записи этой пачки в rolling-окне дневника отсутствует ${batch.skippedBeforeBatch} более ранних записей. Не выдумывай их содержание; явно сохрани факт этого пробела."
                 } else ""
         )
-        val modelResult = if (BatteryLevel.get(context) > 12) requestBestModel(root, prompt) else null
+        val modelResult = requestBestModel(root, prompt)
         val summaryText: String
         val sections: JSONObject
         val method: String
