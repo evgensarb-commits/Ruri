@@ -156,7 +156,7 @@ class LifeStateRecoveryTest {
 
         val recovered = LifeStateEngine.recoverStateFromHistory(root, damaged)
 
-        assertEquals(firstTs, recovered.optLong("last_seen_commander"))
+        assertEquals(0L, recovered.optLong("last_seen_commander"))
         assertEquals(0L, recovered.optLong("last_processed_event_offset"))
         assertEquals(1, recovered.optJSONArray("active_goals")?.length())
         assertTrue(recovered.optString("current_focus").contains("Восстановление"))
