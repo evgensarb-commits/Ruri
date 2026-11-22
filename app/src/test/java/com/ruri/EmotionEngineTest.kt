@@ -162,6 +162,20 @@ class LegacyEmotionMigrationTest : EmotionEngineTestBase() {
 }
 
 class EmotionOncePerMessageTest : EmotionEngineTestBase() {
+    @Test fun genericL4WritesPreserveBothEmotionDeduplicationMarkers() {
+        EmotionEngine.onCommanderMessage(root, "Привет", "commander-message-keep")
+        EmotionEngine.onCommanderReply(root, "commander-reply-keep")
+
+        val staleSnapshot = JSONObject(FileManager.read(root, "memory/L4_state.json"))
+            .remove("last_emotion_msg_id")
+            .remove("last_reply_emotion_msg_id")
+        FileManager.write(root, "memory/L4_state.json", staleSnapshot.toString(2))
+
+        val saved = JSONObject(FileManager.read(root, "memory/L4_state.json"))
+        assertEquals("commander-message-keep", saved.optString("last_emotion_msg_id"))
+        assertEquals("commander-reply-keep", saved.optString("last_reply_emotion_msg_id"))
+    }
+
     @Test fun repeatedCommanderMessageIdDoesNotApplyEmotionDeltaAgain() {
         val before = EmotionEngine.readValues(root)
         EmotionEngine.onCommanderMessage(root, "Привет, Рури", "commander-message-42")
