@@ -202,13 +202,13 @@ object FileManager {
         val configuredModels = runCatching {
             JSONObject(read(root, CONFIG_PATH)).optJSONArray("models")
         }.getOrNull()
-        val meromeroId = configuredModels?.let { models ->
-            (0 until models.length()).mapNotNull { models.optJSONObject(it) }
-                .firstOrNull { it.optString("model").contains("meromero", ignoreCase = true) }
-                ?.optString("id").orEmpty()
-        }.orEmpty()
-        if (meromeroId.isNotBlank()) {
-            SecretStore.migrateRoutewayFallbackKey(root, meromeroId, "routeway-minimax")
+        val hasMeroRoute = configuredModels?.let { models ->
+            (0 until models.length()).any { index ->
+                models.optJSONObject(index)?.optString("model")?.contains("meromero", ignoreCase = true) == true
+            }
+        } == true
+        if (hasMeroRoute) {
+            SecretStore.migrateRoutewayFallbackKey(root, "routeway", "routeway-minimax")
         }
         RouteMeta.pruneToConfiguredRoutes(root)
         RouteMeta.migrateLegacyNsfwFlags(root)
@@ -722,7 +722,11 @@ object FileManager {
                         it.optString("id").contains("meromero", ignoreCase = true)
                 }
             val meromero = meromeroSource?.let { JSONObject(it.toString()) } ?: JSONObject()
-            val meromeroId = meromero.optString("id").ifBlank { "routeway" }
+            val sourceMeromeroId = meromero.optString("id").ifBlank { "routeway" }
+            if (sourceMeromeroId != "routeway") {
+                SecretStore.migrateRoutewayFallbackKey(root, sourceMeromeroId, "routeway")
+            }
+            val meromeroId = "routeway"
             if (!meromero.optString("model").contains("meromero", ignoreCase = true)) {
                 meromero.put("model", "gemma-4-26b-a4b-it-meromero:free")
             }
