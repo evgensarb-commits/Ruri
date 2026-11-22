@@ -139,6 +139,19 @@ object Thinker {
             reply = if (initial.isNullOrBlank()) null else ToolLoop.unwrapDiaryReply(root, initial, messages) { next ->
                 ChatEngine.requestToolFollowup(model, next, root, routeId, task)
             }
+            if (ToolLoop.proseCandidate(reply.orEmpty()).isNullOrBlank()) {
+                messages.put(JSONObject().put("role", "system")
+                    .put("content", "Предыдущий ответ был пустым или содержал только JSON. Ответь обычной прозой без JSON и без action."))
+                val retry = ChatEngine.requestToolFollowup(model, messages, root, routeId, task)
+                reply = ToolLoop.proseCandidate(retry.orEmpty())
+                if (reply.isNullOrBlank()) {
+                    appendEvent(root, "thought_lost", JSONObject()
+                        .put("route", routeId)
+                        .put("reason", "empty_or_json_only_after_prose_retry"))
+                    runCatching { RouteMeta.recordFailure(root, routeId, "other", task) }
+                    continue
+                }
+            }
             if (!reply.isNullOrBlank() && initiative &&
                 RouteSelector.looksLikeRefusalOrDisclaimer(reply)) {
                 runCatching { RouteMeta.recordFailure(root, routeId, "refusal", task) }
@@ -179,15 +192,19 @@ object Thinker {
         val (cleanThought, diaryTexts, _) = ToolLoop.stripActions(cleanedReply)
         val diaryText = cleanThought.ifBlank { diaryTexts.firstOrNull().orEmpty() }
         val safeReply = SecretRedactor.redactText(diaryText.trim())
-        if (safeReply.isBlank() || ToolLoop.isActionJson(safeReply)) {
+        if (ToolLoop.proseCandidate(safeReply).isNullOrBlank()) {
+            appendEvent(root, "thought_lost", JSONObject()
+                .put("reason", "empty_or_json_only_after_prose_retry")
+                .put("route", successfulRouteId))
             state.put("last_thought", now)
             persistStatePreservingTurnInFlight(root, state)
             return
         }
 
+        OutcomeDigest.verifyClaims(root, safeReply)
         val notificationMessageId = if (initiative) {
             val messageId = appendChatMessage(root, "ruri", safeReply, now, ChatEngine.sourceUrlsSnapshot(), successfulRouteId)
-            Diary.append(root, safeReply, "инициатива", emotion, "said")
+            if (ChatEngine.diaryMirrorSaid(root)) Diary.append(root, safeReply, "инициатива", emotion, "said")
             messageId
         } else {
             if (Diary.isDuplicate(root, safeReply, "thought")) {
@@ -215,6 +232,20 @@ object Thinker {
         persistStatePreservingTurnInFlight(root, state)
         val stillInFlight = readJson(root, "memory/L4_state.json").optBoolean("turn_in_flight", false)
         if (!inFlight && !stillInFlight) Notifier.thought(ctx, safeReply, notificationMessageId)
+    }
+
+    internal fun shelfContextText(root: File, name: String): String {
+        val safe = ShelfWatcher.safeName(name) ?: return ""
+        val file = File(root, "shelf/" + safe)
+        if (!file.isFile) return ""
+        val bytes = runCatching { file.readBytes() }.getOrNull() ?: return ""
+        return if (Vision.mimeOf(bytes) != null) {
+            FileManager.read(root, "shelf/.desc/" + safe + ".txt")
+                .takeIf { it.isNotBlank() }?.take(900)
+                ?: "[изображение без описания: vision недоступен]"
+        } else {
+            FileManager.read(root, "shelf/" + safe).take(900)
+        }
     }
 
     private fun buildPrompt(ctx: Context, root: File, state: JSONObject, reason: String, initiative: Boolean): String {
@@ -252,7 +283,7 @@ object Thinker {
             val name = shelfNames.optString(i)
             if (name.isNotBlank()) {
                 shelfText.append("\n--- ").append(name).append(" ---\n")
-                    .append(FileManager.read(root, "shelf/" + name).take(900))
+                    .append(shelfContextText(root, name))
             }
         }
         // Commander explicitly enabled full notification context for Ruri's cognition.
@@ -300,6 +331,7 @@ object Thinker {
             ". Запрещённые фразы: " + (character.optJSONArray("banned_phrases")?.toString() ?: "[]") + ".\n" +
             Capabilities.bodySection(root) + "\n" +
             EmotionEngine.promptSection(root) + "\n" +
+            OutcomeDigest.build(root) + "\n" +
             "Первый приоритет: " + priorities.optString("priority_1", "Жить") +
             ". Второй: " + priorities.optString("priority_2", "Любить Командира") + ".\n" +
             "Конституция: " + (constitution.optJSONArray("primary_needs")?.toString() ?: "[]") + ". Обе главные потребности равнозначны и неизменны.\n" +
