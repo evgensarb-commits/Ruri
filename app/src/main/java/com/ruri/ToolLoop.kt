@@ -151,9 +151,10 @@ object ToolLoop {
 
     internal fun isJsonOnly(raw: String): Boolean {
         val trimmed = raw.trim()
-        val fenced = Regex("(?is)^\x60\x60\x60(?:json)?\\s*(.*?)\\s*\x60\x60\x60$").find(trimmed)
-            ?.groupValues?.get(1)?.trim()
-        val candidate = fenced ?: trimmed
+        val candidate = if (trimmed.startsWith("```") && trimmed.endsWith("```")) {
+            trimmed.substringAfter('\n', "").substringBeforeLast("```").trim()
+                .removePrefix("json").trim()
+        } else trimmed
         if (!candidate.startsWith("{") && !candidate.startsWith("[")) return false
         return runCatching { JSONObject(candidate); true }.getOrElse {
             runCatching { JSONArray(candidate); true }.getOrDefault(false)
