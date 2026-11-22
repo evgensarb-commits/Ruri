@@ -75,6 +75,29 @@ object EmotionEngine {
         for (k in o.keys()) m[k] = o.optJSONObject(k) ?: JSONObject(); return m
     }
     private fun drift(root: File) = config(root).optJSONObject("drift") ?: JSONObject()
+
+    // Compatibility for LifeScheduler: the new initiative gate is handled directly by
+    // initiativeGate(), while this snapshot still exposes the adaptive reflection interval.
+    fun thresholds(root: File): JSONObject {
+        val v = readValues(root)
+        val d = drift(root)
+        val channelConfig = config(root).optJSONObject("channels") ?: JSONObject()
+        fun n(key: String): Double {
+            val base = channelConfig.optJSONObject(key)?.optDouble("base", 0.0) ?: 0.0
+            return (v.optDouble(key, base) - base) / 100.0
+        }
+        val initiative = (d.optDouble("base_initiative_h", 3.5)
+            + (n("anger") + n("sadness")) * 2.0 + n("fatigue") * 2.0
+            - n("longing") * 1.5 - n("boredom") - n("affection")).coerceIn(0.5, 8.0)
+        val cooldown = (d.optDouble("base_cooldown_h", 3.0)
+            + n("fatigue") * 2.0 - n("boredom")).coerceIn(0.5, 6.0)
+        val reflection = (6.0 - n("interest") * 2.0 - n("boredom") * 2.0
+            + n("fatigue") * 2.0).coerceIn(1.0, 12.0)
+        return JSONObject()
+            .put("initiative_h", initiative)
+            .put("cooldown_h", cooldown)
+            .put("reflection_h", reflection)
+    }
     private fun readState(root: File) = runCatching { JSONObject(FileManager.read(root, STATE)) }.getOrElse { JSONObject() }
     fun readValues(root: File): JSONObject {
         val v = readState(root).optJSONObject("values"); if (v != null) return v
