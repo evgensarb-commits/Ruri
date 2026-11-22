@@ -85,6 +85,18 @@ object Vision {
             // A capability probe is a real provider request and consumes the route's free quota.
             RouteMeta.recordAttempt(root, id)
             val capable = runCatching { probeRoute(JSONObject(model.toString())) }.getOrDefault(false)
+            val probeSnippet = if (capable) {
+                "Vision probe accepted an image-grounded response."
+            } else {
+                "Vision probe did not confirm image interpretation."
+            }
+            FileManager.appendEvent(root, JSONObject()
+                .put("type", "vision_probe_result")
+                .put("route", id)
+                .put("capable", capable)
+                .put("snippet", probeSnippet)
+                .put("ts", now))
+            runCatching { OutcomeDigest.recordVisionProbe(root, id, capable, probeSnippet) }
             RouteMeta.update(root, id) {
                 val updatedCaps = it.optJSONObject("caps") ?: JSONObject()
                 updatedCaps.put("vision", capable)
