@@ -6,17 +6,17 @@ import org.junit.Assert.*
 import org.junit.Test
 import java.nio.file.Files
 
-class InvalidActionUnwrapTest {
-    @Test fun unknownActionWithTextKeepsOnlyText() {
+class WriteDiaryUnwrapReturnsTextTest {
+    @Test fun writeDiaryActionUnwrapsToTextWithoutRetryOrRawJson() {
         val root = Files.createTempDirectory("ruri-invalid-action").toFile()
         val messages = JSONArray()
         var requested = false
         val result = ToolLoop.unwrapDiaryReply(root,
             """{"action":"write_diary","text":"Сегодня я многое поняла."}""",
             messages) { requested = true; "проза" }
-        val (_, diaryTexts, tools) = ToolLoop.stripActions(result)
-        assertEquals(listOf("Сегодня я многое поняла."), diaryTexts)
-        assertTrue(tools.isEmpty())
+        assertEquals("Сегодня я многое поняла.", result)
+        assertFalse(result.startsWith("{"))
+        assertTrue(ToolLoop.proseCandidate(result) != null)
         assertFalse(requested)
     }
 }
