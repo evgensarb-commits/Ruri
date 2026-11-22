@@ -145,14 +145,14 @@ object ChatEngine {
                 JSONObject().put("role", role).put(
                     "content",
                     text
-                )
+                ).put("_ruri_event_id", event.optString("id"))
             } catch (_: Exception) { null }
         }.take(14).reversed()
         if (history.isEmpty() || history.last().optString("role") != "user") {
             throw IllegalStateException("Не найдено последнее сообщение командира")
         }
         val commanderText = history.last().optString("content")
-        EmotionEngine.onCommanderMessage(root, commanderText)
+        EmotionEngine.onCommanderMessage(root, commanderText, history.last().optString("_ruri_event_id"))
         val task = RouteSelector.detectTask(commanderText)
         fun selectOrder(online: Boolean): List<Int> = RouteSelector.orderedIndices(root, models, current, task, online, NetState.vpn)
         var order = selectOrder(NetState.online || assumeReachable)
@@ -182,7 +182,11 @@ object ChatEngine {
                     .put("content", "Ассоциативно найденные воспоминания. Используй их, если они относятся к вопросу. Не выдавай предположения за точные воспоминания; при необходимости обозначай неопределённость.\n" + recalled)
             )
         }
-        history.forEach { messages.put(it) }
+        history.forEach {
+            val providerMessage = JSONObject(it.toString())
+            providerMessage.remove("_ruri_event_id")
+            messages.put(providerMessage)
+        }
         if (!hasFullMemoryContext(messages)) {
             OfflineQueue.markPending(root)
             throw IllegalStateException("Полная память не собрана; запрос к модели не отправлен")
