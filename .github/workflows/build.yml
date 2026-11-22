@@ -81,6 +81,8 @@ jobs:
             exit 1
           fi
           "$APKSIGNER" verify --verbose --print-certs "$APK"
+          echo "APK_SHA256=$(sha256sum "$APK" | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "Signed APK SHA-256: $APK_SHA256"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
