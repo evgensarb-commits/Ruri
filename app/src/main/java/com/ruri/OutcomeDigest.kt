@@ -148,12 +148,24 @@ object OutcomeDigest {
             mismatches += "Ответ утверждал, что файл/страница прочитаны, но в L0 нет успешного read_shelf или read_url."
         }
         if (claimsVision) {
-            val described = currentTurn.any {
+            val probeOrDescription = currentTurn.any {
                 val type = it.optString("type")
                 (type == "shelf_image_described" || type == "vision_description_result") &&
                     !string(it, "ok").equals("false", true)
-            } || ("read_shelf" in successfulActions || "read_url" in successfulActions)
-            if (!described) mismatches += "Ответ утверждал, что изображение просмотрено, но L0 не подтверждает успешное чтение/описание изображения."
+            }
+            val imageSidecarRead = "read_shelf" in successfulActions && currentTurn
+                .filter { it.optString("type") == "tool_call" && string(it, "action") == "read_shelf" }
+                .mapNotNull { it.optJSONObject("params")?.optString("name") }
+                .any { name ->
+                    val safe = ShelfWatcher.safeName(name) ?: return@any false
+                    val file = File(root, "shelf/" + safe)
+                    val image = file.isFile && runCatching { Vision.mimeOf(file.readBytes()) != null }.getOrDefault(false)
+                    val description = FileManager.read(root, "shelf/.desc/" + safe + ".txt")
+                    image && description.isNotBlank()
+                }
+            if (!probeOrDescription && !imageSidecarRead) {
+                mismatches += "Ответ утверждал, что изображение просмотрено, но L0/sidecar не подтверждает успешное vision-описание изображения."
+            }
         }
         if (mismatches.isEmpty()) return null
 
