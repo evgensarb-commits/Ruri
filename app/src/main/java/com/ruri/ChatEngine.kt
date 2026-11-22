@@ -428,8 +428,11 @@ object ChatEngine {
         return hasMemoryLayers && hasRecallTool && hasConversation
     }
 
+    internal fun diaryMirrorSaid(config: JSONObject): Boolean =
+        config.optBoolean("diary_mirror_said", false)
+
     internal fun diaryMirrorSaid(root: File): Boolean =
-        runCatching { JSONObject(SecretStore.readRuntimeConfig(root)).optBoolean("diary_mirror_said", false) }
+        runCatching { diaryMirrorSaid(JSONObject(SecretStore.readRuntimeConfig(root))) }
             .getOrDefault(false)
 
     internal fun parseAction(reply: String): JSONObject? {
