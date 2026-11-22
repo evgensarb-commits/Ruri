@@ -131,6 +131,7 @@ class VisionProbeLoggedTest {
             Capabilities.ensure(root)
             self = JSONObject(FileManager.read(root, "memory/self_model.json"))
             assertTrue(self.optJSONArray("limitations").toString().contains("vision_probe:"))
+            assertTrue(Capabilities.bodySection(root).contains("vision_probe:"))
         } finally {
             root.deleteRecursively()
         }
