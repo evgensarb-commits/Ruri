@@ -126,7 +126,10 @@ class VisionProbeLoggedTest {
             assertEquals("vision-route", probe.optString("route"))
             assertFalse(probe.optBoolean("capable"))
             assertTrue(probe.optString("snippet").isNotBlank())
-            val self = JSONObject(FileManager.read(root, "memory/self_model.json"))
+            var self = JSONObject(FileManager.read(root, "memory/self_model.json"))
+            assertTrue(self.optJSONArray("limitations").toString().contains("vision_probe:"))
+            Capabilities.ensure(root)
+            self = JSONObject(FileManager.read(root, "memory/self_model.json"))
             assertTrue(self.optJSONArray("limitations").toString().contains("vision_probe:"))
         } finally {
             root.deleteRecursively()
