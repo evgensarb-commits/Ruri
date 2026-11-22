@@ -60,8 +60,8 @@ object RouteSelector {
         online: Boolean = NetState.online,
         vpn: Boolean = NetState.vpn
     ): List<Int> {
-        val now = System.currentTimeMillis()
         val candidates = mutableListOf<Pair<Int, Double>>()
+        val eligibleIndices = mutableSetOf<Int>()
         for (index in 0 until models.length()) {
             val model = models.optJSONObject(index) ?: continue
             if (!model.optBoolean("free_tier", false) || !model.optBoolean("enabled", true)) continue
@@ -71,8 +71,39 @@ object RouteSelector {
             val meta = RouteMeta.route(root, id)
             // Reachability, VPN and quota are transport/runtime concerns. Keep every eligible
             // free route in the order; the caller/OfflineQueue handles connection failures.
+            eligibleIndices += index
             candidates += index to score(meta, task)
         }
+
+        val meromeroIndex = (0 until models.length()).firstOrNull { index ->
+            val model = models.optJSONObject(index) ?: return@firstOrNull false
+            model.optString("model").contains("meromero", ignoreCase = true) ||
+                model.optString("id").contains("meromero", ignoreCase = true)
+        }
+        val minimaxIndex = (0 until models.length()).firstOrNull { index ->
+            models.optJSONObject(index)?.optString("model") == "minimax-m3.1-flash:free"
+        }
+        if (meromeroIndex != null || minimaxIndex != null) {
+            val meromero = meromeroIndex?.let { models.optJSONObject(it) }
+            val meromeroId = meromero?.optString("id")
+                ?.ifBlank { meromero.optString("name") }
+                .orEmpty()
+            val meromeroTokensPerDay = meromero?.optLong("tokens_per_day", 0L) ?: 0L
+            val gemmaExhausted = meromeroTokensPerDay > 0L &&
+                meromeroId.isNotBlank() &&
+                RouteMeta.tokensToday(root, meromeroId) >= meromeroTokensPerDay
+
+            if (task == Task.VISION) {
+                return listOfNotNull(meromeroIndex?.takeIf { it in eligibleIndices })
+            }
+            val preferredOrder = if (gemmaExhausted) {
+                listOf(minimaxIndex, meromeroIndex)
+            } else {
+                listOf(meromeroIndex, minimaxIndex)
+            }
+            return preferredOrder.filterNotNull().filter { it in eligibleIndices }
+        }
+
         return candidates.sortedWith(
             compareBy<Pair<Int, Double>> { if (it.first == current) 0 else 1 }
                 .thenByDescending { it.second }
