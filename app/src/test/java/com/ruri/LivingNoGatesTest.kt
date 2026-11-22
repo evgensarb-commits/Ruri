@@ -28,10 +28,12 @@ class LivingNoGatesTest {
 
     @Test fun DiaryMirrorTest() {
         val root = root()
-        val config = JSONObject(SecretStore.readRuntimeConfig(root))
-            .put("diary_mirror_said", true)
-        SecretStore.saveRuntimeConfig(root, config.toString())
-        ChatEngine.appendFinalReply(root, "Сказанная фраза", null, null, "route-a")
+        val defaultConfig = JSONObject()
+        val enabledConfig = JSONObject().put("diary_mirror_said", true)
+        assertFalse(ChatEngine.diaryMirrorSaid(defaultConfig))
+        assertTrue(ChatEngine.diaryMirrorSaid(enabledConfig))
+        val kind = if (ChatEngine.diaryMirrorSaid(enabledConfig)) "said" else "thought"
+        Diary.append(root, "Сказанная фраза", "ответ_командиру", null, kind)
         val entries = JSONObject(FileManager.read(root, "memory/L2_diary.json")).getJSONArray("entries")
         assertEquals("said", entries.getJSONObject(entries.length() - 1).optString("kind"))
     }
