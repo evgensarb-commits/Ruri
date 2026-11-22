@@ -109,7 +109,8 @@ class EmotionEpisodeTagsTest : EmotionEngineTestBase() {
 class InitiativeGateEmotionTest : EmotionEngineTestBase() {
     @Test fun emotionCanMakeInitiativeDueEarlierOrDelayIt() {
         val now = System.currentTimeMillis()
-        val lastSeen = now - 3L * EMOTION_TEST_HOUR_MS
+        // The one-time reset starts fatigue at 50, raising the initial initiative threshold.
+        val lastSeen = now - 4L * EMOTION_TEST_HOUR_MS
         assertEquals(false, EmotionEngine.initiativeGate(root, lastSeen, now, false, 0L))
 
         EmotionEngine.applyDelta(root, JSONObject().put("boredom", 80.0), "test")
