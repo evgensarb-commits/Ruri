@@ -8,14 +8,46 @@ import java.io.File
 object ToolLoop {
     private val allowed = setOf("search", "list_shelf", "read_shelf", "recall", "remember_fact", "read_url")
 
-    private val actionBlock = Regex("\\{[^{}]*?\\\"action\\\"\\s*:\\s*\\\"[a-z_]+\\\"[^{}]*?\\}")
+    private fun extractJsonObjects(text: String): List<String> {
+        val out = mutableListOf<String>()
+        var i = 0
+        while (i < text.length) {
+            if (text[i] != '{') { i++; continue }
+            var depth = 0
+            var j = i
+            var inStr = false
+            var esc = false
+            while (j < text.length) {
+                val c = text[j]
+                if (inStr) {
+                    if (esc) esc = false
+                    else if (c == '\\') esc = true
+                    else if (c == '"') inStr = false
+                } else when (c) {
+                    '"' -> inStr = true
+                    '{' -> depth++
+                    '}' -> {
+                        depth--
+                        if (depth == 0) {
+                            out.add(text.substring(i, j + 1))
+                            break
+                        }
+                    }
+                }
+                j++
+            }
+            i = j + 1
+        }
+        return out
+    }
 
     fun stripActions(reply: String): Triple<String, List<String>, List<JSONObject>> {
         val diary = mutableListOf<String>(); val tools = mutableListOf<JSONObject>()
         var cleaned = reply
-        for (match in actionBlock.findAll(reply)) {
-            cleaned = cleaned.replace(match.value, "")
-            val action = runCatching { JSONObject(match.value) }.getOrNull() ?: continue
+        for (objectText in extractJsonObjects(reply)) {
+            val action = runCatching { JSONObject(objectText) }.getOrNull()
+                ?.takeIf { it.has("action") } ?: continue
+            cleaned = cleaned.replace(objectText, "")
             when (action.optString("action")) {
                 "write_diary", "diary" -> action.optString("text").trim().takeIf { it.isNotBlank() }?.let(diary::add)
                 "search", "list_shelf", "read_shelf", "recall", "remember_fact", "read_url" -> tools.add(action)
