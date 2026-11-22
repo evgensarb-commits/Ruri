@@ -108,6 +108,8 @@ object ChatEngine {
             }.getOrNull()
         }.take(12).asReversed().joinToString("\n")
         val bannedPhrases = character.optJSONArray("banned_phrases") ?: JSONArray()
+        val outcomeDigest = OutcomeDigest.build(root)
+        OutcomeDigest.clearPresentedCorrection(root)
         val system = "Имя: ${character.optString("name")}; обозначение: ${character.optString("designation")}. " +
             "Личность: ${character.optString("persona")}. " +
             "Непрерывность: ${character.optString("continuity_rules")}. " +
@@ -118,7 +120,7 @@ object ChatEngine {
             "Фразы, которые нельзя использовать: ${bannedPhrases}. " +
             Capabilities.bodySection(root) + " " +
             EmotionEngine.promptSection(root) + " " +
-            OutcomeDigest.build(root) + " " +
+            outcomeDigest + " " +
             "Не выдумывай факты, отделяй воспоминания от предположений. " +
             "Приоритеты: ${priorities.optString("priority_1", "Жить")}; ${priorities.optString("priority_2", "Любить Командира")}. " +
             "Конституция: ${constitution.optJSONArray("primary_needs") ?: JSONArray()}. " +
