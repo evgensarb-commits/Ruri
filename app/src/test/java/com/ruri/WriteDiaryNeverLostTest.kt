@@ -48,10 +48,13 @@ class InitiativeNotLostTest {
     fun initiativeAcceptsWriteDiaryTextAsThoughtInsteadOfRetrying() {
         val text = "Мне самой захотелось поделиться этой мыслью."
         val raw = JSONObject().put("action", "write_diary").put("text", text).toString()
-        val thought = ToolLoop.unwrapDiaryReply(
-            Files.createTempDirectory("ruri-initiative").toFile(), raw, JSONArray()
-        ) { null }
-        assertEquals(text, ToolLoop.proseCandidate(thought))
+        val root = Files.createTempDirectory("ruri-initiative").toFile()
+        try {
+            val thought = ToolLoop.unwrapDiaryReply(root, raw, JSONArray()) { null }
+            assertEquals(text, ToolLoop.proseCandidate(thought))
+        } finally {
+            root.deleteRecursively()
+        }
     }
 }
 
