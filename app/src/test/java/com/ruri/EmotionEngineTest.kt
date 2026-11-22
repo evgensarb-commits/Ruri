@@ -6,6 +6,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -80,7 +81,7 @@ class EmotionLineStripTest : EmotionEngineTestBase() {
 
 class MoodLabelTest : EmotionEngineTestBase() {
     @Test fun moodLabelUsesPriorityRules() {
-        assertEquals("обиженная", EmotionEngine.moodLabel(JSONObject().put("hurt", 61)))
+        assertEquals("раздражённая", EmotionEngine.moodLabel(JSONObject().put("anger", 61)))
         assertEquals("томная", EmotionEngine.moodLabel(JSONObject().put("desire", 61)))
         assertEquals("собранная", EmotionEngine.moodLabel(JSONObject()))
     }
@@ -105,34 +106,6 @@ class EmotionEpisodeTagsTest : EmotionEngineTestBase() {
 }
 
 
-class EmotionThresholdsTest : EmotionEngineTestBase() {
-    @Test fun neutralEmotionValuesPreserveExistingSchedule() {
-        val th = EmotionEngine.thresholds(root)
-        assertEquals(3.5, th.getDouble("initiative_h"), 0.0001)
-        assertEquals(3.0, th.getDouble("cooldown_h"), 0.0001)
-        assertEquals(6.0, th.getDouble("reflection_h"), 0.0001)
-    }
-
-    @Test fun boredomAndAffectionLowerInitiativeThreshold() {
-        EmotionEngine.applyDelta(root, JSONObject().put("boredom", 60.0).put("affection", 30.0), "test")
-        val th = EmotionEngine.thresholds(root)
-        assertTrue(th.getDouble("initiative_h") < 3.5)
-        assertTrue(th.getDouble("cooldown_h") < 3.0)
-    }
-
-    @Test fun hurtAndFatigueRaiseInitiativeThreshold() {
-        EmotionEngine.applyDelta(root, JSONObject().put("hurt", 70.0).put("fatigue", 60.0), "test")
-        val th = EmotionEngine.thresholds(root)
-        assertTrue(th.getDouble("initiative_h") > 3.5)
-        assertTrue(th.getDouble("cooldown_h") > 3.0)
-    }
-
-    @Test fun interestAndBoredomShortenReflectionInterval() {
-        EmotionEngine.applyDelta(root, JSONObject().put("interest", 50.0).put("boredom", 40.0), "test")
-        assertTrue(EmotionEngine.thresholds(root).getDouble("reflection_h") < 6.0)
-    }
-}
-
 class InitiativeGateEmotionTest : EmotionEngineTestBase() {
     @Test fun emotionCanMakeInitiativeDueEarlierOrDelayIt() {
         val now = System.currentTimeMillis()
@@ -143,7 +116,7 @@ class InitiativeGateEmotionTest : EmotionEngineTestBase() {
         assertEquals(true, EmotionEngine.initiativeGate(root, lastSeen, now, false, 0L))
 
         EmotionEngine.applyDelta(root, JSONObject().put("boredom", -80.0)
-            .put("hurt", 90.0).put("fatigue", 80.0), "test")
+            .put("anger", 90.0).put("fatigue", 80.0), "test")
         assertEquals(false, EmotionEngine.initiativeGate(root, lastSeen, now, false, 0L))
     }
 
@@ -155,29 +128,35 @@ class InitiativeGateEmotionTest : EmotionEngineTestBase() {
     }
 }
 
-class ThresholdsMergeTest : EmotionEngineTestBase() {
-    @Test fun oldEmotionConfigReceivesMissingInitiativeWeights() {
+class LegacyEmotionMigrationTest : EmotionEngineTestBase() {
+    @Test fun hurtAndCalmAreRemovedAndHurtSplitsIntoAngerAndSadness() {
         val config = JSONObject(FileManager.read(root, "core/emotions.json"))
-        val drift = config.getJSONObject("drift")
-        val newKeys = listOf(
-            "base_initiative_h", "base_cooldown_h", "base_reflection_h",
-            "w_hurt_init", "w_fatigue_init", "w_boredom_init",
-            "w_affection_init", "w_anxiety_init", "w_interest_init"
-        )
-        newKeys.forEach { drift.remove(it) }
+        config.put("schema_version", 1)
+        val channels = config.getJSONObject("channels")
+        channels.put("hurt", JSONObject().put("min", 0).put("max", 100).put("base", 10).put("half_life_h", 24))
+        channels.put("calm", JSONObject().put("min", 0).put("max", 100).put("base", 60).put("half_life_h", 6))
         FileManager.write(root, "core/emotions.json", config.toString(2))
+
+        val state = JSONObject(FileManager.read(root, "memory/emotions.json"))
+        val values = state.getJSONObject("values")
+            .put("anger", 10.0)
+            .put("sadness", 20.0)
+            .put("hurt", 40.0)
+            .put("calm", 75.0)
+        state.put("values", values)
+        FileManager.write(root, "memory/emotions.json", state.toString(2))
 
         EmotionEngine.ensure(root)
 
-        val migrated = JSONObject(FileManager.read(root, "core/emotions.json")).getJSONObject("drift")
-        assertEquals(3.5, migrated.getDouble("base_initiative_h"), 0.0)
-        assertEquals(3.0, migrated.getDouble("base_cooldown_h"), 0.0)
-        assertEquals(6.0, migrated.getDouble("base_reflection_h"), 0.0)
-        assertEquals(2.0, migrated.getDouble("w_hurt_init"), 0.0)
-        assertEquals(2.0, migrated.getDouble("w_fatigue_init"), 0.0)
-        assertEquals(1.5, migrated.getDouble("w_boredom_init"), 0.0)
-        assertEquals(1.0, migrated.getDouble("w_affection_init"), 0.0)
-        assertEquals(1.0, migrated.getDouble("w_anxiety_init"), 0.0)
-        assertEquals(0.5, migrated.getDouble("w_interest_init"), 0.0)
+        val migratedConfig = JSONObject(FileManager.read(root, "core/emotions.json"))
+        val migratedChannels = migratedConfig.getJSONObject("channels")
+        val migratedValues = EmotionEngine.readValues(root)
+        assertEquals(2, migratedConfig.getInt("schema_version"))
+        assertFalse(migratedChannels.has("hurt"))
+        assertFalse(migratedChannels.has("calm"))
+        assertFalse(migratedValues.has("hurt"))
+        assertFalse(migratedValues.has("calm"))
+        assertEquals(30.0, migratedValues.getDouble("anger"), 0.0)
+        assertEquals(40.0, migratedValues.getDouble("sadness"), 0.0)
     }
 }
