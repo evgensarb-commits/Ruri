@@ -320,16 +320,18 @@ object ChatEngine {
                 }
                 val meta = JSONObject()
                 lastSearchSourceUrls = JSONArray()
-                val rawReply = ToolLoop.unwrapDiaryReply(root, initialReply, messages, meta) { nextMessages ->
-                    requestToolFollowup(model, nextMessages, root, routeId, task)
-                }
+                val initialDiaryText = ToolLoop.diaryActionText(initialReply)
+                val rawReply = if (initialDiaryText != null) "" else
+                    ToolLoop.unwrapDiaryReply(root, initialReply, messages, meta) { nextMessages ->
+                        requestToolFollowup(model, nextMessages, root, routeId, task)
+                    }
                 val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(rawReply)
                 val emotion = if (emotionDelta != null) EmotionEngine.applyDelta(root, emotionDelta, "chat") else null
                 var finalReply = cleanedReply
                 var guard = 0
                 while (guard < 2) {
                     val (clean, diaryTexts, toolActions) = ToolLoop.stripActions(finalReply)
-                    diaryTexts.forEach { Diary.append(root, it, "chat_write_diary", emotion, "thought") }
+                    diaryTexts.forEach { routeChatDiaryAction(root, it, emotion) }
                     if (toolActions.isEmpty()) { finalReply = clean; break }
                     toolActions.forEach { action ->
                         val name = action.optString("action")
@@ -342,17 +344,20 @@ object ChatEngine {
                     guard++
                 }
                 val (cleanFinal, tailDiary, _) = ToolLoop.stripActions(finalReply)
-                tailDiary.forEach { Diary.append(root, it, "chat_write_diary", emotion, "thought") }
-                var proseReply = ToolLoop.proseCandidate(cleanFinal)
-                if (proseReply.isNullOrBlank()) {
+                tailDiary.forEach { routeChatDiaryAction(root, it, emotion) }
+                if (initialDiaryText != null) routeChatDiaryAction(root, initialDiaryText, emotion)
+                var proseReply = if (initialDiaryText == null) ToolLoop.proseCandidate(cleanFinal) else null
+                if (proseReply.isNullOrBlank() && initialDiaryText == null && tailDiary.isEmpty()) {
                     messages.put(JSONObject().put("role", "system")
-                        .put("content", "Предыдущий ответ был пустым или содержал только JSON. Ответь обычной прозой без JSON, без markdown-блока и без action."))
+                        .put("content", "Предыдущий ответ был действительно пустым. Ответь обычной прозой без JSON или верни write_diary с непустым text."))
                     val retry = requestToolFollowup(model, messages, root, routeId, task).orEmpty()
                     val (retryClean, retryDiary, _) = ToolLoop.stripActions(retry)
-                    retryDiary.forEach { Diary.append(root, it, "chat_write_diary", emotion, "thought") }
+                    retryDiary.forEach { routeChatDiaryAction(root, it, emotion) }
                     proseReply = ToolLoop.proseCandidate(retryClean)
                 }
-                val reply = proseReply?.takeIf { it.isNotBlank() } ?: "(не смогла сформулировать ответ)"
+                val diaryFallback = initialDiaryText ?: tailDiary.firstOrNull()
+                    ?: ToolLoop.diaryActionText(finalReply).orEmpty()
+                val reply = resolveChatReply(cleanFinal, diaryFallback)
                 if (recordAdultRefusal(
                         root = root,
                         routeId = routeId,
@@ -430,6 +435,17 @@ object ChatEngine {
             role == "user" || role == "assistant"
         }
         return hasMemoryLayers && hasRecallTool && hasConversation
+    }
+
+    internal fun routeChatDiaryAction(root: File, rawText: String, emotion: JSONObject? = null) {
+        val safe = SecretRedactor.redactText(rawText.trim())
+        if (safe.isNotBlank()) Diary.append(root, safe, "chat_write_diary", emotion, "thought")
+    }
+
+    internal fun resolveChatReply(cleanReply: String, diaryFallback: String): String {
+        return ToolLoop.proseCandidate(cleanReply)?.takeIf { it.isNotBlank() }
+            ?: SecretRedactor.redactText(diaryFallback.trim()).takeIf { it.isNotBlank() }
+            ?: "(не смогла сформулировать ответ)"
     }
 
     internal fun diaryMirrorSaid(config: JSONObject): Boolean =
