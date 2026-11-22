@@ -143,6 +143,26 @@ object SecretStore {
         }
     }
 
+    /**
+     * Reuses the existing Routeway credential for the MiniMax Routeway endpoint.
+     * The key remains encrypted in Android Keystore and is never copied into config.json.
+     */
+    fun migrateRoutewayFallbackKey(root: File, primaryRouteId: String, fallbackRouteId: String) = synchronized(lock) {
+        if (primaryRouteId.isBlank() || fallbackRouteId.isBlank() || primaryRouteId == fallbackRouteId) {
+            return@synchronized
+        }
+        try {
+            val secrets = readSecrets(root)
+            val primaryKey = secrets.optString(primaryRouteId)
+            if (primaryKey.isNotBlank() && secrets.optString(fallbackRouteId).isBlank()) {
+                secrets.put(fallbackRouteId, primaryKey)
+                writeSecrets(root, secrets)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Routeway fallback key migration skipped; encrypted secrets were preserved", e)
+        }
+    }
+
     private fun modelId(model: JSONObject, index: Int): String {
         val explicit = model.optString("id").trim()
         if (explicit.isNotEmpty()) return explicit
