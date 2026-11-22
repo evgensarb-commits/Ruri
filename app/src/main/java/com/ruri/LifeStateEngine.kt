@@ -58,12 +58,9 @@ object LifeStateEngine {
         val quietHours = if (lastSeen <= 0L) 0.0 else
             ((now - lastSeen).coerceAtLeast(0L) / 3_600_000.0)
 
-        // The two constitutional needs are equal. Their dynamic values only express urgency.
-        val liveNeed = when {
-            battery <= 12 || (freeBytes in 0 until 100L * 1024L * 1024L) -> 0.95
-            battery <= 25 || (freeBytes in 0 until 500L * 1024L * 1024L) -> 0.72
-            else -> 0.38
-        }
+        // The live need has a stable baseline; battery is sensor context, not a cognitive gate.
+        // Personal energy is calculated from time-of-day in Thinker.energyFor().
+        val liveNeed = 0.38
         val connectionNeed = min(0.95, 0.35 + (quietHours / 18.0) * 0.5)
         val needs = state.optJSONObject("needs") ?: JSONObject()
         needs.put("live", liveNeed)
@@ -80,10 +77,6 @@ object LifeStateEngine {
         device.put("battery_percent", battery)
         device.put("available_storage_bytes", freeBytes)
         device.put("sampled_at", now)
-        device.put(
-            "resource_mode",
-            if (battery <= 15 || (freeBytes in 0 until 100L * 1024L * 1024L)) "conserve" else "normal"
-        )
         state.put("device", device)
 
         val typeCounts = JSONObject()
@@ -139,7 +132,7 @@ object LifeStateEngine {
             state = readStateStrict(root)
         } else {
             // Resource-related drives still change on a quiet cycle, but no activity is invented.
-            updateDrives(root, 0, battery, now, "cycle:${now}")
+            updateDrives(root, 0, now, "cycle:${now}")
             state.put("last_processed_event_offset", batch.nextOffset)
             FileManager.write(root, STATE_PATH, state.toString(2))
         }
@@ -222,14 +215,13 @@ object LifeStateEngine {
 
     private fun completePendingBatch(root: File, state: JSONObject, outbox: JSONObject) {
         val batchId = outbox.optString("batch_id")
-        val battery = outbox.optInt("battery_percent", 50)
         val processedAt = outbox.optLong("processed_at", System.currentTimeMillis())
         val eventCount = outbox.optInt("event_count", 0)
         val recordCount = outbox.optInt("record_count", eventCount)
         val types = outbox.optJSONObject("event_types") ?: JSONObject()
         val endOffset = outbox.optLong("end_offset", 0L)
 
-        updateDrives(root, eventCount, battery, processedAt, batchId)
+        updateDrives(root, eventCount, processedAt, batchId)
         state.put("last_processed_event_offset", endOffset)
         val lastId = outbox.optString("last_event_id")
         if (lastId.isNotBlank()) state.put("last_processed_event_id", lastId)
@@ -241,7 +233,7 @@ object LifeStateEngine {
         FileManager.write(root, STATE_PATH, state.toString(2))
     }
 
-    private fun updateDrives(root: File, newEventCount: Int, battery: Int, now: Long, batchId: String) {
+    private fun updateDrives(root: File, newEventCount: Int, now: Long, batchId: String) {
         val raw = FileManager.read(root, DRIVES_PATH)
         if (raw.isBlank()) return
         val config = try { JSONObject(raw) } catch (e: Exception) {
@@ -262,12 +254,6 @@ object LifeStateEngine {
                 "curiosity" -> if (newEventCount > 0) current + min(0.15, newEventCount * 0.025) else current - 0.01
                 "development" -> if (newEventCount > 0) current + 0.01 else current - 0.003
                 "completion" -> (0.25 + goals.length() * 0.12).coerceAtMost(0.95)
-                "resource_recovery" -> when {
-                    battery <= 15 -> 0.95
-                    battery <= 30 -> 0.75
-                    battery <= 50 -> 0.5
-                    else -> 0.2
-                }
                 else -> current
             }.coerceIn(0.0, 1.0)
             drive.put("level", updated)
@@ -359,7 +345,7 @@ object LifeStateEngine {
             .put("waiting_for_reply", false)
             .put("ignored_count", 0)
             .put("offended_until", 0L)
-            .put("last_seen_commander", latestCommander?.optLong("timestamp", latestCommander.optLong("ts", 0L)) ?: 0L)
+            .put("last_seen_commander", 0L)
             .put("last_processed_event_offset", 0L)
             .put("last_thought", 0L)
             .put("active_goals", JSONArray(goals.toString()))
