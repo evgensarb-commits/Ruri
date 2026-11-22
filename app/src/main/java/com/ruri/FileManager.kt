@@ -199,6 +199,18 @@ object FileManager {
         // never discards credentials from the encrypted SecretStore.
         SecretStore.migrateLegacyApiKeys(root)
         migrateModelConfig(root)
+        val configuredModels = runCatching {
+            JSONObject(read(root, CONFIG_PATH)).optJSONArray("models")
+        }.getOrNull()
+        val meromeroId = configuredModels?.let { models ->
+            (0 until models.length()).mapNotNull { models.optJSONObject(it) }
+                .firstOrNull { it.optString("model").contains("meromero", ignoreCase = true) }
+                ?.optString("id").orEmpty()
+        }.orEmpty()
+        if (meromeroId.isNotBlank()) {
+            SecretStore.migrateRoutewayFallbackKey(root, meromeroId, "routeway-minimax")
+        }
+        RouteMeta.pruneToConfiguredRoutes(root)
         RouteMeta.migrateLegacyNsfwFlags(root)
         migrateGoalSchema(root)
         ensureRemoteModelContextPolicy(root)
@@ -700,128 +712,53 @@ object FileManager {
         val file = safe(root, CONFIG_PATH) ?: return
         if (!file.exists()) return
         try {
-            val config = JSONObject(file.readText(Charsets.UTF_8))
-            val sourceModels = config.optJSONArray("models") ?: return
-            val previousCurrentId = sourceModels.optJSONObject(config.optInt("current", -1))?.optString("id").orEmpty()
-            val models = mergeModelsById(sourceModels)
-            for (i in models.length() - 1 downTo 0) {
-                val model = models.optJSONObject(i) ?: continue
-                if (model.optString("id").equals("kilo", true) || model.optBoolean("minimal_context", false) ||
-                    model.optBoolean("allow_anonymous", false)) {
-                    models.remove(i)
-                }
-            }
-            var changed = models.length() != sourceModels.length()
-            config.put("models", models)
-            for (i in 0 until models.length()) {
-                val model = models.optJSONObject(i) ?: continue
-                if (model.optString("model") == "gemini-2.0-flash") {
-                    model.put("model", "gemini-3.8-flash")
-                    changed = true
-                }
-                if (model.optString("id").isBlank()) {
-                    model.put("id", model.optString("name", "model_$i").lowercase().replace(Regex("[^a-z0-9_-]"), "_"))
-                    changed = true
-                }
-            }
+            val raw = file.readText(Charsets.UTF_8)
+            val config = JSONObject(raw)
+            val sourceModels = mergeModelsById(config.optJSONArray("models") ?: JSONArray())
 
-            fun ensureProvider(id: String, defaults: JSONObject): Int {
-                for (i in 0 until models.length()) {
-                    val existing = models.optJSONObject(i) ?: continue
-                    if (existing.optString("id") == id) {
-                        for (key in defaults.keys()) {
-                            if (!existing.has(key) || (key == "api_key" && existing.optString(key).isBlank())) {
-                                existing.put(key, defaults.get(key))
-                                changed = true
-                            }
-                        }
-                        return i
-                    }
+            val meromeroSource = (0 until sourceModels.length()).mapNotNull { sourceModels.optJSONObject(it) }
+                .firstOrNull {
+                    it.optString("model").contains("meromero", ignoreCase = true) ||
+                        it.optString("id").contains("meromero", ignoreCase = true)
                 }
-                models.put(defaults)
-                changed = true
-                return models.length() - 1
+            val meromero = meromeroSource?.let { JSONObject(it.toString()) } ?: JSONObject()
+            val meromeroId = meromero.optString("id").ifBlank { "routeway" }
+            if (!meromero.optString("model").contains("meromero", ignoreCase = true)) {
+                meromero.put("model", "gemma-4-26b-a4b-it-meromero:free")
             }
-
-            val routewayIndex = ensureProvider("routeway", JSONObject()
-                .put("id", "routeway")
+            meromero.put("id", meromeroId)
                 .put("name", "Routeway · Gemma MeroMero Free")
                 .put("base_url", "https://api.routeway.ai/v1")
                 .put("api_key", "")
-                .put("model", "gemma-4-26b-a4b-it-meromero:free")
                 .put("priority", 1)
                 .put("free_tier", true)
-                .put("enabled", true))
+                .put("enabled", true)
+            if (meromero.optLong("tokens_per_day", 0L) <= 0L) {
+                meromero.put("tokens_per_day", 400000L)
+            }
 
-            ensureProvider("requesty", JSONObject()
-                .put("id", "requesty")
-                .put("name", "Requesty · Google Gemma 4 Free")
-                .put("base_url", "https://router.requesty.ai/v1")
+            val minimaxSource = (0 until sourceModels.length()).mapNotNull { sourceModels.optJSONObject(it) }
+                .firstOrNull { it.optString("model") == "minimax-m3.1-flash:free" }
+            val minimax = minimaxSource?.let { JSONObject(it.toString()) } ?: JSONObject()
+            minimax.put("id", "routeway-minimax")
+                .put("name", "MiniMax M3.1 Flash Free")
+                .put("base_url", "https://api.routeway.ai/v1")
                 .put("api_key", "")
-                .put("model", "google/gemma-4-31b-it")
-                .put("priority", 3)
+                .put("model", "minimax-m3.1-flash:free")
+                .put("priority", 2)
                 .put("free_tier", true)
-                .put("enabled", true))
+                .put("enabled", true)
 
-            ensureProvider("gemini", JSONObject()
-                .put("id", "gemini").put("name", "Gemini (legacy, disabled)")
-                .put("base_url", "https://generativelanguage.googleapis.com/v1beta/openai")
-                .put("api_key", "").put("model", "gemini-3.8-flash")
-                .put("priority", 90).put("free_tier", false).put("enabled", false))
-            ensureProvider("groq", JSONObject()
-                .put("id", "groq").put("name", "Groq (legacy, disabled)")
-                .put("base_url", "https://api.groq.com/openai/v1")
-                .put("api_key", "").put("model", "openai/gpt-oss-120b")
-                .put("priority", 91).put("free_tier", false).put("enabled", false))
+            val kept = JSONArray().put(meromero).put(minimax)
+            config.put("models", kept)
+                .put("current", 0)
+                .put("free_only", true)
+                .put("two_route_migration_v1", true)
 
-            for (i in 0 until models.length()) {
-                val model = models.optJSONObject(i) ?: continue
-                if (model.optString("id") == "gemini" || model.optString("id") == "groq") {
-                    val legacyFields = mapOf(
-                        "needs_vpn" to true,
-                        "ru_reachable" to false,
-                        "role" to "neutral_fallback",
-                        "free_tier" to false,
-                        "enabled" to false
-                    )
-                    legacyFields.forEach { (key, value) ->
-                        if (model.opt(key) != value) {
-                            model.put(key, value)
-                            changed = true
-                        }
-                    }
-                }
-            }
-
-            // Legacy paid providers and any unknown models remain stored, but are never sent.
-            for (i in 0 until models.length()) {
-                val model = models.optJSONObject(i) ?: continue
-                if (model.optString("id") !in setOf("routeway", "requesty")) {
-                    if (model.optBoolean("free_tier", false) || model.optBoolean("enabled", true)) {
-                        model.put("free_tier", false)
-                        model.put("enabled", false)
-                        changed = true
-                    }
-                }
-            }
-
-            config.put("free_only", true)
-            if (!config.optBoolean("free_routes_migrated", false)) {
-                config.put("current", routewayIndex)
-                config.put("free_routes_migrated", true)
-                changed = true
-            } else {
-                val migratedCurrent = (0 until models.length()).firstOrNull {
-                    models.optJSONObject(it)?.optString("id") == previousCurrentId
-                } ?: routewayIndex
-                if (config.optInt("current", -1) != migratedCurrent) {
-                    config.put("current", migratedCurrent)
-                    changed = true
-                }
-            }
-            if (changed) atomicWrite(file, config.toString(2))
+            val normalized = config.toString(2)
+            if (normalized != raw) atomicWrite(file, normalized)
         } catch (e: Exception) {
-            android.util.Log.w("Ruri", "Free provider migration skipped; original model configuration was preserved", e)
+            android.util.Log.w("Ruri", "Two-route model migration skipped; original model configuration was preserved", e)
         }
     }
 
