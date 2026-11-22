@@ -71,11 +71,11 @@ class AutonomousDriftTest : EmotionEngineTestBase() {
 
 class EmotionLineStripTest : EmotionEngineTestBase() {
     @Test fun serviceLineIsRemovedFromVisibleReply() {
-        val raw = "Я немного задумалась.\nEMOTION_DELTA: {\"joy\":-10,\"hurt\":15}"
+        val raw = "Я немного задумалась.\nEMOTION_DELTA: {\"joy\":-10,\"anger\":15}"
         val (visible, delta) = EmotionEngine.parseAndStrip(raw)
         assertEquals("Я немного задумалась.", visible)
         assertEquals(-10.0, delta?.getDouble("joy") ?: 0.0, 0.0)
-        assertEquals(15.0, delta?.getDouble("hurt") ?: 0.0, 0.0)
+        assertEquals(15.0, delta?.getDouble("anger") ?: 0.0, 0.0)
     }
 }
 
