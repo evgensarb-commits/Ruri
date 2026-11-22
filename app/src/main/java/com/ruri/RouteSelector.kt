@@ -85,9 +85,8 @@ object RouteSelector {
         }
         if (meromeroIndex != null || minimaxIndex != null) {
             val meromero = meromeroIndex?.let { models.optJSONObject(it) }
-            val meromeroId = meromero?.optString("id")
-                ?.ifBlank { meromero.optString("name") }
-                .orEmpty()
+            val meromeroId = meromero?.optString("id").orEmpty()
+                .ifBlank { meromero?.optString("name").orEmpty() }
             val meromeroTokensPerDay = meromero?.optLong("tokens_per_day", 0L) ?: 0L
             val gemmaExhausted = meromeroTokensPerDay > 0L &&
                 meromeroId.isNotBlank() &&
