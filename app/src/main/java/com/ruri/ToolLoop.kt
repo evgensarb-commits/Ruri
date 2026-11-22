@@ -127,7 +127,7 @@ object ToolLoop {
     internal fun diaryActionText(raw: String): String? {
         val action = parseJsonAction(raw) ?: return null
         if (action.optString("action") !in setOf("write_diary", "diary")) return null
-        return action.optString("text").trim().takeIf { it.isNotBlank() }?.let(SecretRedactor::redactText)
+        return action.optString("text").trim().takeIf { it.isNotBlank() }?.let { SecretRedactor.redactText(it) }
     }
 
     fun unwrapDiaryReply(
