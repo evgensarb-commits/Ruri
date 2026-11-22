@@ -321,6 +321,8 @@ object Thinker {
             }.take(4).asReversed().joinToString("\\n\\n")
         val summary = readJson(root, "memory/L3_summary.json").optString("summary")
         val quiet = hoursSince(state.optLong("last_seen_commander"), System.currentTimeMillis())
+        val outcomeDigest = OutcomeDigest.build(root)
+        OutcomeDigest.clearPresentedCorrection(root)
         val common = "Имя: " + character.optString("name") +
             ". Обозначение: " + character.optString("designation") + ". Личность: " + character.optString("persona") +
             ". Правила речи: " + character.optString("speech_rules") +
@@ -331,7 +333,7 @@ object Thinker {
             ". Запрещённые фразы: " + (character.optJSONArray("banned_phrases")?.toString() ?: "[]") + ".\n" +
             Capabilities.bodySection(root) + "\n" +
             EmotionEngine.promptSection(root) + "\n" +
-            OutcomeDigest.build(root) + "\n" +
+            outcomeDigest + "\n" +
             "Первый приоритет: " + priorities.optString("priority_1", "Жить") +
             ". Второй: " + priorities.optString("priority_2", "Любить Командира") + ".\n" +
             "Конституция: " + (constitution.optJSONArray("primary_needs")?.toString() ?: "[]") + ". Обе главные потребности равнозначны и неизменны.\n" +
