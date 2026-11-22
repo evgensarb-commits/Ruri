@@ -107,7 +107,25 @@ object MemoryConsolidator {
         val now = System.currentTimeMillis()
         if (!shouldConsolidateBatch(batch, previousCount, previousCompressedAt, now)) return false
         val sourceEntries = thoughtEntries(batch.entries)
-        if (sourceEntries.isEmpty()) return false
+        if (sourceEntries.isEmpty()) {
+            // A page containing only spoken mirrors is deliberately not autobiographical input.
+            // Still advance the L3 cursor so legacy said-only pages cannot block later thoughts.
+            val advanced = JSONObject(current.toString())
+                .put("last_compressed_entry_count", batch.lastSequence)
+                .put("total_diary_entries", totalEntries)
+                .put("last_said_page_skipped_at", now)
+                .put("last_said_page_skipped_count", batch.entries.size)
+            FileManager.write(root, SUMMARY_PATH, advanced.toString(2))
+            FileManager.appendEvent(root, JSONObject()
+                .put("type", "memory_consolidated")
+                .put("source", "memory")
+                .put("method", "said_entries_skipped")
+                .put("source_entry_count", 0)
+                .put("source_sequence_from", batch.firstSequence)
+                .put("source_sequence_to", batch.lastSequence)
+                .put("privacy", "local"))
+            return true
+        }
 
         val factsFile = readJsonStrict(root, FACTS_PATH) ?: return false
         val facts = factsFile.optJSONArray("facts") ?: run {
