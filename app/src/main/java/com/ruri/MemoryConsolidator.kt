@@ -103,7 +103,8 @@ object MemoryConsolidator {
         val totalEntries = batch.totalEntries
         val now = System.currentTimeMillis()
         if (!shouldConsolidateBatch(batch, previousCount, previousCompressedAt, now)) return false
-        val sourceEntries = batch.entries
+        val sourceEntries = batch.entries.filter { it.optString("kind", "thought") == "thought" }
+        if (sourceEntries.isEmpty()) return false
 
         val factsFile = readJsonStrict(root, FACTS_PATH) ?: return false
         val facts = factsFile.optJSONArray("facts") ?: run {
