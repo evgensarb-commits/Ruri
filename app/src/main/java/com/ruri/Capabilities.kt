@@ -87,6 +87,13 @@ object Capabilities {
             val array = config.optJSONArray(key) ?: JSONArray()
             return (0 until array.length()).joinToString("\n") { "• " + array.optString(it) }
         }
+        val selfModel = runCatching {
+            JSONObject(FileManager.read(root, "memory/self_model.json"))
+        }.getOrElse { JSONObject() }
+        val selfLimitations = selfModel.optJSONArray("limitations")
+            ?: config.optJSONArray("limits") ?: JSONArray()
+        val limitationText = (0 until selfLimitations.length())
+            .joinToString("\n") { "• " + selfLimitations.optString(it) }
         return buildString {
             append("=== ТВОЁ ТЕЛО И ЧУВСТВА ===\n").append(lines("senses")).append("\n")
             append("=== ТВОЯ ПАМЯТЬ ===\n").append(lines("memory")).append("\n")
@@ -102,7 +109,7 @@ object Capabilities {
             append("• ").append(localDescription).append("\n")
             append("Инициатива, дневник, эмоциональная регуляция и осмысление событий выполняются обычной прозой, не JSON-инструментами. Не выдумывай действия телефона, которых нет в разрешённых возможностях.\n")
             append("URL источников покажет интерфейс, тебе перечислять не нужно. Если цитируешь — копируй URL байт-в-байт из tool_result, не выдумывай. Не уверен в URL — не пиши ссылку.\n")
-            append("=== ТВОИ ЧЕСТНЫЕ ГРАНИЦЫ ===\n").append(lines("limits")).append("\n")
+            append("=== ТВОИ ЧЕСТНЫЕ ГРАНИЦЫ ===\n").append(limitationText).append("\n")
             append(config.optString("self_narrative"))
         }
     }
