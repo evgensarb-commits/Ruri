@@ -20,6 +20,9 @@ object MemoryConsolidator {
     private const val MAX_ENTRIES_PER_CONSOLIDATION = 40
     private val processLock = Any()
 
+    internal fun thoughtEntries(entries: List<JSONObject>): List<JSONObject> =
+        entries.filter { it.optString("kind", "thought") == "thought" }
+
     internal data class SequenceBatch(
         val entries: List<JSONObject>,
         val firstSequence: Long,
@@ -103,7 +106,7 @@ object MemoryConsolidator {
         val totalEntries = batch.totalEntries
         val now = System.currentTimeMillis()
         if (!shouldConsolidateBatch(batch, previousCount, previousCompressedAt, now)) return false
-        val sourceEntries = batch.entries.filter { it.optString("kind", "thought") == "thought" }
+        val sourceEntries = thoughtEntries(batch.entries)
         if (sourceEntries.isEmpty()) return false
 
         val factsFile = readJsonStrict(root, FACTS_PATH) ?: return false
