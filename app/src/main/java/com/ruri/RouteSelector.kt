@@ -60,7 +60,6 @@ object RouteSelector {
         online: Boolean = NetState.online,
         vpn: Boolean = NetState.vpn
     ): List<Int> {
-        if (!online) return emptyList()
         val now = System.currentTimeMillis()
         val candidates = mutableListOf<Pair<Int, Double>>()
         for (index in 0 until models.length()) {
@@ -70,11 +69,8 @@ object RouteSelector {
             if (model.optString("api_key").isBlank()) continue
 
             val meta = RouteMeta.route(root, id)
-            if (model.has("needs_vpn") && model.optBoolean("needs_vpn")) {
-                RouteMeta.setNeedsVpn(root, id, true)
-            }
-            val needsVpn = RouteMeta.route(root, id).optBoolean("needs_vpn", false)
-            // Reachability and quota are telemetry/scoring only: always retain eligible free routes.
+            // Reachability, VPN and quota are transport/runtime concerns. Keep every eligible
+            // free route in the order; the caller/OfflineQueue handles connection failures.
             candidates += index to score(meta, task)
         }
         return candidates.sortedWith(
