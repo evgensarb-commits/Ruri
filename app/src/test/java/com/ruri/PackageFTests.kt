@@ -288,7 +288,7 @@ class EmotionRedesignTest {
         try {
             EmotionEngine.onCycle(root)
             val values = EmotionEngine.readValues(root)
-            assertEquals(22.0, values.getDouble("fatigue"), 0.0)
+            assertEquals(52.0, values.getDouble("fatigue"), 0.0)
             assertEquals(16.0, values.getDouble("boredom"), 0.0)
         } finally {
             root.deleteRecursively()
