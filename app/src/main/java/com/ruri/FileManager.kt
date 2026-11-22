@@ -450,7 +450,35 @@ object FileManager {
             }
         }
         val target = safe(root, normalized) ?: throw IllegalArgumentException("Invalid data path")
-        synchronized(lockFor(target)) { atomicWrite(target, content) }
+        synchronized(lockFor(target)) {
+            val output = if (normalized == "memory/L4_state.json") {
+                runCatching {
+                    val incoming = JSONObject(content)
+                    val existing = if (target.isFile) JSONObject(target.readText(Charsets.UTF_8)) else JSONObject()
+                    listOf("last_emotion_msg_id", "last_reply_emotion_msg_id").forEach { key ->
+                        val currentId = existing.optString(key)
+                        if (currentId.isNotBlank()) incoming.put(key, currentId)
+                        else incoming.remove(key)
+                    }
+                    incoming.toString(2)
+                }.getOrDefault(content)
+            } else content
+            atomicWrite(target, output)
+        }
+    }
+
+    /** Atomically update one of the two monotonic emotion deduplication markers in L4. */
+    fun updateL4EmotionMarker(root: File, key: String, messageId: String) {
+        require(key == "last_emotion_msg_id" || key == "last_reply_emotion_msg_id")
+        if (messageId.isBlank()) return
+        val target = safe(root, "memory/L4_state.json") ?: throw IllegalArgumentException("Invalid L4 path")
+        synchronized(lockFor(target)) {
+            val state = if (target.isFile) {
+                runCatching { JSONObject(target.readText(Charsets.UTF_8)) }.getOrElse { JSONObject() }
+            } else JSONObject()
+            state.put(key, messageId)
+            atomicWrite(target, state.toString(2))
+        }
     }
 
     fun lastAppendTimestamp(root: File): Long {
