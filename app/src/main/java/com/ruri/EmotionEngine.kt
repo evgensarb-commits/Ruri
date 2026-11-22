@@ -185,8 +185,7 @@ object EmotionEngine {
         delta.put("longing", -d.optDouble("message_longing_relief", 10.0))
         applyDelta(root, delta, "commander_message")
         if (msgId.isNotBlank()) {
-            l4.put("last_emotion_msg_id", msgId)
-            FileManager.write(root, "memory/L4_state.json", l4.toString(2))
+            FileManager.updateL4EmotionMarker(root, "last_emotion_msg_id", msgId)
         }
     }
 
@@ -202,8 +201,7 @@ object EmotionEngine {
             .put("sadness", -d.optDouble("reply_sadness_relief", 6.0)).put("joy", d.optDouble("reply_joy", 5.0))
             .put("longing", -d.optDouble("reply_longing_relief", 20.0)), "commander_reply")
         if (msgId.isNotBlank()) {
-            l4.put("last_reply_emotion_msg_id", msgId)
-            FileManager.write(root, "memory/L4_state.json", l4.toString(2))
+            FileManager.updateL4EmotionMarker(root, "last_reply_emotion_msg_id", msgId)
         }
     }
 
