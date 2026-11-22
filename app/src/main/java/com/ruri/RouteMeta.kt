@@ -78,6 +78,24 @@ object RouteMeta {
         }
     }
 
+    /** Remove telemetry for providers that are no longer present in runtime config. */
+    @Synchronized
+    fun pruneToConfiguredRoutes(root: File) {
+        val config = runCatching { JSONObject(FileManager.read(root, "core/config.json")) }.getOrNull() ?: return
+        val models = config.optJSONArray("models") ?: return
+        val configuredIds = (0 until models.length()).mapNotNull { index ->
+            val model = models.optJSONObject(index) ?: return@mapNotNull null
+            model.optString("id").ifBlank { model.optString("name").ifBlank { "route_$index" } }
+                .takeIf { it.isNotBlank() }
+        }.toSet()
+        val all = load(root)
+        val staleIds = all.keys().asSequence().filter { it !in configuredIds }.toList()
+        if (staleIds.isNotEmpty()) {
+            staleIds.forEach { all.remove(it) }
+            save(root, all)
+        }
+    }
+
     @Synchronized
     fun save(root: File, value: JSONObject) {
         val sanitized = JSONObject(value.toString())
