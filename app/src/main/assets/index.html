@@ -58,11 +58,28 @@ button.action.secondary{background:transparent;color:var(--gold)}
 .l0-detail.open{display:block}
 .message-focus .bub{outline:1px solid var(--cyan);box-shadow:0 0 0 2px #36d7e933}
 
+
+.memory-tabs{display:flex;gap:6px;overflow:auto;padding:0 0 12px;position:sticky;top:0;z-index:2;background:var(--bg)}
+.memory-tab{flex:0 0 auto;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--muted);padding:8px 12px;font:700 10px ui-monospace,monospace}
+.memory-tab.on{border-color:var(--gold);color:var(--gold);background:#171b24}
+.memory-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 12px}
+.memory-toolbar h3{margin:0;font-size:15px;color:var(--text)}
+.memory-card{margin-bottom:9px;padding:11px}
+.memory-card-title{font-weight:650;overflow-wrap:anywhere}
+.memory-meta{color:var(--muted);font:10px/1.5 ui-monospace,monospace;margin:5px 0}
+.memory-text{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.6;margin-top:7px}
+.memory-json{white-space:pre-wrap;overflow-wrap:anywhere;max-height:420px;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;font:10px/1.5 ui-monospace,monospace;color:var(--muted);margin:8px 0 0}
+.memory-empty{padding:16px;text-align:center;color:var(--muted);border:1px dashed var(--border);border-radius:6px;font-size:12px}
+.memory-emotion{display:grid;grid-template-columns:minmax(94px,1fr) 2fr 34px;gap:9px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);font-size:12px}
+.memory-meter{height:8px;background:#1a263b;border-radius:99px;overflow:hidden}
+.memory-meter>span{display:block;height:100%;background:var(--gold);border-radius:99px}
+.memory-mood{font-size:15px;color:var(--gold);font-weight:700}
+
 </style>
 </head>
 <body>
 <header><strong>RU-R1 · Рури</strong><span id="status">● ЗАГРУЗКА</span><button id="settingsToggle" class="gear" aria-label="Настройки">⚙</button></header>
-<nav><button class="on" data-pane="chat">ЧАТ</button><button data-pane="diary">ДНЕВНИК</button><button data-pane="l0">L0</button></nav>
+<nav><button class="on" data-pane="chat">ЧАТ</button><button data-pane="diary">ДНЕВНИК</button><button data-pane="l0">L0</button><button data-pane="memory">ПАМЯТЬ</button></nav>
 <main>
 <section class="pane on" id="pane-chat">
 <div id="chat"></div>
@@ -74,6 +91,19 @@ button.action.secondary{background:transparent;color:var(--gold)}
 <div class="actions" id="l0filters"></div>
 <button class="action secondary" id="l0refresh">ОБНОВИТЬ</button>
 <div id="l0list"></div></div></section>
+<section class="pane" id="pane-memory"><div class="scroll">
+<div class="overlay-head"><h2 class="section">ПАМЯТЬ <span>все слои</span></h2><span class="small" id="memoryStatus">локальные данные</span></div>
+<div class="memory-tabs" id="memoryTabs">
+<button class="memory-tab on" data-memory-layer="L0">L0</button>
+<button class="memory-tab" data-memory-layer="L1">L1</button>
+<button class="memory-tab" data-memory-layer="L2">L2</button>
+<button class="memory-tab" data-memory-layer="L3">L3</button>
+<button class="memory-tab" data-memory-layer="L4">L4</button>
+<button class="memory-tab" data-memory-layer="EMO">ЭМОЦИИ</button>
+<button class="memory-tab" data-memory-layer="SELF">SELF</button>
+</div>
+<div id="memoryLayerView"></div>
+</div></section>
 <section class="pane overlay-pane" id="pane-brain"><div class="scroll"><div class="overlay-head"><h2 class="section">МОЗГ <span>и личность</span></h2><button id="closeSettings">✕</button></div>
 <div class="card"><b>БЕСПЛАТНЫЕ МАРШРУТЫ — БЕЗ ПЛАТНЫХ ЗАПРОСОВ</b><p>Основной: Routeway · Gemma 4 MeroMero Free. Резерв: Requesty · Google Gemma 4 Free. Вызываются только явно бесплатные маршруты; free-tier guard не отключается. Gemini и Groq — legacy neutral_fallback: выключены и не участвуют в автоматическом выборе. Взрослая тема отправляется на выбранные бесплатные маршруты без предварительного capability-зонда; при явном отказе Рури записывает nsfw_refusal и пробует следующий маршрут.</p><p>Добавь ключи Routeway и Requesty ниже. Ключи хранятся в Android Keystore.</p><p><a href="#" onclick="Ruri.openUrl('https://routeway.ai/');return false">Routeway — получить ключ</a> · <a href="#" onclick="Ruri.openUrl('https://www.requesty.ai/model/google/gemma-4-31b-it');return false">Requesty — получить ключ</a></p></div>
 <div class="card"><b>МАРШРУТЫ</b><p>Первый маршрут выбирается по приоритету и скорингу. При ошибке Рури автоматически пробует остальные бесплатные маршруты.</p><div id="routeList" class="small">Загружаю маршруты…</div><div id="routeMode" class="small">Режим: первый маршрут + автоматический резерв</div></div>
@@ -214,6 +244,7 @@ document.querySelectorAll('nav button').forEach(function(x){x.classList.remove('
 document.querySelectorAll('.pane').forEach(function(p){p.classList.remove('on');});$('#pane-'+b.dataset.pane).classList.add('on');
 if(b.dataset.pane==='diary')loadDiary();
 if(b.dataset.pane==='l0')loadL0Pane();
+if(b.dataset.pane==='memory')loadMemoryLayer(activeMemoryLayer);
 });});
 var l0FilterTypes=[
 {value:'all',label:'все'},{value:'message',label:'message'},{value:'tool_call',label:'tool_call'},
@@ -242,6 +273,160 @@ box.appendChild(row);
 if(!events.length)box.textContent='Записей нет.';
 }catch(e){box.textContent='Ошибка чтения L0: '+e.message;}
 }
+
+var activeMemoryLayer='L0';
+var memoryLayerTitles={L0:'События L0',L1:'Факты L1',L2:'Дневник L2',L3:'Автобиографическая сводка L3',L4:'Текущее состояние L4',EMO:'Эмоциональные каналы',SELF:'Модель себя'};
+var memoryEmotionNames={joy:'радость',affection:'нежность',anger:'злость',sadness:'грусть',anxiety:'тревога',interest:'интерес',boredom:'скука',desire:'желание',fatigue:'усталость',longing:'тоска по Командиру'};
+function memoryNode(tag,cls,value){
+var el=document.createElement(tag);if(cls)el.className=cls;if(value!==undefined&&value!==null)el.textContent=String(value);return el;
+}
+function memoryPretty(value){try{return JSON.stringify(value,null,2);}catch(_){return String(value);}}
+function memoryDate(value){
+var n=Number(value||0);if(!isFinite(n)||n<=0)return '—';
+try{return new Date(n).toLocaleString('ru-RU');}catch(_){return '—';}
+}
+function memoryEmpty(parent,message){parent.appendChild(memoryNode('div','memory-empty',message));}
+function memoryPre(parent,value){parent.appendChild(memoryNode('pre','memory-json',typeof value==='string'?value:memoryPretty(value)));}
+function memoryCard(parent,title,meta,body){
+var card=memoryNode('div','card memory-card');
+card.appendChild(memoryNode('div','memory-card-title',title||'Без названия'));
+if(meta)card.appendChild(memoryNode('div','memory-meta',meta));
+if(body!==undefined&&body!==null&&String(body)!=='')card.appendChild(memoryNode('div','memory-text',body));
+parent.appendChild(card);return card;
+}
+function memoryMood(v){
+return Number(v.anger||0)>60&&Number(v.sadness||0)>50?'обиженная':
+Number(v.anger||0)>60?'раздражённая':
+Number(v.sadness||0)>60?'грустная':
+Number(v.longing||0)>60?'тоскующая':
+Number(v.anxiety||0)>60?'тревожная':
+Number(v.joy||0)>60&&Number(v.affection||0)>60?'ласковая':
+Number(v.interest||0)>60?'увлечённая':
+Number(v.boredom||0)>60?'скучающая':
+Number(v.desire||0)>60?'томная':
+Number(v.fatigue||0)>70?'уставшая':'собранная';
+}
+function renderMemoryL0(parent,events){
+if(!Array.isArray(events)||!events.length){memoryEmpty(parent,'Событий пока нет.');return;}
+events.slice().reverse().forEach(function(item){
+item=item&&typeof item==='object'?item:{};
+var row=memoryNode('div','l0-row');
+var type=item.type||'событие';
+var summary=memoryNode('div','l0-summary',memoryDate(item.ts||item.timestamp)+' · '+type+
+(item.who?' · '+item.who:'')+(item.source?' · '+item.source:'')+
+(item.text?' — '+String(item.text).slice(0,180):''));
+var detail=memoryNode('pre','l0-detail',memoryPretty(item));
+row.appendChild(summary);row.appendChild(detail);
+row.addEventListener('click',function(){detail.classList.toggle('open');});
+parent.appendChild(row);
+});
+}
+function renderMemoryL1(parent,data){
+var facts=Array.isArray(data)?data:(data.facts||[]);
+if(!facts.length){memoryEmpty(parent,'Фактов в L1 пока нет.');return;}
+facts.slice().reverse().forEach(function(fact){
+fact=fact&&typeof fact==='object'?fact:{};
+var meta=[fact.category||'без категории',fact.confidence!=null?'уверенность '+Math.round(Number(fact.confidence)*100)+'%':null,
+fact.explicit?'явно сказано':null,fact.origin||null,'создано '+memoryDate(fact.created_at)].filter(Boolean).join(' · ');
+var card=memoryCard(parent,fact.text||fact.value||fact.id||'Факт',meta);
+var detail=memoryNode('details','memory-details');
+var summary=memoryNode('summary','small','ПОДРОБНОСТИ ФАКТА');
+detail.appendChild(summary);detail.appendChild(memoryNode('pre','memory-json',memoryPretty(fact)));card.appendChild(detail);
+});
+}
+function renderMemoryL2(parent,data){
+var entries=Array.isArray(data)?data:(data.entries||[]);
+if(!entries.length){memoryEmpty(parent,'Записей дневника пока нет.');return;}
+entries.slice().reverse().forEach(function(entry){
+entry=entry&&typeof entry==='object'?entry:{};
+var said=entry.kind==='said';
+var meta=(said?'СКАЗАЛА':'МЫСЛЬ')+' · '+memoryDate(entry.ts||entry.timestamp)+
+(entry.sequence!=null?' · запись №'+entry.sequence:'');
+var card=memoryCard(parent,said?'Сказанное':'Внутренняя мысль',meta,entry.text||entry.content||'');
+var details=memoryNode('details','memory-details');details.appendChild(memoryNode('summary','small','ДАННЫЕ ЗАПИСИ'));
+details.appendChild(memoryNode('pre','memory-json',memoryPretty(entry)));card.appendChild(details);
+});
+}
+function renderMemoryL3(parent,data){
+var summary=typeof data==='string'?data:(data.summary||'');
+if(summary)memoryCard(parent,'Сводка',data.updated_at?'обновлено '+memoryDate(data.updated_at):'',summary);
+else memoryEmpty(parent,'Текст сводки пока не создан.');
+if(data&&typeof data==='object'){
+var sections=data.sections;
+if(sections&&typeof sections==='object'){
+var card=memoryNode('div','card memory-card');card.appendChild(memoryNode('div','memory-card-title','Разделы автобиографии'));
+Object.keys(sections).forEach(function(key){
+var value=sections[key];var line=memoryNode('div','memory-text');
+line.appendChild(memoryNode('b','',key.replace(/_/g,' ')+': '));
+line.appendChild(document.createTextNode(Array.isArray(value)?value.join(' · '):typeof value==='string'?value:memoryPretty(value)));
+card.appendChild(line);
+});
+parent.appendChild(card);
+}
+var details=memoryNode('details','memory-card card');details.appendChild(memoryNode('summary','small','ПОЛНАЯ СТРУКТУРА L3'));
+details.appendChild(memoryNode('pre','memory-json',memoryPretty(data)));parent.appendChild(details);
+}
+}
+function renderMemoryL4(parent,data){
+if(!data||typeof data!=='object'||!Object.keys(data).length){memoryEmpty(parent,'Состояние L4 пока пусто.');return;}
+Object.keys(data).sort().forEach(function(key){
+var value=data[key];var card=memoryNode('div','card memory-card');
+card.appendChild(memoryNode('div','memory-card-title',key));
+if(value&&typeof value==='object')memoryPre(card,value);
+else card.appendChild(memoryNode('div','memory-text',String(value)));
+parent.appendChild(card);
+});
+}
+function renderMemoryEmotions(parent,data){
+var values=data.values||{};
+var mood=memoryMood(values);
+var top=memoryNode('div','card memory-card');
+top.appendChild(memoryNode('div','memory-meta','ТЕКУЩЕЕ НАСТРОЕНИЕ'));
+top.appendChild(memoryNode('div','memory-mood',mood));
+top.appendChild(memoryNode('div','memory-meta','Обновлено: '+memoryDate(data.updated_at)));
+parent.appendChild(top);
+var keys=Object.keys(memoryEmotionNames);
+keys.forEach(function(key){
+var n=Number(values[key]||0);if(!isFinite(n))n=0;n=Math.max(0,Math.min(100,n));
+var row=memoryNode('div','memory-emotion');
+row.appendChild(memoryNode('div','',memoryEmotionNames[key]));
+var meter=memoryNode('div','memory-meter');var fill=memoryNode('span','');fill.style.width=n+'%';meter.appendChild(fill);row.appendChild(meter);
+row.appendChild(memoryNode('div','memory-meta',Math.round(n)+'/100'));
+parent.appendChild(row);
+});
+}
+function renderMemorySelf(parent,data,raw){
+if(data&&typeof data==='object'&&Object.keys(data).length)memoryPre(parent,data);
+else if(raw&&raw.trim())memoryPre(parent,raw);
+else memoryEmpty(parent,'Модель SELF пока не сохранена.');
+}
+function loadMemoryLayer(layer){
+activeMemoryLayer=layer||activeMemoryLayer;
+document.querySelectorAll('[data-memory-layer]').forEach(function(button){button.classList.toggle('on',button.dataset.memoryLayer===activeMemoryLayer);});
+var view=$('#memoryLayerView');if(!view)return;view.innerHTML='';
+var toolbar=memoryNode('div','memory-toolbar');toolbar.appendChild(memoryNode('h3','',memoryLayerTitles[activeMemoryLayer]||activeMemoryLayer));
+var refresh=memoryNode('button','action secondary','ОБНОВИТЬ');refresh.type='button';refresh.addEventListener('click',function(){loadMemoryLayer(activeMemoryLayer);});toolbar.appendChild(refresh);view.appendChild(toolbar);
+try{
+var raw=Ruri.readMemoryLayer(activeMemoryLayer)||'';
+var data=activeMemoryLayer==='L0'?JSON.parse(raw||'[]'):JSON.parse(raw||'{}');
+var body=memoryNode('div','memory-body');view.appendChild(body);
+if(activeMemoryLayer==='L0')renderMemoryL0(body,data);
+else if(activeMemoryLayer==='L1')renderMemoryL1(body,data);
+else if(activeMemoryLayer==='L2')renderMemoryL2(body,data);
+else if(activeMemoryLayer==='L3')renderMemoryL3(body,data);
+else if(activeMemoryLayer==='L4')renderMemoryL4(body,data);
+else if(activeMemoryLayer==='EMO')renderMemoryEmotions(body,data);
+else if(activeMemoryLayer==='SELF')renderMemorySelf(body,data,raw);
+$('#memoryStatus').textContent='Обновлено '+new Date().toLocaleTimeString('ru-RU');
+}catch(error){
+var message=memoryNode('div','memory-empty error','Не удалось прочитать '+activeMemoryLayer+': '+error.message);view.appendChild(message);
+$('#memoryStatus').textContent='ошибка чтения';
+}
+}
+document.querySelectorAll('[data-memory-layer]').forEach(function(button){
+button.addEventListener('click',function(){loadMemoryLayer(button.dataset.memoryLayer);});
+});
+
 window.openMessageById=function(id){
 if(!id)return;loadChat();loadDiary();
 var nodes=Array.prototype.slice.call(document.querySelectorAll('[data-message-id]'));
