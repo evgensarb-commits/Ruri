@@ -57,6 +57,10 @@ object EmotionEngine {
             v.put("anger", v.optDouble("anger", 0.0) + h / 2); v.put("sadness", v.optDouble("sadness", 0.0) + h / 2); v.remove("hurt") }
         v.remove("calm")
         for (k in cc.keys()) if (!v.has(k)) v.put(k, cc.optJSONObject(k).optDouble("base", 50.0))
+        if (!cfg.optBoolean("fatigue_reset_v1", false)) {
+            v.put("fatigue", 50.0)
+            cfg.put("fatigue_reset_v1", true)
+        }
         val dd = def.optJSONObject("drift"); val cd = cfg.optJSONObject("drift") ?: JSONObject().also { cfg.put("drift", it) }
         for (k in dd.keys()) if (!cd.has(k)) cd.put(k, dd.get(k))
         val dl = def.optJSONObject("lexicon"); val cl = cfg.optJSONObject("lexicon") ?: JSONObject().also { cfg.put("lexicon", it) }
@@ -157,21 +161,50 @@ object EmotionEngine {
         val st = readState(root); val now = System.currentTimeMillis()
         writeState(root, readValues(root), now, st.optLong("last_tick_at", now), now) }
 
-    fun onCommanderMessage(root: File, text: String) {
+    @Synchronized
+    fun onCommanderMessage(root: File, text: String, msgId: String = "") {
+        val l4 = runCatching {
+            JSONObject(FileManager.read(root, "memory/L4_state.json"))
+        }.getOrElse { JSONObject() }
+        if (msgId.isNotBlank() && l4.optString("last_emotion_msg_id") == msgId) return
+
         val d = drift(root); val q = text.lowercase(); val delta = JSONObject()
         val lex = config(root).optJSONObject("lexicon")?.optJSONArray("desire") ?: JSONArray()
-        for (i in 0 until lex.length()) if (q.contains(lex.optString(i).lowercase())) { delta.put("desire", d.optDouble("desire_flirt_commander", 12.0)); break }
-        if (RouteSelector.nsfwWindow(root)) delta.put("desire", delta.optDouble("desire", 0.0) + d.optDouble("desire_nsfw_window", 10.0))
+        for (i in 0 until lex.length()) {
+            if (q.contains(lex.optString(i).lowercase())) {
+                delta.put("desire", d.optDouble("desire_flirt_commander", 12.0))
+                break
+            }
+        }
+        if (RouteSelector.nsfwWindow(root)) {
+            delta.put("desire", delta.optDouble("desire", 0.0) + d.optDouble("desire_nsfw_window", 10.0))
+        }
         delta.put("fatigue", delta.optDouble("fatigue", 0.0) + d.optDouble("activity_fatigue", 3.0))
         delta.put("boredom", delta.optDouble("boredom", 0.0) - d.optDouble("activity_boredom_relief", 6.0))
         delta.put("longing", -d.optDouble("message_longing_relief", 10.0))
         applyDelta(root, delta, "commander_message")
+        if (msgId.isNotBlank()) {
+            l4.put("last_emotion_msg_id", msgId)
+            FileManager.write(root, "memory/L4_state.json", l4.toString(2))
+        }
     }
 
-    fun onCommanderReply(root: File) { val d = drift(root)
+    @Synchronized
+    fun onCommanderReply(root: File, msgId: String = "") {
+        val l4 = runCatching {
+            JSONObject(FileManager.read(root, "memory/L4_state.json"))
+        }.getOrElse { JSONObject() }
+        if (msgId.isNotBlank() && l4.optString("last_reply_emotion_msg_id") == msgId) return
+
+        val d = drift(root)
         applyDelta(root, JSONObject().put("anger", -d.optDouble("reply_anger_relief", 8.0))
             .put("sadness", -d.optDouble("reply_sadness_relief", 6.0)).put("joy", d.optDouble("reply_joy", 5.0))
-            .put("longing", -d.optDouble("reply_longing_relief", 20.0)), "commander_reply") }
+            .put("longing", -d.optDouble("reply_longing_relief", 20.0)), "commander_reply")
+        if (msgId.isNotBlank()) {
+            l4.put("last_reply_emotion_msg_id", msgId)
+            FileManager.write(root, "memory/L4_state.json", l4.toString(2))
+        }
+    }
 
     fun onIgnored(root: File) { val d = drift(root)
         applyDelta(root, JSONObject().put("anger", d.optDouble("ignored_anger", 12.0)).put("sadness", d.optDouble("ignored_sadness", 10.0)), "ignored") }
