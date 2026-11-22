@@ -31,19 +31,15 @@ object Vision {
     fun cachedVisionRoute(root: File): JSONObject? {
         val config = runCatching { JSONObject(SecretStore.readRuntimeConfig(root)) }.getOrElse { JSONObject() }
         val models = config.optJSONArray("models") ?: JSONArray()
-        val current = config.optInt("current", 0)
-        val ordered = (0 until models.length()).sortedWith(
-            compareBy<Int> { if (it == current) 0 else 1 }
-                .thenBy { models.optJSONObject(it)?.optInt("priority", 100) ?: 100 }
-        )
-        for (index in ordered) {
-            val model = models.optJSONObject(index) ?: continue
-            if (!isEligibleVisionModel(model)) continue
-            val id = routeId(model)
-            val caps = RouteMeta.route(root, id).optJSONObject("caps") ?: JSONObject()
-            if (caps.optBoolean("vision", false)) return JSONObject(model.toString())
-        }
-        return null
+        val meromero = (0 until models.length()).firstNotNullOfOrNull { index ->
+            models.optJSONObject(index)?.takeIf { model ->
+                model.optString("model").contains("meromero", ignoreCase = true) ||
+                    model.optString("id").equals("routeway", ignoreCase = true)
+            }
+        } ?: return null
+        if (!isEligibleVisionModel(meromero)) return null
+        val caps = RouteMeta.route(root, routeId(meromero)).optJSONObject("caps") ?: JSONObject()
+        return if (caps.optBoolean("vision", false)) JSONObject(meromero.toString()) else null
     }
 
     /** Injectable selection seam for unit tests; production always supplies the real network probe. */
