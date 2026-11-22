@@ -69,11 +69,16 @@ object OutcomeDigest {
                 it.optString("type") == "message" && it.optString("who") == "commander"
             }
         } else -1
-        val turnEvents = if (replyIndex > commanderIndex) events.subList(commanderIndex + 1, replyIndex) else emptyList()
+        val wakeIndex = events.subList(0, (replyIndex.coerceAtLeast(0))).indexOfLast {
+            it.optString("type") == "wake"
+        }
+        val turnStart = if (wakeIndex > commanderIndex) wakeIndex + 1 else commanderIndex + 1
+        val turnEvents = if (replyIndex > turnStart) events.subList(turnStart, replyIndex) else emptyList()
         val toolResults = turnEvents.filter { it.optString("type") == "tool_result" }
         val successfulTools = toolResults.count { string(it, "ok").equals("true", true) }
         val failedTools = toolResults.size - successfulTools
         val visionEvent = turnEvents.lastOrNull { it.optString("type") == "vision_probe_result" }
+            ?: events.asReversed().firstOrNull { it.optString("type") == "vision_probe_result" }
         val visionText = when {
             visionEvent == null -> "не проверялось"
             string(visionEvent, "capable").equals("true", true) ->
@@ -136,7 +141,9 @@ object OutcomeDigest {
         val commanderIndex = events.indexOfLast {
             it.optString("type") == "message" && it.optString("who") == "commander"
         }
-        val currentTurn = if (commanderIndex >= 0) events.drop(commanderIndex + 1) else events
+        val latestWakeIndex = events.indexOfLast { it.optString("type") == "wake" }
+        val turnStart = if (latestWakeIndex > commanderIndex) latestWakeIndex + 1 else commanderIndex + 1
+        val currentTurn = events.drop(turnStart.coerceAtLeast(0))
         val successfulActions = currentTurn.filter {
             it.optString("type") == "tool_result" && string(it, "ok").equals("true", true)
         }.map { string(it, "action") }.toSet()
@@ -159,7 +166,8 @@ object OutcomeDigest {
                 .any { name ->
                     val safe = ShelfWatcher.safeName(name) ?: return@any false
                     val file = File(root, "shelf/" + safe)
-                    val image = file.isFile && runCatching { Vision.mimeOf(file.readBytes()) != null }.getOrDefault(false)
+                    val image = file.isFile && file.length() in 1..(8L * 1024L * 1024L) &&
+                        runCatching { Vision.mimeOf(file.readBytes()) != null }.getOrDefault(false)
                     val description = FileManager.read(root, "shelf/.desc/" + safe + ".txt")
                     image && description.isNotBlank()
                 }
