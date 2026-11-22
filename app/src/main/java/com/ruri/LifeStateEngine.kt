@@ -48,7 +48,12 @@ object LifeStateEngine {
         val newEvents = batch.events
 
         // A new L0 message is new activity even when two events share the same millisecond.
-        if (applyCommanderActivity(state, newEvents)) EmotionEngine.onCommanderReply(root)
+        val latestCommanderMessage = newEvents.lastOrNull {
+            it.optString("type") == "message" && it.optString("who") == "commander"
+        }
+        if (applyCommanderActivity(state, newEvents)) {
+            EmotionEngine.onCommanderReply(root, latestCommanderMessage?.optString("id").orEmpty())
+        }
 
         val battery = BatteryLevel.get(context)
         val freeBytes = try { StatFs(root.absolutePath).availableBytes } catch (_: Exception) { -1L }
