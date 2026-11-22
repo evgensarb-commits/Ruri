@@ -167,8 +167,8 @@ class EmotionOncePerMessageTest : EmotionEngineTestBase() {
         EmotionEngine.onCommanderReply(root, "commander-reply-keep")
 
         val staleSnapshot = JSONObject(FileManager.read(root, "memory/L4_state.json"))
-            .remove("last_emotion_msg_id")
-            .remove("last_reply_emotion_msg_id")
+        staleSnapshot.remove("last_emotion_msg_id")
+        staleSnapshot.remove("last_reply_emotion_msg_id")
         FileManager.write(root, "memory/L4_state.json", staleSnapshot.toString(2))
 
         val saved = JSONObject(FileManager.read(root, "memory/L4_state.json"))
