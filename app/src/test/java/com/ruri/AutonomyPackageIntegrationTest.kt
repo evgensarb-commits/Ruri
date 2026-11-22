@@ -52,12 +52,16 @@ class AutonomyPackageIntegrationTest {
     }
 
     @Test
-    fun legacyProvidersAreExplicitNeutralFallbacks() {
+    fun runtimeMigrationKeepsOnlyMeroMeroAndMiniMaxFree() {
         val fileManager = source("src/main/java/com/ruri/FileManager.kt")
-        assertTrue(fileManager.contains("needs_vpn"))
-        assertTrue(fileManager.contains("ru_reachable"))
-        assertFalse(fileManager.contains("nsfw_capable"))
-        assertTrue(fileManager.contains("neutral_fallback"))
+        val routeSelector = source("src/main/java/com/ruri/RouteSelector.kt")
+        assertTrue(fileManager.contains("two_route_migration_v1"))
+        assertTrue(fileManager.contains("gemma-4-26b-a4b-it-meromero:free"))
+        assertTrue(fileManager.contains("minimax-m3.1-flash:free"))
         assertTrue(fileManager.contains("free_only"))
+        assertTrue(fileManager.contains("RouteMeta.pruneToConfiguredRoutes"))
+        assertTrue(routeSelector.contains("minimax-m3.1-flash:free"))
+        assertTrue(routeSelector.contains("Task.VISION"))
+        assertFalse(fileManager.contains("Requesty · Google Gemma 4 Free"))
     }
 }
