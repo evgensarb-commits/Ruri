@@ -42,6 +42,14 @@ object ToolLoop {
     }
 
     fun stripActions(reply: String): Triple<String, List<String>, List<JSONObject>> {
+        val direct = parseJsonAction(reply)
+        if (direct != null) {
+            val text = direct.optString("text").trim()
+            val diary = if (direct.optString("action") in setOf("write_diary", "diary") && text.isNotBlank())
+                listOf(SecretRedactor.redactText(text)) else emptyList()
+            val tools = if (direct.optString("action") in allowed) listOf(direct) else emptyList()
+            return Triple("", diary, tools)
+        }
         val diary = mutableListOf<String>(); val tools = mutableListOf<JSONObject>()
         var cleaned = reply
         for (objectText in extractJsonObjects(reply)) {
@@ -116,6 +124,12 @@ object ToolLoop {
     fun executeTool(root: File, action: String, params: JSONObject): Pair<Boolean, String> =
         ChatEngine.executeTool(root, action, params)
 
+    internal fun diaryActionText(raw: String): String? {
+        val action = parseJsonAction(raw) ?: return null
+        if (action.optString("action") !in setOf("write_diary", "diary")) return null
+        return action.optString("text").trim().takeIf { it.isNotBlank() }?.let(SecretRedactor::redactText)
+    }
+
     fun unwrapDiaryReply(
         root: File,
         initialReply: String,
@@ -134,7 +148,7 @@ object ToolLoop {
                 toolLoopRun = true
                 reply = runToolLoop(root, reply, messages, meta, requestNext = requestNext)
             } else if (action == "write_diary" || action == "diary") {
-                return reply.trim()
+                return diaryActionText(reply).orEmpty()
             } else if (json.has("text") && json.opt("text") is String) {
                 return SecretRedactor.redactText(json.optString("text").trim())
             } else {
