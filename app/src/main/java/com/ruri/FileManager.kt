@@ -160,14 +160,12 @@ object FileManager {
         put(root, CONFIG_PATH, """
             {
               "models": [
-                { "id": "gemini", "name": "Gemini (legacy, disabled)", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "api_key": "", "model": "gemini-3.8-flash", "priority": 90, "free_tier": false, "enabled": false },
-                { "id": "groq", "name": "Groq (legacy, disabled)", "base_url": "https://api.groq.com/openai/v1", "api_key": "", "model": "openai/gpt-oss-120b", "priority": 91, "free_tier": false, "enabled": false },
-                { "id": "routeway", "name": "Routeway · Gemma MeroMero Free", "base_url": "https://api.routeway.ai/v1", "api_key": "", "model": "gemma-4-26b-a4b-it-meromero:free", "priority": 1, "free_tier": true, "enabled": true },
-                { "id": "requesty", "name": "Requesty · Google Gemma 4 Free", "base_url": "https://router.requesty.ai/v1", "api_key": "", "model": "google/gemma-4-31b-it", "priority": 3, "free_tier": true, "enabled": true }
+                { "id": "routeway", "name": "Routeway · Gemma MeroMero Free", "base_url": "https://api.routeway.ai/v1", "api_key": "", "model": "gemma-4-26b-a4b-it-meromero:free", "priority": 1, "tokens_per_day": 400000, "free_tier": true, "enabled": true },
+                { "id": "routeway-minimax", "name": "MiniMax M3.1 Flash Free", "base_url": "https://api.routeway.ai/v1", "api_key": "", "model": "minimax-m3.1-flash:free", "priority": 2, "free_tier": true, "enabled": true }
               ],
-              "current": 2,
+              "current": 0,
               "free_only": true,
-              "free_routes_migrated": true,
+              "two_route_migration_v1": true,
               "quota_used": 0,
               "quota_reset": 0
             }
