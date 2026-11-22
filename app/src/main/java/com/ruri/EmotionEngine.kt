@@ -162,6 +162,7 @@ object EmotionEngine {
         writeState(root, readValues(root), now, st.optLong("last_tick_at", now), now) }
 
     @Synchronized
+    @Synchronized
     fun onCommanderMessage(root: File, text: String, msgId: String = "") {
         val l4 = runCatching {
             JSONObject(FileManager.read(root, "memory/L4_state.json"))
