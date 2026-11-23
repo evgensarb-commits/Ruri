@@ -231,10 +231,22 @@ object RouteMeta {
             it.put("rate_limits_today", 0)
             it.put("network_errors_today", 0)
             it.put("timeouts_today", 0)
+            it.put("http_responses_today", 0)
+            it.put("http_4xx_today", 0)
+            it.put("http_5xx_today", 0)
+            it.put("last_http_status", JSONObject.NULL)
         }
         it.put("day_count", it.optInt("day_count", 0) + 1)
         it.put("lifetime_requests", it.optLong("lifetime_requests", 0L) + 1L)
         it.put("last_attempt", System.currentTimeMillis())
+    }
+
+    fun recordHttpStatus(root: File, id: String, status: Int) = update(root, id) {
+        it.put("last_http_status", status)
+            .put("http_responses_today", it.optInt("http_responses_today", 0) + 1)
+        if (status == 429) it.put("rate_limits_today", it.optInt("rate_limits_today", 0) + 1)
+        if (status in 400..499) it.put("http_4xx_today", it.optInt("http_4xx_today", 0) + 1)
+        if (status in 500..599) it.put("http_5xx_today", it.optInt("http_5xx_today", 0) + 1)
     }
 
     fun recordSuccess(root: File, id: String, task: Task? = null) = update(root, id) {
@@ -250,7 +262,6 @@ object RouteMeta {
         it.put("failures_today", it.optInt("failures_today", 0) + 1)
         it.put("last_failure_kind", kind.take(40))
         when (kind) {
-            "quota", "rate_limit" -> it.put("rate_limits_today", it.optInt("rate_limits_today", 0) + 1)
             "network", "region" -> it.put("network_errors_today", it.optInt("network_errors_today", 0) + 1)
             "timeout" -> it.put("timeouts_today", it.optInt("timeouts_today", 0) + 1)
         }
