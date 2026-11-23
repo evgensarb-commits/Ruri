@@ -58,6 +58,11 @@ object Capabilities {
             actions.put(0, actions.optString(0).trimEnd('.') + ", self_check.")
             actionsChanged = true
         }
+        if (actions.length() > 0 && !actions.optString(0).contains("7000 символов")) {
+            actions.put(0, actions.optString(0).trimEnd('.') +
+                " Полное чтение полки: DOCX/ODT извлекаются из XML; read_shelf отдаёт части по 7000 символов. При маркере ПРОДОЛЖЕНИЕ ОБЯЗАТЕЛЬНО вызывай read_shelf с указанным offset до КОНЕЦ ФАЙЛА.")
+            actionsChanged = true
+        }
         if (actionsChanged || sensesChanged) {
             config.put("actions", actions)
             config.put("senses", senses)
