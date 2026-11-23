@@ -96,7 +96,7 @@ object Vision {
             .put(JSONObject().put("type", "text").put("text", prompt))
             .put(JSONObject().put("type", "image_url").put("image_url",
                 JSONObject().put("url", "data:" + mime + ";base64," + base64)))
-        val response = call(model, JSONArray().put(JSONObject().put("role", "user").put("content", content)))
+        val response = call(model, JSONArray().put(JSONObject().put("role", "user").put("content", content)), root, id)
         val description = response?.let { SecretRedactor.redactText(it).take(4000).takeIf { text -> text.isNotBlank() } }
         if (description.isNullOrBlank()) {
             runCatching { RouteMeta.recordFailure(root, id, "other", Task.VISION) }
@@ -126,7 +126,7 @@ object Vision {
         else -> null
     }
 
-    private fun call(model: JSONObject, messages: JSONArray): String? {
+    private fun call(model: JSONObject, messages: JSONArray, root: File? = null, routeId: String = ""): String? {
         var connection: HttpURLConnection? = null
         return try {
             val base = model.optString("base_url").trimEnd('/')
@@ -143,7 +143,9 @@ object Vision {
             val body = JSONObject().put("model", model.optString("model"))
                 .put("messages", messages).put("temperature", 0.3).put("max_tokens", 600)
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-            if (connection.responseCode !in 200..299) null
+            val code = connection.responseCode
+            if (root != null && routeId.isNotBlank()) RouteMeta.recordHttpStatus(root, routeId, code)
+            if (code !in 200..299) null
             else JSONObject(connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() })
                 .getJSONArray("choices").getJSONObject(0).getJSONObject("message")
                 .getString("content").trim()
