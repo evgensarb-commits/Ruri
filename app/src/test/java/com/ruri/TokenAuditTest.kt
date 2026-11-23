@@ -34,8 +34,6 @@ class TokenAuditTest {
             assertEquals(120L, initial.getLong("total"))
             assertEquals(30L, initial.getLong("cached"))
             assertEquals(800L, initial.getJSONObject("breakdown").getLong("system_chars"))
-            assertEquals(2, stages.getJSONObject("tool_hop").getInt("count"))
-                .let { /* stage count is one event; assertion below checks aggregate totals */ }
             assertEquals(1, stages.getJSONObject("tool_hop").getInt("count"))
             assertEquals(150L, stages.getJSONObject("tool_hop").getLong("prompt"))
             assertEquals(2, summary.getInt("events"))
