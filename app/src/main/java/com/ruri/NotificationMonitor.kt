@@ -7,15 +7,29 @@ import android.util.Log
 import org.json.JSONObject
 
 class NotificationMonitor : NotificationListenerService() {
+    private val lastContentByKey = LinkedHashMap<String, Int>()
+
+    internal fun shouldRecordNotification(key: String, fingerprint: Int): Boolean = synchronized(lastContentByKey) {
+        if (lastContentByKey[key] == fingerprint) return@synchronized false
+        lastContentByKey[key] = fingerprint
+        while (lastContentByKey.size > 256) {
+            val oldest = lastContentByKey.keys.firstOrNull() ?: break
+            lastContentByKey.remove(oldest)
+        }
+        true
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         if (sbn == null || sbn.packageName == packageName) return
         try {
             val extras = sbn.notification.extras
-            val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+            val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty().trim().take(2000)
             val text = NotificationTextExtractor.extract(
                 extras,
                 excludedKeys = setOf(Notification.EXTRA_TITLE)
             )
+            val fingerprint = (title + "\u0000" + text).hashCode()
+            if (!shouldRecordNotification(sbn.key, fingerprint)) return
             FileManager.appendEvent(
                 filesDir,
                 JSONObject()
@@ -35,6 +49,7 @@ class NotificationMonitor : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         if (sbn == null || sbn.packageName == packageName) return
+        synchronized(lastContentByKey) { lastContentByKey.remove(sbn.key) }
         try {
             FileManager.appendEvent(
                 filesDir,
@@ -45,7 +60,7 @@ class NotificationMonitor : NotificationListenerService() {
                     .put("notification_id", sbn.id)
                     .put("package", sbn.packageName)
             )
-            LifeScheduler.enqueueEvent(applicationContext, "phone_notification_removed")
+            // A removed notification is kept in L0 for history, but does not trigger a model cycle.
         } catch (e: Exception) {
             Log.w("Ruri", "Could not record notification removal", e)
         }
