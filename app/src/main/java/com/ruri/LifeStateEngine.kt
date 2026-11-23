@@ -24,7 +24,9 @@ object LifeStateEngine {
     fun process(context: Context, reason: String): JSONObject = synchronized(processLock) {
         val root = context.filesDir
         FileManager.init(root)
-        processLocked(context, root, reason)
+        FileManager.withL4StateLock(root) {
+            processLocked(context, root, reason)
+        }
     }
 
     private fun processLocked(context: Context, root: File, reason: String): JSONObject {
