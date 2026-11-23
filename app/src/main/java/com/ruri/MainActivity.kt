@@ -36,6 +36,7 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var visionStatusProbeQueued = false
     private var pendingMessageId: String? = null
     @Volatile private var verifiedHFCatalog = JSONArray()
+    @Volatile private var verifiedOpenRouterCatalog = JSONArray()
     private val importFileRequestCode = 2002
 
     @SuppressLint("SetJavaScriptEnabled", "AddJavascriptInterface")
@@ -708,6 +709,161 @@ class MainActivity : AppCompatActivity() {
                 }
                 "OK"
             } catch (e: Exception) { "ERROR: " + (e.message ?: "HF model discovery failed") }
+        }
+
+        @JavascriptInterface
+        fun saveOpenRouterKey(key: String): String {
+            return try {
+                val value = key.trim()
+                require(value.startsWith("sk-or-") && value.length >= 30) {
+                    "Проверь OpenRouter API key (обычно начинается с sk-or-v1-)"
+                }
+                val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
+                val models = config.optJSONArray("models") ?: JSONArray()
+                var route = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
+                    .firstOrNull { it.optString("id") == "openrouter" }
+                if (route == null) {
+                    val template = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
+                        .firstOrNull { it.optString("id") == "hf" }
+                        ?: throw IllegalStateException("Не найден шаблон маршрута для OpenRouter")
+                    route = JSONObject(template.toString()).apply {
+                        put("id", "openrouter")
+                        remove("api_key_ref")
+                        remove("hf_model")
+                        remove("hf_provider")
+                        put("name", "OpenRouter · free NSFW pool")
+                        put("model", "")
+                        put("base_url", "https://openrouter.ai/api/v1")
+                        put("enabled", false)
+                        put("vision", false)
+                        put("priority", 999)
+                    }
+                    models.put(route)
+                }
+                route.put("api_key", value)
+                    .put("base_url", "https://openrouter.ai/api/v1")
+                    .put("enabled", false)
+                    .put("model", "")
+                route.remove("api_key_ref")
+                SecretStore.saveRuntimeConfig(filesDir, config.toString(2))
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "OpenRouter key save failed") }
+        }
+
+        @JavascriptInterface
+        fun fetchOpenRouterModels(): String {
+            return try {
+                val runtime = JSONObject(SecretStore.readRuntimeConfig(filesDir))
+                val models = runtime.optJSONArray("models") ?: JSONArray()
+                val openRouter = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
+                    .firstOrNull { it.optString("id") == "openrouter" }
+                    ?: throw IllegalStateException("Сначала сохрани OpenRouter API key")
+                val token = openRouter.optString("api_key")
+                require(token.isNotBlank()) { "Сначала сохрани OpenRouter API key" }
+                routeExecutor.execute {
+                    val result = try {
+                        val connection = (java.net.URL("https://openrouter.ai/api/v1/models").openConnection()
+                            as java.net.HttpURLConnection)
+                        try {
+                            connection.requestMethod = "GET"
+                            connection.setRequestProperty("Authorization", "Bearer " + token)
+                            connection.setRequestProperty("Accept", "application/json")
+                            connection.setRequestProperty("HTTP-Referer", "https://ruri.app")
+                            connection.setRequestProperty("X-Title", "Ruri")
+                            connection.connectTimeout = 15000
+                            connection.readTimeout = 30000
+                            val code = connection.responseCode
+                            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                            val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                            if (code !in 200..299) {
+                                val detail = runCatching { JSONObject(body).optString("message") }.getOrDefault("")
+                                throw IllegalStateException("OpenRouter catalog HTTP " + code +
+                                    if (detail.isBlank()) "" else ": " + detail.take(240))
+                            }
+                            val parsed = OpenRouterCatalog.parseDetailed(body)
+                            verifiedOpenRouterCatalog = JSONArray(parsed.models.toString())
+                            JSONObject()
+                                .put("ok", true)
+                                .put("models", parsed.models)
+                                .put("stats", parsed.toJson())
+                        } finally { connection.disconnect() }
+                    } catch (error: Exception) {
+                        JSONObject().put("ok", false)
+                            .put("error", error.message ?: "OpenRouter catalog discovery failed")
+                    }
+                    mainHandler.post {
+                        if (::web.isInitialized) web.evaluateJavascript(
+                            "window.onOpenRouterModelsResult && window.onOpenRouterModelsResult(" +
+                                JSONObject.quote(result.toString()) + ")", null
+                        )
+                    }
+                }
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "OpenRouter model discovery failed") }
+        }
+
+        @JavascriptInterface
+        fun saveOpenRouterModels(modelsJson: String): String {
+            return try {
+                val requested = JSONArray(modelsJson)
+                require(requested.length() in 1..30) { "Нет подтверждённых бесплатных NSFW/RP-моделей OpenRouter" }
+                val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
+                val models = config.optJSONArray("models") ?: JSONArray()
+                val openRouter = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
+                    .firstOrNull { it.optString("id") == "openrouter" }
+                    ?: throw IllegalStateException("Маршрут OpenRouter не найден")
+                require(openRouter.optString("api_key").isNotBlank()) { "Сначала сохрани OpenRouter API key" }
+                val verified = (0 until verifiedOpenRouterCatalog.length())
+                    .mapNotNull { verifiedOpenRouterCatalog.optJSONObject(it) }
+                require(verified.isNotEmpty()) { "Сначала заново загрузи проверенный каталог OpenRouter" }
+                val selected = mutableListOf<JSONObject>()
+                for (i in 0 until requested.length()) {
+                    val requestedModel = requested.optJSONObject(i) ?: continue
+                    val modelId = requestedModel.optString("model")
+                    val trusted = verified.firstOrNull { it.optString("model") == modelId }
+                        ?: throw IllegalArgumentException("Модель отсутствует в проверенном каталоге OpenRouter")
+                    require(modelId.endsWith(":free", ignoreCase = true) &&
+                        trusted.optBoolean("free") &&
+                        trusted.optDouble("price_input", -1.0) == 0.0 &&
+                        trusted.optDouble("price_output", -1.0) == 0.0) {
+                        "Разрешены только варианты :free с нулевыми ценами input/output"
+                    }
+                    selected.add(trusted)
+                }
+                require(selected.isNotEmpty()) { "Список моделей пуст" }
+                for (i in models.length() - 1 downTo 0) {
+                    if (models.optJSONObject(i)?.optString("id").orEmpty().startsWith("or_pool_")) models.remove(i)
+                }
+                openRouter.put("model", "")
+                    .put("enabled", false)
+                    .put("vision", false)
+                    .put("base_url", "https://openrouter.ai/api/v1")
+                selected.forEachIndexed { index, candidate ->
+                    val modelId = candidate.getString("model")
+                    val stableId = "or_pool_" + Integer.toHexString(modelId.hashCode())
+                    val route = JSONObject(openRouter.toString())
+                    route.put("id", stableId)
+                        .put("name", "OpenRouter · " + candidate.optString("name", modelId))
+                        .put("model", modelId)
+                        .put("base_url", "https://openrouter.ai/api/v1")
+                        .put("api_key", "")
+                        .put("api_key_ref", "openrouter")
+                        .put("enabled", true)
+                        .put("free_tier", true)
+                        .put("nsfw", true)
+                        .put("vision", false)
+                        .put("priority", index + 50)
+                        .put("openrouter_model", modelId)
+                        .put("openrouter_free", true)
+                        .put("openrouter_price_input", candidate.optDouble("price_input"))
+                        .put("openrouter_price_output", candidate.optDouble("price_output"))
+                        .put("openrouter_context_length", candidate.optInt("context_length"))
+                        .put("openrouter_score", candidate.optDouble("score"))
+                    models.put(route)
+                }
+                SecretStore.saveRuntimeConfig(filesDir, config.toString(2))
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "OpenRouter model pool save failed") }
         }
 
         @JavascriptInterface
