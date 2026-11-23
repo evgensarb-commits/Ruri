@@ -158,11 +158,11 @@ class OnlyNsfwRoutesTest {
 }
 
 class VisionMeroMeroOnlyTest {
-    @Test fun cachedVisionRouteNeverReturnsDolphin() {
+    @Test fun cachedVisionRouteNeverReturnsNemotron() {
         val root = Files.createTempDirectory("ruri-cached-vision-meromero").toFile()
         try {
             FileManager.init(root)
-            RouteMeta.setCapability(root, "hf", "vision", true)
+            RouteMeta.setCapability(root, "nemotron", "vision", true)
             RouteMeta.setCapability(root, "routeway", "vision", false)
             val config = JSONObject(FileManager.read(root, "core/config.json"))
             val configured = config.getJSONArray("models")
@@ -181,8 +181,8 @@ class VisionMeroMeroOnlyTest {
             val models = JSONArray()
                 .put(JSONObject().put("id", "routeway").put("model", "gemma-4-26b-a4b-it-meromero:free")
                     .put("tokens_per_day", 400000).put("vision", true).put("free_tier", true).put("enabled", true).put("api_key", "set"))
-                .put(JSONObject().put("id", "hf").put("model", "TheDrummer/Cydonia-24B-v4.1")
-                    .put("free_tier", true).put("enabled", true).put("api_key", "set").put("nsfw", true).put("vision", false))
+                .put(JSONObject().put("id", "nemotron").put("model", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning")
+                    .put("free_tier", true).put("enabled", true).put("api_key", "set").put("nsfw", false).put("vision", false))
             val order = RouteSelector.orderedIndices(root, models, current = 1, task = Task.VISION, online = true, vpn = false)
             assertEquals(listOf(0), order)
         } finally {
@@ -228,7 +228,7 @@ class MeroMeroNemotronRoutesTest {
             assertEquals(2, models.length())
             assertEquals("routeway", models.getJSONObject(0).getString("id"))
             assertEquals("gemma-4-26b-a4b-it-meromero:free", models.getJSONObject(0).getString("model"))
-            assertEquals("hf", models.getJSONObject(1).getString("id"))
+            assertEquals("nemotron", models.getJSONObject(1).getString("id"))
             assertEquals("nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", models.getJSONObject(1).getString("model"))
             assertTrue(models.getJSONObject(0).getBoolean("nsfw"))
             assertFalse(models.getJSONObject(1).getBoolean("nsfw"))
