@@ -216,4 +216,20 @@ class ListShelfKindsTest {
             assertTrue(result.second.contains("text"))
         } finally { root.deleteRecursively() }
     }
+    @Test fun officeExtractionStopsAfterBoundedUncompressedZipData() {
+        val bytes = java.io.ByteArrayOutputStream().use { output ->
+            ZipOutputStream(output).use { zip ->
+                zip.putNextEntry(ZipEntry("large-first-entry.bin"))
+                zip.write(ByteArray(17 * 1024 * 1024))
+                zip.closeEntry()
+                zip.putNextEntry(ZipEntry("word/document.xml"))
+                zip.write("<document><p>must not be reached</p></document>".toByteArray(Charsets.UTF_8))
+                zip.closeEntry()
+            }
+            output.toByteArray()
+        }
+        assertTrue(bytes.size < 8 * 1024 * 1024)
+        assertEquals("", ShelfWatcher.extractOffice(bytes, "bomb.docx"))
+    }
+
 }
