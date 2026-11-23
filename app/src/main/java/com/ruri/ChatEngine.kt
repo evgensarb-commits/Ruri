@@ -31,6 +31,8 @@ object ChatEngine {
         if (!targetId.isNullOrBlank()) {
             findSavedReply(root, targetId)?.let { (id, text) ->
                 lastFinalMessageId = id
+                CommanderReplyQueue.markAnswered(root, targetId, id)
+                OfflineQueue.clear(root)
                 return@synchronized text
             }
             CommanderReplyQueue.recordAttempt(root, targetId)
