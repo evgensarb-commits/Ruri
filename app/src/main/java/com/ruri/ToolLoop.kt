@@ -81,7 +81,10 @@ object ToolLoop {
         }
         while (true) {
             val action = ChatEngine.parseAction(current) ?: return finish(current)
-            if (hops >= 64) return finish(current)
+            if (hops >= 64) return finish(
+                "Не удалось завершить чтение: достигнут лимит 64 последовательных действий. " +
+                    "Файл прочитан не полностью; я не буду утверждать обратное."
+            )
             val name = action.optString("action")
             val params = JSONObject(action.toString()).apply { remove("action") }
             FileManager.appendEvent(root, SecretRedactor.redactEvent(
