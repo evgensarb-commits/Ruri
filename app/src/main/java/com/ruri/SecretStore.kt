@@ -31,14 +31,18 @@ object SecretStore {
 
     /** Safe WebView view: model keys are replaced by presence flags and never cross the bridge. */
     fun readPublicRuntimeConfig(root: File): String = synchronized(lock) {
-        val config = JSONObject(readRuntimeConfig(root))
+        redactRuntimeConfigForWeb(readRuntimeConfig(root))
+    }
+
+    internal fun redactRuntimeConfigForWeb(rawConfig: String): String {
+        val config = JSONObject(rawConfig)
         val models = config.optJSONArray("models") ?: JSONArray()
         for (index in 0 until models.length()) {
             val model = models.optJSONObject(index) ?: continue
             model.put("has_key", model.optString("api_key").isNotBlank())
             model.put("api_key", "")
         }
-        config.toString()
+        return config.toString()
     }
 
     fun readRuntimeConfig(root: File): String = synchronized(lock) {
