@@ -139,7 +139,8 @@ class ReadShelfDocxFullTest {
             var offset = 0
             while (offset < extracted.length) {
                 val chunk = ChatEngine.shelfText(root, "full.docx", offset)
-                val bodyStart = chunk.indexOf(".\\n") + 2
+                val headerEnd = chunk.indexOf(" из ").let { chunk.indexOf("\\n", it) + 1 }
+                val bodyStart = headerEnd
                 val bodyEnd = chunk.indexOf("\\n[", bodyStart).let { if (it < 0) chunk.length else it }
                 rebuilt.append(chunk.substring(bodyStart, bodyEnd))
                 offset = minOf(offset + 7000, extracted.length)
@@ -187,7 +188,7 @@ class ReadShelfImageDescTest {
         try {
             File(root, "shelf").mkdirs()
             File(root, "shelf/.desc").mkdirs()
-            File(root, "shelf/picture.png").writeBytes(byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a))
+            File(root, "shelf/picture.png").writeBytes(byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00))
             File(root, "shelf/.desc/picture.png.txt").writeText("Описание изображения")
             assertTrue(ChatEngine.shelfText(root, "picture.png").contains("Описание изображения"))
         } finally { root.deleteRecursively() }
