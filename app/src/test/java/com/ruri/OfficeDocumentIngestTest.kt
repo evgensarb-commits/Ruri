@@ -120,3 +120,99 @@ class PdfFragmentsHonestTest {
         }
     }
 }
+
+
+class ReadShelfDocxFullTest {
+    @Test fun returnsWholeDocxAcrossSequentialChunks() {
+        val root = officeTestRoot()
+        try {
+            val text = (1..1800).joinToString(" ") { "Слово$it." }
+            val xml = """<?xml version="1.0" encoding="UTF-8"?>
+                <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                  <w:body><w:p><w:r><w:t>$text</w:t></w:r></w:p></w:body>
+                </w:document>""".trimIndent()
+            File(root, "shelf").mkdirs()
+            val bytes = officeZip("word/document.xml", xml)
+            File(root, "shelf/full.docx").writeBytes(bytes)
+            val extracted = ShelfWatcher.extractOffice(bytes, "full.docx")
+            val rebuilt = StringBuilder()
+            var offset = 0
+            while (offset < extracted.length) {
+                val chunk = ChatEngine.shelfText(root, "full.docx", offset)
+                val bodyStart = chunk.indexOf(".\\n") + 2
+                val bodyEnd = chunk.indexOf("\\n[", bodyStart).let { if (it < 0) chunk.length else it }
+                rebuilt.append(chunk.substring(bodyStart, bodyEnd))
+                offset = minOf(offset + 7000, extracted.length)
+            }
+            assertEquals(extracted, rebuilt.toString())
+            assertTrue(ChatEngine.shelfText(root, "full.docx", extracted.length).contains("прочитан полностью"))
+        } finally { root.deleteRecursively() }
+    }
+}
+
+class ReadShelfOdtFullTest {
+    @Test fun extractsOdtXmlInsteadOfZipBytes() {
+        val root = officeTestRoot()
+        try {
+            File(root, "shelf").mkdirs()
+            val xml = """<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+                xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"><office:body><office:text>
+                <text:p>ODT first paragraph.</text:p><text:p>ODT final sentence.</text:p>
+                </office:text></office:body></office:document-content>"""
+            File(root, "shelf/file.odt").writeBytes(officeZip("content.xml", xml))
+            val result = ChatEngine.shelfText(root, "file.odt")
+            assertTrue(result.contains("ODT first paragraph."))
+            assertTrue(result.contains("ODT final sentence."))
+            assertFalse(result.contains("PK"))
+        } finally { root.deleteRecursively() }
+    }
+}
+
+class ReadShelfTxtFullTest {
+    @Test fun readsPlainTextThroughFinalCharacter() {
+        val root = officeTestRoot()
+        try {
+            File(root, "shelf").mkdirs()
+            File(root, "shelf/a.txt").writeText("Первая буква. Последняя точка.", Charsets.UTF_8)
+            val result = ChatEngine.shelfText(root, "a.txt")
+            assertTrue(result.contains("Первая буква. Последняя точка."))
+            assertTrue(result.contains("КОНЕЦ ФАЙЛА"))
+        } finally { root.deleteRecursively() }
+    }
+}
+
+class ReadShelfImageDescTest {
+    @Test fun readsVisionDescriptionInsteadOfBinaryImage() {
+        val root = officeTestRoot()
+        try {
+            File(root, "shelf").mkdirs()
+            File(root, "shelf/.desc").mkdirs()
+            File(root, "shelf/picture.png").writeBytes(byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a))
+            File(root, "shelf/.desc/picture.png.txt").writeText("Описание изображения")
+            assertTrue(ChatEngine.shelfText(root, "picture.png").contains("Описание изображения"))
+        } finally { root.deleteRecursively() }
+    }
+}
+
+class ReadShelfMissingHonestTest {
+    @Test fun missingFileIsReportedHonestly() {
+        val root = officeTestRoot()
+        try { assertEquals("Файл не найден", ChatEngine.shelfText(root, "missing.docx")) }
+        finally { root.deleteRecursively() }
+    }
+}
+
+class ListShelfKindsTest {
+    @Test fun listsFileNameSizeAndKind() {
+        val root = officeTestRoot()
+        try {
+            File(root, "shelf").mkdirs()
+            File(root, "shelf/a.txt").writeText("text")
+            val result = ChatEngine.executeTool(root, "list_shelf", JSONObject())
+            assertTrue(result.first)
+            assertTrue(result.second.contains("a.txt"))
+            assertTrue(result.second.contains("байт"))
+            assertTrue(result.second.contains("text"))
+        } finally { root.deleteRecursively() }
+    }
+}
