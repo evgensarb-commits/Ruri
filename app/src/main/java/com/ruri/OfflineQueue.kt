@@ -12,10 +12,10 @@ object OfflineQueue {
 
     fun markPending(root: File, messageId: String? = null) {
         if (!messageId.isNullOrBlank()) CommanderReplyQueue.enqueue(root, messageId)
-        val state = readState(root)
-        state.put("pending_reply", true)
-        state.put("pending_reply_marked_at", System.currentTimeMillis())
-        FileManager.write(root, STATE_PATH, state.toString(2))
+        FileManager.updateL4State(root) { state ->
+            state.put("pending_reply", true)
+                .put("pending_reply_marked_at", System.currentTimeMillis())
+        }
     }
 
     fun hasPending(root: File): Boolean = try {
@@ -26,9 +26,9 @@ object OfflineQueue {
 
     fun clear(root: File) {
         val stillPending = CommanderReplyQueue.hasPending(root)
-        val state = readState(root)
-        state.put("pending_reply", stillPending)
-        if (!stillPending) state.put("pending_reply_cleared_at", System.currentTimeMillis())
-        FileManager.write(root, STATE_PATH, state.toString(2))
+        FileManager.updateL4State(root) { state ->
+            state.put("pending_reply", stillPending)
+            if (!stillPending) state.put("pending_reply_cleared_at", System.currentTimeMillis())
+        }
     }
 }
