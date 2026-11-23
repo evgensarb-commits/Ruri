@@ -135,17 +135,21 @@ object CommanderReplyQueue {
             JSONObject(FileManager.read(root, "memory/L4_state.json")).optLong("last_seen_commander", 0L)
         }.getOrDefault(0L)
         val lines = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 1000)
-        val latest = lines.asReversed().asSequence().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
-            .firstOrNull { event ->
+        var firstRecovered: String? = null
+        lines.asSequence().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+            .filter { event ->
+                val id = event.optString("id")
                 event.optString("type") == "message" && event.optString("who") == "commander" &&
-                    event.optString("id").isNotBlank() &&
-                    event.optLong("ts", event.optLong("timestamp", 0L)) > lastSeen &&
-                    !Tombstone.isDeleted(root, event.optString("id")) &&
-                    !receipts.optJSONObject(event.optString("id"))?.optBoolean("replied_by_ruri", false).let { it == true }
-            } ?: return@synchronized null
-        val id = latest.optString("id")
-        enqueue(root, id)
-        id
+                    id.isNotBlank() && event.optLong("ts", event.optLong("timestamp", 0L)) > lastSeen &&
+                    !Tombstone.isDeleted(root, id) &&
+                    receipts.optJSONObject(id)?.optBoolean("replied_by_ruri", false) != true
+            }
+            .forEach { event ->
+                val id = event.optString("id")
+                enqueue(root, id)
+                if (firstRecovered == null) firstRecovered = id
+            }
+        firstRecovered
     }
 
     private fun isCompletedLocked(root: File, messageId: String): Boolean {
