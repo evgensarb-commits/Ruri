@@ -2,6 +2,7 @@ package com.ruri
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
@@ -24,6 +25,8 @@ object SearchRouter {
 
     private fun err(message: String) = JSONObject().put("error", message).toString()
 
+    private const val MAX_SEARCH_RESPONSE_BYTES = 2 * 1024 * 1024
+
     private fun http(
         address: String,
         method: String,
@@ -36,6 +39,7 @@ object SearchRouter {
                 requestMethod = method
                 connectTimeout = 12000
                 readTimeout = 18000
+                instanceFollowRedirects = false
                 setRequestProperty(
                     "User-Agent",
                     "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
@@ -48,15 +52,25 @@ object SearchRouter {
             if (body != null) {
                 connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
             }
-            if (connection.responseCode !in 200..299) null
-            else connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            if (connection.responseCode !in 200..299) return null
+            if (connection.contentLengthLong > MAX_SEARCH_RESPONSE_BYTES) return null
+            val output = ByteArrayOutputStream()
+            connection.inputStream.use { input ->
+                val buffer = ByteArray(8192)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    if (output.size() + count > MAX_SEARCH_RESPONSE_BYTES) return null
+                    output.write(buffer, 0, count)
+                }
+            }
+            output.toString(Charsets.UTF_8.name())
         } catch (_: Exception) {
             null
         } finally {
             connection?.disconnect()
         }
     }
-
     private fun serper(root: File, query: String): String? {
         val key = cfg(root).optString("serper_key").trim()
         if (key.isBlank()) return null
