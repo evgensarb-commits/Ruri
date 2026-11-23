@@ -521,6 +521,13 @@ class MainActivity : AppCompatActivity() {
         fun appendEvent(eventJson: String): String {
             return try {
                 val event = JSONObject(eventJson)
+                require(event.optString("type") == "message" && event.optString("who") == "commander") {
+                    "The WebView may append Commander messages only"
+                }
+                require(event.optString("text").isNotBlank()) { "Message text is empty" }
+                require(event.optString("id").matches(Regex("[A-Za-z0-9_-]{1,200}"))) {
+                    "Invalid Commander message id"
+                }
                 val saved = JSONObject(FileManager.appendEvent(filesDir, event))
                 if (event.optString("type") == "message" && event.optString("who") == "commander") {
                     val messageId = saved.optString("id")
