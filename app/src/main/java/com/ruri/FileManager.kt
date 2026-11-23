@@ -824,12 +824,13 @@ object FileManager {
                 .firstOrNull { it.optString("id") == "nemotron" }
             val nemotron = nemotronSource?.let { JSONObject(it.toString()) } ?: JSONObject()
             nemotron.put("id", "nemotron")
-                .put("name", "NVIDIA · Nemotron 3 Nano Omni Free")
-                .put("base_url", "https://integrate.api.nvidia.com/v1")
+                .put("name", "BlockRun · Nemotron 3 Nano Omni Free")
+                .put("base_url", "https://blockrun.ai/api/v1")
                 .put("model", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning")
                 .put("api_key", "")
+                .put("api_key_optional", true)
                 .put("free_tier", true)
-                .put("enabled", nemotron.optBoolean("enabled", false))
+                .put("enabled", true)
                 .put("nsfw", false)
                 .put("vision", false)
                 .put("priority", 2)
@@ -845,6 +846,8 @@ object FileManager {
             // Remove the retired shared credentials used by generated HF/OpenRouter pool routes.
             SecretStore.removeModelKey(root, "hf")
             SecretStore.removeModelKey(root, "openrouter")
+            // BlockRun's free Nemotron endpoint is keyless; discard any obsolete NVIDIA token.
+            SecretStore.removeModelKey(root, "nemotron")
 
             val firstNsfwMigration = !config.optBoolean("nsfw_only_routes_v2", false)
             val selectedId = if (firstNsfwMigration) "routeway" else config.optString("selected_route_id")
