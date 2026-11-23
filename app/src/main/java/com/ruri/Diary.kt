@@ -26,6 +26,7 @@ object Diary {
 
     @Synchronized
     fun append(root: File, text: String, trigger: String, emotion: JSONObject?, kind: String = "thought") {
+        if (kind != "thought") return
         val t = SecretRedactor.redactText(text.trim())
         if (t.isBlank() || isDuplicate(root, t, kind)) return
         val d = runCatching { JSONObject(FileManager.read(root, "memory/L2_diary.json")) }
