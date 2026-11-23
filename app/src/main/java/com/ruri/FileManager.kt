@@ -779,13 +779,20 @@ object FileManager {
             if (!meromero.optString("model").contains("meromero", ignoreCase = true)) {
                 meromero.put("model", "gemma-4-26b-a4b-it-meromero:free")
             }
+            val manualOrderMigration = !config.optBoolean("manual_route_order_v1", false)
             meromero.put("id", meromeroId)
                 .put("name", "Routeway · Gemma MeroMero Free")
                 .put("base_url", "https://api.routeway.ai/v1")
                 .put("api_key", "")
-                .put("priority", 1)
                 .put("free_tier", true)
                 .put("enabled", true)
+            if (manualOrderMigration) {
+                meromero.put("priority", 2).put("nsfw", true).put("vision", true)
+            } else {
+                if (!meromero.has("priority")) meromero.put("priority", 2)
+                if (!meromero.has("nsfw")) meromero.put("nsfw", true)
+                if (!meromero.has("vision")) meromero.put("vision", true)
+            }
             if (meromero.optLong("tokens_per_day", 0L) <= 0L) {
                 meromero.put("tokens_per_day", 400000L)
             }
@@ -798,15 +805,23 @@ object FileManager {
                 .put("base_url", "https://api.routeway.ai/v1")
                 .put("api_key", "")
                 .put("model", "minimax-m3.1-flash:free")
-                .put("priority", 2)
                 .put("free_tier", true)
                 .put("enabled", true)
+            if (manualOrderMigration) {
+                minimax.put("priority", 1).put("nsfw", false).put("vision", false)
+            } else {
+                if (!minimax.has("priority")) minimax.put("priority", 1)
+                if (!minimax.has("nsfw")) minimax.put("nsfw", false)
+                if (!minimax.has("vision")) minimax.put("vision", false)
+            }
 
             val kept = JSONArray().put(meromero).put(minimax)
             config.put("models", kept)
-                .put("current", 0)
+                .put("current", config.optInt("current", 0).coerceIn(0, 1))
                 .put("free_only", true)
                 .put("two_route_migration_v1", true)
+                .put("manual_route_order_v1", true)
+            if (!config.has("nsfw_override")) config.put("nsfw_override", true)
 
             val normalized = config.toString(2)
             if (normalized != raw) atomicWrite(file, normalized)
