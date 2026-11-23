@@ -160,7 +160,7 @@ object ChatEngine {
             val meta = RouteMeta.route(root, id)
             val reason = when {
                 selected == null -> "Нет доступного маршрута: список бесплатных моделей пуст"
-                selected.optString("api_key").isBlank() -> "Маршрут $name: API-ключ не задан"
+                selected.optString("api_key").isBlank() && !selected.optBoolean("api_key_optional", false) -> "Маршрут $name: API-ключ не задан"
                 else -> "Маршрут $name: Android сообщает, что сетевого подключения нет"
             }
             throw ModelRequestFailure(reason, 60_000L, "no_route")
@@ -281,13 +281,13 @@ object ChatEngine {
             val selectedId = selected?.optString("id")?.ifBlank { "route_$current" } ?: "route_$current"
             val selectedMeta = RouteMeta.route(root, selectedId)
             val specificReason = when {
-                selected != null && selected.optString("api_key").isBlank() ->
+                selected != null && selected.optString("api_key").isBlank() && !selected.optBoolean("api_key_optional", false) ->
                     "Маршрут $selectedName: API-ключ не задан"
                 else -> ""
             }
             val reason = when {
                 specificReason.isNotBlank() -> specificReason
-                else -> "Нет настроенного бесплатного маршрута с API-ключом."
+                else -> "Нет настроенного бесплатного маршрута."
             }
             throw IllegalStateException(reason)
         }
@@ -332,7 +332,7 @@ object ChatEngine {
             if (attempt > 1) Thread.sleep(if (attempt == 2) 2000L else 5000L)
             val model = models.optJSONObject(index) ?: continue
             val key = model.optString("api_key")
-            if (key.isBlank()) {
+            if (key.isBlank() && !model.optBoolean("api_key_optional", false)) {
                 lastError = "${model.optString("name", model.optString("id"))}: требуется бесплатный API-ключ"
                 continue
             }
