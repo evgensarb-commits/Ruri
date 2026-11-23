@@ -26,9 +26,22 @@ object ChatEngine {
     fun respond(root: File, commanderMessageId: String? = null): String = synchronized(responseLock) {
         lastFinalMessageId = null
         var queueHead = CommanderReplyQueue.firstPending(root)
-        while (queueHead != null && Tombstone.isDeleted(root, queueHead.optString("message_id"))) {
-            CommanderReplyQueue.markDeleted(root, queueHead.optString("message_id"))
-            queueHead = CommanderReplyQueue.firstPending(root)
+        while (queueHead != null) {
+            val headId = queueHead.optString("message_id")
+            if (Tombstone.isDeleted(root, headId)) {
+                CommanderReplyQueue.markDeleted(root, headId)
+                queueHead = CommanderReplyQueue.firstPending(root)
+                continue
+            }
+            val saved = findSavedReply(root, headId)
+            if (saved != null) {
+                CommanderReplyQueue.markAnswered(root, headId, saved.first)
+                updateLastSeenCommander(root, headId)
+                OfflineQueue.clear(root)
+                queueHead = CommanderReplyQueue.firstPending(root)
+                continue
+            }
+            break
         }
         val requestedId = commanderMessageId?.takeIf { it.isNotBlank() }
         if (queueHead != null) {
@@ -56,6 +69,7 @@ object ChatEngine {
             findSavedReply(root, targetId)?.let { (id, text) ->
                 lastFinalMessageId = id
                 CommanderReplyQueue.markAnswered(root, targetId, id)
+                updateLastSeenCommander(root, targetId)
                 OfflineQueue.clear(root)
                 return@synchronized text
             }
@@ -90,6 +104,19 @@ object ChatEngine {
             .firstOrNull { it.optString("type") == "message" && it.optString("who") == "ruri" &&
                 it.optString("reply_to") == commanderMessageId }
             ?.let { it.optString("id") to it.optString("text") }
+
+    private fun updateLastSeenCommander(root: File, messageId: String) {
+        val commander = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 5000)
+            .asReversed().asSequence().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+            .firstOrNull {
+                it.optString("id") == messageId && it.optString("type") == "message" &&
+                    it.optString("who") == "commander"
+            } ?: return
+        val commanderTs = commander.optLong("ts", commander.optLong("timestamp", System.currentTimeMillis()))
+        FileManager.updateL4State(root) { state ->
+            state.put("last_seen_commander", maxOf(state.optLong("last_seen_commander", 0L), commanderTs))
+        }
+    }
 
     internal fun isCommanderMessage(root: File, messageId: String): Boolean {
         if (messageId.isBlank()) return false
