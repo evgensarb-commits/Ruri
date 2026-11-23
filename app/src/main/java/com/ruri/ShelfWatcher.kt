@@ -9,6 +9,10 @@ import java.io.File
 /** Watches the private shelf directory and queues durable ingestion events. */
 object ShelfWatcher {
     private const val SEEN = "memory/shelf_seen.json"
+    private const val MAX_SHELF_FILE_BYTES = 8L * 1024L * 1024L
+    private const val MAX_OFFICE_TOTAL_UNCOMPRESSED = 16 * 1024 * 1024
+    private const val MAX_OFFICE_ENTRY_BYTES = 2 * 1024 * 1024
+    private const val MAX_OFFICE_ENTRIES = 1000
     private var observer: FileObserver? = null
     private val lock = Any()
 
@@ -67,6 +71,14 @@ object ShelfWatcher {
         val safe = safeName(name) ?: return null
         val file = File(root, "shelf/" + safe)
         if (!file.isFile) return null
+        if (file.length() > MAX_SHELF_FILE_BYTES) {
+            FileManager.appendEvent(root, JSONObject()
+                .put("type", "shelf_file_unreadable").put("source", "shelf")
+                .put("name", safe).put("size_bytes", file.length())
+                .put("reason", "file exceeds 8 MiB ingestion limit")
+                .put("ts", System.currentTimeMillis()))
+            return null
+        }
         val bytes = file.readBytes()
         val mime = Vision.mimeOf(bytes)
         if (mime != null) {
@@ -129,24 +141,30 @@ object ShelfWatcher {
      * The uncompressed XML is bounded to avoid pathological ZIP entries.
      */
     internal fun extractOffice(bytes: ByteArray, name: String): String {
+        if (bytes.size > MAX_SHELF_FILE_BYTES) return ""
         val target = if (name.endsWith(".odt", ignoreCase = true)) "content.xml" else "word/document.xml"
         val xmlBytes = runCatching {
             java.util.zip.ZipInputStream(bytes.inputStream()).use { zip ->
                 var entry = zip.nextEntry
+                var entryCount = 0
+                var totalUncompressed = 0
                 while (entry != null) {
-                    if (entry.name == target) {
-                        val output = java.io.ByteArrayOutputStream()
-                        val buffer = ByteArray(8192)
-                        var total = 0
-                        while (true) {
-                            val count = zip.read(buffer)
-                            if (count < 0) break
-                            total += count
-                            if (total > 2 * 1024 * 1024) return@use null
-                            output.write(buffer, 0, count)
-                        }
-                        return@use output.toByteArray()
+                    entryCount++
+                    if (entryCount > MAX_OFFICE_ENTRIES) return@use null
+                    val isTarget = entry.name == target
+                    val output = if (isTarget) java.io.ByteArrayOutputStream() else null
+                    val buffer = ByteArray(8192)
+                    var entryBytes = 0
+                    while (true) {
+                        val count = zip.read(buffer)
+                        if (count < 0) break
+                        entryBytes += count
+                        totalUncompressed += count
+                        if (totalUncompressed > MAX_OFFICE_TOTAL_UNCOMPRESSED) return@use null
+                        if (isTarget && entryBytes > MAX_OFFICE_ENTRY_BYTES) return@use null
+                        output?.write(buffer, 0, count)
                     }
+                    if (isTarget) return@use output?.toByteArray()
                     zip.closeEntry()
                     entry = zip.nextEntry
                 }
