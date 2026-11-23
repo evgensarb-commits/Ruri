@@ -391,6 +391,7 @@ object ChatEngine {
             val initialReply = responseJson.getJSONArray("choices")
                     .getJSONObject(0).getJSONObject("message").getString("content").trim()
                 if (initialReply.isBlank()) {
+                    runCatching { RouteMeta.recordFailure(root, routeId, "empty_response", task) }
                     diagnostic.put("result", "empty_reply")
                     NetworkDiagnostics.record(root, diagnostic)
                     lastError = "Модель вернула пустой ответ"
