@@ -88,12 +88,19 @@ class OnlyTwoRoutesTest {
                     .put("free_tier", true).put("enabled", true))
                 .put(JSONObject().put("id", "groq").put("model", "legacy-groq")
                     .put("free_tier", false).put("enabled", false))
-            config.put("models", oldModels).put("current", 1)
+                .put(JSONObject().put("id", "routeway-darksoul").put("name", "Gemma Darksoul")
+                    .put("base_url", "https://api.routeway.ai/v1")
+                    .put("model", "gemma-4-26b-a4b-it-darksoul:free")
+                    .put("free_tier", true).put("enabled", true))
+            config.put("models", oldModels).put("current", 2)
+                .put("route_mode", "MANUAL")
+                .put("selected_route_id", "routeway-darksoul")
             FileManager.write(root, "core/config.json", config.toString(2))
             FileManager.write(root, RouteMeta.PATH, JSONObject()
                 .put("routeway", JSONObject().put("day_count", 1))
                 .put("requesty", JSONObject().put("day_count", 2))
-                .put("groq", JSONObject().put("day_count", 3)).toString(2))
+                .put("groq", JSONObject().put("day_count", 3))
+                .put("routeway-darksoul", JSONObject().put("day_count", 4)).toString(2))
 
             FileManager.init(root)
 
@@ -109,10 +116,13 @@ class OnlyTwoRoutesTest {
             assertFalse(models.getJSONObject(1).getBoolean("nsfw"))
             assertFalse(models.getJSONObject(1).getBoolean("vision"))
             assertTrue(migrated.getBoolean("nsfw_override"))
+            assertEquals("routeway-minimax", migrated.getString("selected_route_id"))
+            assertEquals(1, migrated.getInt("current"))
             val metadata = RouteMeta.load(root)
             assertTrue(metadata.has("routeway"))
             assertFalse(metadata.has("requesty"))
             assertFalse(metadata.has("groq"))
+            assertFalse(metadata.has("routeway-darksoul"))
         } finally {
             root.deleteRecursively()
         }
@@ -187,4 +197,3 @@ class QuotaOrderTest {
         }
     }
 }
-

@@ -219,6 +219,7 @@ object FileManager {
         if (hasMeroRoute) {
             SecretStore.migrateRoutewayFallbackKey(root, "routeway", "routeway-minimax")
         }
+        SecretStore.removeModelKey(root, "routeway-darksoul")
         RouteMeta.pruneToConfiguredRoutes(root)
         RouteMeta.migrateLegacyNsfwFlags(root)
         migrateGoalSchema(root)
@@ -841,22 +842,27 @@ object FileManager {
             }
 
             val kept = JSONArray().put(meromero).put(minimax)
+            val selectedId = config.optString("selected_route_id")
+            val selectedIndex = (0 until kept.length()).firstOrNull { index ->
+                kept.optJSONObject(index)?.optString("id") == selectedId
+            }
+            val selectedCurrent = selectedIndex ?: config.optInt("current", 0).coerceIn(0, 1)
             config.put("models", kept)
-                .put("current", config.optInt("current", 0).coerceIn(0, 1))
+                .put("current", selectedCurrent)
                 .put("free_only", true)
                 .put("two_route_migration_v1", true)
                 .put("manual_route_order_v1", true)
             if (!config.has("nsfw_override")) config.put("nsfw_override", true)
             if (!config.has("route_mode")) config.put("route_mode", "AUTO")
-            if (!config.has("selected_route_id")) {
-                val selected = kept.optJSONObject(config.optInt("current", 0))
+            if (selectedIndex == null) {
+                val selected = kept.optJSONObject(selectedCurrent)
                 config.put("selected_route_id", selected?.optString("id") ?: "routeway")
             }
 
             val normalized = config.toString(2)
             if (normalized != raw) atomicWrite(file, normalized)
         } catch (e: Exception) {
-            android.util.Log.w("Ruri", "Two-route model migration skipped; original model configuration was preserved", e)
+            android.util.Log.w("Ruri", "Free-route model migration skipped; original model configuration was preserved", e)
         }
     }
 
