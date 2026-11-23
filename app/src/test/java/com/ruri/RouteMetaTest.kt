@@ -93,4 +93,28 @@ class RouteMetaTest {
             root.deleteRecursively()
         }
     }
+    @Test
+    fun modelRequestCountersSeparate429FromNetworkFailures() {
+        val root = Files.createTempDirectory("ruri-route-telemetry").toFile()
+        try {
+            RouteMeta.recordAttempt(root, "route-test")
+            RouteMeta.recordFailure(root, "route-test", "rate_limit")
+            RouteMeta.recordAttempt(root, "route-test")
+            RouteMeta.recordFailure(root, "route-test", "quota")
+            RouteMeta.recordAttempt(root, "route-test")
+            RouteMeta.recordFailure(root, "route-test", "network")
+            RouteMeta.recordAttempt(root, "route-test")
+            RouteMeta.recordSuccess(root, "route-test")
+            val route = RouteMeta.route(root, "route-test")
+            assertEquals(4, route.optInt("day_count"))
+            assertEquals(4L, route.optLong("lifetime_requests"))
+            assertEquals(2, route.optInt("rate_limits_today"))
+            assertEquals(1, route.optInt("network_errors_today"))
+            assertEquals(1, route.optInt("successes_today"))
+            assertEquals(3, route.optInt("failures_today"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
 }
