@@ -75,7 +75,9 @@ object EmotionEngine {
                 if (!found) arr.put(w) } }
         cfg.put("schema_version", 2)
         FileManager.write(root, CONFIG, cfg.toString(2))
-        writeState(root, v, System.currentTimeMillis(), st.optLong("last_tick_at", 0L), st.optLong("last_cycle_at", 0L))
+        val now = System.currentTimeMillis()
+        val lastTick = st.optLong("last_tick_at", 0L).takeIf { it > 0L } ?: now
+        writeState(root, v, now, lastTick, st.optLong("last_cycle_at", 0L))
     }
 
     private fun config(root: File) = runCatching { JSONObject(FileManager.read(root, CONFIG)) }.getOrElse { defaults() }
@@ -129,7 +131,8 @@ object EmotionEngine {
 
     fun tick(root: File, now: Long, lastSeen: Long, lastEventAt: Long) {
         val st = readState(root)
-        val dtH = ((now - st.optLong("last_tick_at", now)) / HOUR).coerceAtLeast(0.0)
+        val lastTick = st.optLong("last_tick_at", 0L).takeIf { it > 0L } ?: now
+        val dtH = ((now - lastTick) / HOUR).coerceAtLeast(0.0)
         decay(root, now)
         val d = drift(root)
         val delta = JSONObject()
@@ -155,7 +158,8 @@ object EmotionEngine {
     fun onCycle(root: File) {
         val st = readState(root)
         val now = System.currentTimeMillis()
-        writeState(root, readValues(root), now, st.optLong("last_tick_at", now), now)
+        val lastTick = st.optLong("last_tick_at", 0L).takeIf { it > 0L } ?: now
+        writeState(root, readValues(root), now, lastTick, now)
     }
 
     fun onActiveTask(root: File) {
