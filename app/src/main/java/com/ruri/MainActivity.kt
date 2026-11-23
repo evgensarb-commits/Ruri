@@ -50,9 +50,33 @@ class MainActivity : AppCompatActivity() {
         web.settings.domStorageEnabled = true
         web.settings.allowFileAccess = true
         web.settings.allowContentAccess = true
+        web.settings.allowFileAccessFromFileURLs = false
         web.settings.allowUniversalAccessFromFileURLs = false
+        web.settings.javaScriptCanOpenWindowsAutomatically = false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) web.settings.safeBrowsingEnabled = true
         web.webViewClient = object : WebViewClient() {
+            private fun isTrustedLocalAsset(url: String?): Boolean =
+                url?.startsWith("file:///android_asset/") == true
+
+            override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean {
+                val target = request?.url?.toString()
+                if (isTrustedLocalAsset(target)) return false
+                if (target != null && (target.startsWith("https://") || target.startsWith("http://"))) {
+                    runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(target))) }
+                }
+                return true
+            }
+
+            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                if (!isTrustedLocalAsset(url)) {
+                    view?.stopLoading()
+                    return
+                }
+                super.onPageStarted(view, url, favicon)
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
+                if (!isTrustedLocalAsset(url)) return
                 super.onPageFinished(view, url)
                 web.evaluateJavascript("window.startOnboarding && window.startOnboarding()", null)
                 openPendingMessageIfReady()
@@ -145,7 +169,7 @@ class MainActivity : AppCompatActivity() {
         activityResumed = true
         NetState.refresh(this)
         if (OfflineQueue.hasPending(filesDir) && NetState.online) {
-            LifeScheduler.enqueueEvent(this, "offline_drain")
+            LifeScheduler.enqueueEvent(this, "commander_reply_resume")
         }
         if (::web.isInitialized) {
             try { Bridge().markCommanderSeen() } catch (_: Exception) {}
@@ -256,11 +280,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
-        fun completeChat(callbackId: String): String {
+        fun completeChat(callbackId: String, commanderMessageId: String): String {
             if (!callbackId.matches(Regex("[A-Za-z0-9_-]{1,80}"))) return "ERROR: invalid callback"
+            if (!commanderMessageId.matches(Regex("[A-Za-z0-9_-]{1,200}"))) return "ERROR: invalid message id"
             chatExecutor.execute {
                 try {
-                    val reply = ChatEngine.respond(filesDir)
+                    CommanderReplyQueue.enqueue(filesDir, commanderMessageId)
+                    val reply = ChatEngine.respond(filesDir, commanderMessageId)
                     val messageId = ChatEngine.lastSavedReplyId()
                     mainHandler.post {
                         if (!activityResumed && !messageId.isNullOrBlank()) {
@@ -273,6 +299,8 @@ class MainActivity : AppCompatActivity() {
                     }
                 } catch (e: Exception) {
                     val error = e.message ?: "Ошибка ответа модели"
+                    CommanderReplyQueue.enqueue(filesDir, commanderMessageId)
+                    LifeScheduler.scheduleCommanderReplyRetry(this@MainActivity, CommanderReplyQueue.nextDelayMs(filesDir) ?: 30_000L)
                     mainHandler.post {
                         if (::web.isInitialized) web.evaluateJavascript(
                             "window.onNativeChatResult(" + JSONObject.quote(callbackId) + ",null," +
@@ -458,8 +486,11 @@ class MainActivity : AppCompatActivity() {
                 val event = JSONObject(eventJson)
                 val saved = JSONObject(FileManager.appendEvent(filesDir, event))
                 if (event.optString("type") == "message" && event.optString("who") == "commander") {
-                    Receipts.delivered(filesDir, saved.optString("id"))
-                    LifeScheduler.enqueueEvent(this@MainActivity, "commander_message")
+                    val messageId = saved.optString("id")
+                    Receipts.delivered(filesDir, messageId)
+                    CommanderReplyQueue.enqueue(filesDir, messageId)
+                    OfflineQueue.markPending(filesDir, messageId)
+                    LifeScheduler.enqueueEvent(this@MainActivity, "commander_message:" + messageId)
                 }
                 "OK"
             } catch (e: Exception) { "ERROR: " + (e.message ?: "event append failed") }
