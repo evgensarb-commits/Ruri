@@ -13,7 +13,7 @@ object Capabilities {
         .put("senses", JSONArray()
             .put("События тела (L0): заряд, сеть, VPN, экран, разблокировка, уведомления телефона, новые файлы на полке, мои собственные циклы.")
             .put("Уведомления других приложений: заголовок и текст попадают в мой контекст, когда включён доступ.")
-            .put("Полка: файлы, брошенные в папку shelf/ или прикреплённые в чат, автоматически читаются и осмысливаются мной.")
+            .put("Полка: txt, DOCX и ODT читаю как текст; PDF — только извлекаемые фрагменты/метаданные, старый DOC (OLE) не читаю; изображения — через vision.")
             .put("Заряд батареи, состояние сети и VPN, свободное место — я чувствую их каждый цикл."))
         .put("memory", JSONArray()
             .put("L0 — сырой журнал всех событий, никогда не удаляется.")
@@ -39,6 +39,12 @@ object Capabilities {
         val senses = config.optJSONArray("senses") ?: JSONArray()
         val actions = config.optJSONArray("actions") ?: JSONArray()
         val limits = config.optJSONArray("limits") ?: JSONArray()
+        val officeCapability = "Полка: txt, DOCX и ODT читаю как текст; PDF — только извлекаемые фрагменты/метаданные, старый DOC (OLE) не читаю; изображения — через vision."
+        var sensesChanged = false
+        if ((0 until senses.length()).none { senses.optString(it) == officeCapability }) {
+            senses.put(officeCapability)
+            sensesChanged = true
+        }
         val known = JSONArray()
         fun compact(value: String): String = value.substringBefore(":")
             .substringBefore("—").substringBefore("(").trim().take(80)
@@ -52,8 +58,9 @@ object Capabilities {
             actions.put(0, actions.optString(0).trimEnd('.') + ", self_check.")
             actionsChanged = true
         }
-        if (actionsChanged) {
+        if (actionsChanged || sensesChanged) {
             config.put("actions", actions)
+            config.put("senses", senses)
             FileManager.write(root, PATH, config.toString(2))
         }
         for (i in 0 until actions.length()) known.put(compact(actions.optString(i)))
