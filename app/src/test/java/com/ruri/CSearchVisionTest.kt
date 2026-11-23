@@ -145,7 +145,7 @@ class VisionProbeTest {
             .put("api_key", "configured").put("base_url", "http://api.example.org/v1")))
     }
 
-    @Test fun routeProbeUsesOnlyEligibleFreeModelsAndCachesVisionCapability() {
+    @Test fun manualVisionFlagSelectsOnlyDeclaredFreeRouteWithoutProbe() {
         val root = Files.createTempDirectory("ruri-vision-route-probe").toFile()
         try {
             FileManager.init(root)
@@ -156,7 +156,7 @@ class VisionProbeTest {
                     .put("api_key", "disabled-key").put("base_url", "https://disabled.example.org/v1"))
                 .put(JSONObject().put("id", "routeway").put("free_tier", true).put("enabled", true)
                     .put("api_key", "free-key").put("base_url", "https://free.example.org/v1")
-                    .put("model", "free-model").put("rpd", 100))
+                    .put("model", "free-model").put("rpd", 100).put("vision", true))
 
             val probed = mutableListOf<String>()
             val selected = Vision.findVisionRoute(
@@ -165,9 +165,9 @@ class VisionProbeTest {
             )
 
             assertEquals("routeway", selected?.optString("id"))
-            assertEquals(listOf("routeway"), probed)
-            assertTrue(RouteMeta.route(root, "routeway").optJSONObject("caps")?.optBoolean("vision") == true)
-            assertEquals(1, RouteMeta.route(root, "routeway").optInt("day_count"))
+            assertTrue(probed.isEmpty())
+            assertFalse(RouteMeta.route(root, "routeway").optJSONObject("caps")?.optBoolean("vision") == true)
+            assertEquals(0, RouteMeta.route(root, "routeway").optInt("day_count"))
         } finally {
             root.deleteRecursively()
         }
