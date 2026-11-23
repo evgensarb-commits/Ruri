@@ -211,11 +211,11 @@ window.onNativeChatResult=function(id,reply,error){
 var callback=nativeChatCallbacks[id];if(!callback)return;delete nativeChatCallbacks[id];
 if(error)callback.reject(new Error(error));else callback.resolve(reply);
 };
-function callModel(text){
+function callModel(text,messageId){
 return new Promise(function(resolve,reject){
 var id='chat_'+Date.now()+'_'+Math.random().toString(36).slice(2,9);
 nativeChatCallbacks[id]={resolve:resolve,reject:reject};
-try{var result=Ruri.completeChat(id);if(String(result).indexOf('ERROR:')===0){delete nativeChatCallbacks[id];reject(new Error(result));}}
+try{var result=Ruri.completeChat(id,messageId);if(String(result).indexOf('ERROR:')===0){delete nativeChatCallbacks[id];reject(new Error(result));}}
 catch(e){delete nativeChatCallbacks[id];reject(e);}
 });
 }
@@ -225,11 +225,11 @@ var user={id:'c-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),ts:Date.n
 try{appendLog(user);Ruri.markCommanderSeen();loadChat();}
 catch(e){busy=false;$('#send').disabled=false;status('ОШИБКА ПАМЯТИ');alert(e.message);return;}
 var typing=document.createElement('div');typing.className='msg her';typing.id='typing';typing.innerHTML='<div class="typing">Рури обдумывает ответ…</div>';$('#chat').appendChild(typing);$('#chat').scrollTop=$('#chat').scrollHeight;
-callModel(text).then(function(reply){
+callModel(text,user.id).then(function(reply){
 var t=$('#typing');if(t)t.remove();
 var badges=routeBadges(),keys=Object.keys(badges),last=keys.length?badges[keys[keys.length-1]]:null;
 loadChat();status('НА СВЯЗИ'+(last?' · '+last.route+' · ПОЛНАЯ ПАМЯТЬ':'') );
-}).catch(function(e){var t=$('#typing');if(t)t.remove();var d=document.createElement('div');d.className='msg her';d.innerHTML='<div class="bub error">Ответ не получен: '+esc(e.message)+'. Сообщение сохранено в памяти.</div>';$('#chat').appendChild(d);status('ОШИБКА: '+e.message);})
+}).catch(function(e){var t=$('#typing');if(t)t.remove();var d=document.createElement('div');d.className='msg her';d.innerHTML='<div class="bub error">Ответ пока не получен: '+esc(e.message)+'. Сообщение сохранено в очереди; Рури повторит попытку автоматически.</div>';$('#chat').appendChild(d);status('ОШИБКА: '+e.message);})
 .then(function(){busy=false;$('#send').disabled=false;$('#chat').scrollTop=$('#chat').scrollHeight;});
 }
 function isTouchDevice(){
