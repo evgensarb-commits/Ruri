@@ -633,7 +633,11 @@ object ChatEngine {
             val safeMessages = providerMessagesWithFullMemory(messages) ?: return null
             if (root != null && routeId.isNotBlank()) RouteMeta.recordAttempt(root, routeId)
             val body = JSONObject().put("model", model.optString("model"))
-                .put("messages", safeMessages).put("temperature", 0.85)
+                .put("messages", safeMessages)
+                .put("temperature", 0.9)
+                .put("presence_penalty", 0.6)
+                .put("frequency_penalty", 0.4)
+                .put("seed", (System.currentTimeMillis() % 100000L).toInt())
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
