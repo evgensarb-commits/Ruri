@@ -463,7 +463,9 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun write(path: String, content: String): String {
             return try {
-                require(path != "memory/L4_state.json") { "L4 is managed through atomic native updates" }
+                require(path != "memory/L4_state.json" && path != "core/search.json") {
+                    "Sensitive configuration is managed through dedicated native methods"
+                }
                 if (path == "core/config.json") SecretStore.saveRuntimeConfig(filesDir, content)
                 else FileManager.write(filesDir, path, content)
                 "OK"
@@ -485,6 +487,18 @@ class MainActivity : AppCompatActivity() {
         fun readPublicRuntimeConfig(): String {
             return try { SecretStore.readPublicRuntimeConfig(filesDir) }
             catch (e: Exception) { android.util.Log.e("Ruri", "Cannot read public runtime config", e); "{}" }
+        }
+
+        @JavascriptInterface
+        fun readPublicSearchConfig(): String {
+            return try { SecretStore.readPublicSearchConfig(filesDir) }
+            catch (e: Exception) { android.util.Log.e("Ruri", "Cannot read public search config", e); "{}" }
+        }
+
+        @JavascriptInterface
+        fun saveSearchConfig(raw: String): String {
+            return try { SecretStore.saveSearchConfig(filesDir, raw); "OK" }
+            catch (e: Exception) { "ERROR: " + (e.message ?: "search config save failed") }
         }
 
         @JavascriptInterface
