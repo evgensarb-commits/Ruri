@@ -63,7 +63,7 @@ object Diagnostics {
                 .put("in_cooldown", meta.optLong("cooldown_until", 0L) > now)
                 .put("cooldown_until", meta.optLong("cooldown_until", 0L))
                 .put("requests_today", dayCount)
-                .put("requests_lifetime", meta.optLong("lifetime_requests", dayCount.toLong()))
+                .put("requests_lifetime", maxOf(meta.optLong("lifetime_requests", dayCount.toLong()), dayCount.toLong()))
                 .put("successes_today", if (sameDay) meta.optInt("successes_today", 0) else 0)
                 .put("failures_today", if (sameDay) meta.optInt("failures_today", 0) else 0)
                 .put("rate_limits_today", if (sameDay) meta.optInt("rate_limits_today", 0) else 0)
