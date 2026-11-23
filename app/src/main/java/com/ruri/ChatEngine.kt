@@ -25,9 +25,33 @@ object ChatEngine {
 
     fun respond(root: File, commanderMessageId: String? = null): String = synchronized(responseLock) {
         lastFinalMessageId = null
-        val targetId = commanderMessageId?.takeIf { it.isNotBlank() }
-            ?: CommanderReplyQueue.nextDue(root)?.optString("message_id")?.takeIf { it.isNotBlank() }
-            ?: latestCommanderMessageId(root)
+        var queueHead = CommanderReplyQueue.firstPending(root)
+        while (queueHead != null && Tombstone.isDeleted(root, queueHead.optString("message_id"))) {
+            CommanderReplyQueue.markDeleted(root, queueHead.optString("message_id"))
+            queueHead = CommanderReplyQueue.firstPending(root)
+        }
+        val requestedId = commanderMessageId?.takeIf { it.isNotBlank() }
+        if (queueHead != null) {
+            val headId = queueHead.optString("message_id")
+            if (requestedId != null && requestedId != headId) {
+                val delay = CommanderReplyQueue.nextDelayMs(root) ?: 1_000L
+                throw ModelRequestFailure(
+                    "Перед этим сообщением в очереди есть более раннее сообщение Командира",
+                    delay.coerceAtLeast(1_000L),
+                    "queued"
+                )
+            }
+            val delay = queueHead.optLong("next_attempt_at", 0L) - System.currentTimeMillis()
+            if (delay > 0L) {
+                throw ModelRequestFailure(
+                    "Предыдущее сообщение ожидает разрешённого времени повторной попытки",
+                    delay,
+                    queueHead.optString("last_error_kind", "queued")
+                )
+            }
+        }
+        val targetId = queueHead?.optString("message_id")?.takeIf { it.isNotBlank() }
+            ?: requestedId ?: latestCommanderMessageId(root)
         if (!targetId.isNullOrBlank()) {
             findSavedReply(root, targetId)?.let { (id, text) ->
                 lastFinalMessageId = id
