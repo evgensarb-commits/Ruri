@@ -48,10 +48,14 @@ class CommanderReplyQueueTest {
     @Test fun legacyPendingFlagCanRecoverLatestUnansweredMessage() {
         val root = root()
         FileManager.init(root)
+        val now = System.currentTimeMillis()
         FileManager.appendEvent(root, org.json.JSONObject()
-            .put("id", "legacy-msg").put("type", "message").put("who", "commander").put("text", "Ответь").put("ts", System.currentTimeMillis()))
+            .put("id", "legacy-msg-1").put("type", "message").put("who", "commander").put("text", "Первое").put("ts", now))
+        FileManager.appendEvent(root, org.json.JSONObject()
+            .put("id", "legacy-msg-2").put("type", "message").put("who", "commander").put("text", "Второе").put("ts", now + 1L))
         OfflineQueue.markPending(root)
-        assertEquals("legacy-msg", CommanderReplyQueue.recoverLatestUnanswered(root))
-        assertEquals("legacy-msg", CommanderReplyQueue.nextDue(root, System.currentTimeMillis())?.optString("message_id"))
+        assertEquals("legacy-msg-1", CommanderReplyQueue.recoverLatestUnanswered(root))
+        assertEquals(2, CommanderReplyQueue.pendingCount(root))
+        assertEquals("legacy-msg-1", CommanderReplyQueue.nextDue(root, System.currentTimeMillis())?.optString("message_id"))
     }
 }
