@@ -98,10 +98,7 @@ object Vision {
                 JSONObject().put("url", "data:" + mime + ";base64," + base64)))
         val response = call(model, JSONArray().put(JSONObject().put("role", "user").put("content", content)), root, id)
         val description = response?.let { SecretRedactor.redactText(it).take(4000).takeIf { text -> text.isNotBlank() } }
-        if (description.isNullOrBlank()) {
-            runCatching { RouteMeta.recordFailure(root, id, "other", Task.VISION) }
-            return null
-        }
+        if (description.isNullOrBlank()) return null
         runCatching { RouteMeta.recordSuccess(root, id, Task.VISION) }
         return description
     }
@@ -145,11 +142,24 @@ object Vision {
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
             if (root != null && routeId.isNotBlank()) RouteMeta.recordHttpStatus(root, routeId, code)
-            if (code !in 200..299) null
-            else JSONObject(connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() })
-                .getJSONArray("choices").getJSONObject(0).getJSONObject("message")
-                .getString("content").trim()
-        } catch (_: Exception) {
+            if (code !in 200..299) {
+                if (root != null && routeId.isNotBlank()) {
+                    RouteMeta.recordFailure(root, routeId, RouteSelector.classify(code, null), Task.VISION)
+                }
+                null
+            } else {
+                val content = JSONObject(connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() })
+                    .getJSONArray("choices").getJSONObject(0).getJSONObject("message")
+                    .getString("content").trim()
+                if (content.isBlank()) {
+                    if (root != null && routeId.isNotBlank()) RouteMeta.recordFailure(root, routeId, "empty_response", Task.VISION)
+                    null
+                } else content
+            }
+        } catch (e: Exception) {
+            if (root != null && routeId.isNotBlank()) {
+                RouteMeta.recordFailure(root, routeId, RouteSelector.classify(null, e), Task.VISION)
+            }
             null
         } finally {
             connection?.disconnect()
