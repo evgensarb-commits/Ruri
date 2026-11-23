@@ -66,9 +66,7 @@ object ChatEngine {
             ?.let { it.optString("id") to it.optString("text") }
 
     internal fun setTurnInFlight(root: File, value: Boolean) {
-        val state = readJson(root, "memory/L4_state.json")
-        state.put("turn_in_flight", value)
-        FileManager.write(root, "memory/L4_state.json", state.toString(2))
+        FileManager.updateL4State(root) { it.put("turn_in_flight", value) }
     }
 
     internal fun lastSavedReplyId(): String? = lastFinalMessageId
@@ -842,10 +840,10 @@ object ChatEngine {
                     !Tombstone.isDeleted(root, it.optString("id")) }
         }
         if (lastCmd != null) {
-            val state = readJson(root, "memory/L4_state.json")
             val commanderTs = lastCmd.optLong("ts", lastCmd.optLong("timestamp", System.currentTimeMillis()))
-            state.put("last_seen_commander", maxOf(state.optLong("last_seen_commander", 0L), commanderTs))
-            FileManager.write(root, "memory/L4_state.json", state.toString(2))
+            FileManager.updateL4State(root) { state ->
+                state.put("last_seen_commander", maxOf(state.optLong("last_seen_commander", 0L), commanderTs))
+            }
             val commanderId = lastCmd.optString("id")
             Receipts.repliedByRuri(root, commanderId)
             Receipts.readByRuri(root, commanderId)
