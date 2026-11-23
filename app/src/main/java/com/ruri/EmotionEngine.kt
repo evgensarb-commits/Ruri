@@ -99,6 +99,7 @@ object EmotionEngine {
     private fun clamp(x: Double, c: JSONObject) = x.coerceIn(c.optDouble("min", 0.0), c.optDouble("max", 100.0))
     fun snapshot(root: File) = JSONObject(readValues(root).toString())
 
+    @Synchronized
     fun applyDelta(root: File, delta: JSONObject, source: String): JSONObject {
         val now = System.currentTimeMillis(); val before = readValues(root)
         val after = JSONObject(); val applied = JSONObject()
@@ -116,6 +117,7 @@ object EmotionEngine {
         return JSONObject().put("before", before).put("delta", applied).put("after", after).put("mood", mood)
     }
 
+    @Synchronized
     fun decay(root: File, now: Long) {
         val st = readState(root); val dtH = (now - st.optLong("updated_at", now)) / HOUR; if (dtH <= 0) return
         val v = readValues(root); val out = JSONObject()
@@ -130,6 +132,7 @@ object EmotionEngine {
         writeState(root, out, now, st.optLong("last_tick_at", now), st.optLong("last_cycle_at", 0L))
     }
 
+    @Synchronized
     fun tick(root: File, now: Long, lastSeen: Long, lastEventAt: Long) {
         val st = readState(root)
         val lastTick = st.optLong("last_tick_at", 0L).takeIf { it > 0L } ?: now
@@ -156,6 +159,7 @@ object EmotionEngine {
         writeState(root, readValues(root), now, now, s2.optLong("last_cycle_at", 0L))
     }
 
+    @Synchronized
     fun onCycle(root: File) {
         val st = readState(root)
         val now = System.currentTimeMillis()
@@ -163,6 +167,7 @@ object EmotionEngine {
         writeState(root, readValues(root), now, lastTick, now)
     }
 
+    @Synchronized
     fun onActiveTask(root: File) {
         val d = drift(root)
         applyDelta(root, JSONObject()
