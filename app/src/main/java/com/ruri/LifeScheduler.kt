@@ -25,6 +25,9 @@ object LifeScheduler {
     private const val EVENT_NAME = "ru-r1-event-cognition"
     @Volatile private var networkCallbackRegistered = false
 
+    internal fun driveCheckDue(now: Long, lastDriveCheck: Long, intervalMinutes: Double): Boolean =
+        intervalMinutes > 0.0 && (lastDriveCheck <= 0L || now - lastDriveCheck >= intervalMinutes * 60000.0)
+
     fun ensurePeriodic(context: Context) {
         registerConnectivityWake(context.applicationContext)
         val request = PeriodicWorkRequestBuilder<RuriLifeWorker>(15, TimeUnit.MINUTES)
@@ -225,30 +228,28 @@ class RuriLifeWorker(
         val state = try { JSONObject(FileManager.read(root, "memory/L4_state.json")) }
             catch (_: Exception) { JSONObject() }
         val now = System.currentTimeMillis()
-        val lastSeen = state.optLong("last_seen_commander", 0L)
-        val lastInitiative = state.optLong("last_initiative", 0L)
-        val initiativeDue = EmotionEngine.initiativeGate(
-            root, lastSeen, now, state.optBoolean("waiting_for_reply", false), lastInitiative
-        )
-
         val notificationEvent = reason.contains("phone_notification")
-        val explicitSelfTask = reason.contains("research_task") ||
-            reason.contains("self_reflection") ||
-            reason.contains("capability_gap")
-        val th = EmotionEngine.thresholds(root)
-        val reflectionDue = now - state.optLong("last_thought", 0L) >=
-            (th.optDouble("reflection_h", 6.0) * 3_600_000.0).toLong()
+        val explicitSelfTask = reason.contains("research_task") || reason.contains("capability_gap")
+        val driveCheckEvent = reason.contains("drive_check")
 
-        if (!initiativeDue && !notificationEvent && !explicitSelfTask && !reflectionDue) return false
+        if (!driveCheckEvent) {
+            val drift = EmotionEngine.drift(root)
+            val interval = drift.optDouble("drive_check_interval_min", 45.0)
+            if (LifeScheduler.driveCheckDue(now, state.optLong("last_drive_check", 0L), interval)) {
+                state.put("last_drive_check", now)
+                FileManager.write(root, "memory/L4_state.json", state.toString(2))
+                if (EmotionEngine.pressure(root) >= drift.optDouble("initiative_threshold", 40.0)) {
+                    LifeScheduler.enqueueEvent(context, "drive_check")
+                }
+            }
+        }
+
+        if (!driveCheckEvent && !notificationEvent && !explicitSelfTask) return false
 
         val config = try { JSONObject(SecretStore.readRuntimeConfig(root)) } catch (_: Exception) { return false }
         if (!NetState.online) return false
         val models = config.optJSONArray("models") ?: return false
-        val task = when {
-            initiativeDue -> Task.WARMTH
-            explicitSelfTask -> Task.TOOLS
-            else -> Task.REASON
-        }
+        val task = if (driveCheckEvent) Task.WARMTH else if (explicitSelfTask) Task.TOOLS else Task.REASON
         return FreeModelRouter.orderedIndices(
             root, models, config.optInt("current", 0), task
         ).isNotEmpty()
