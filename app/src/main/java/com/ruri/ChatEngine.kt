@@ -189,7 +189,7 @@ object ChatEngine {
             providerMessage.remove("_ruri_event_id")
             if (providerMessage.optString("role") == "assistant" && index < history.size - 2) {
                 val content = providerMessage.optString("content")
-                providerMessage.put("content", content.replace(Regex("^\\s*\\*[^*]{1,80}\\*\\s*"), ""))
+                providerMessage.put("content", StyleGuard.stripOlderOpening("ruri", index, history.size, content))
             }
             messages.put(providerMessage)
         }
