@@ -155,25 +155,33 @@ object ShelfWatcher {
         }.getOrNull() ?: return ""
 
         return runCatching {
-            val parser = android.util.Xml.newPullParser()
-            parser.setFeature(org.xmlpull.v1.XmlPullParser.FEATURE_PROCESS_DOCDECL, false)
-            parser.setInput(xmlBytes.inputStream(), "UTF-8")
+            val factory = javax.xml.parsers.DocumentBuilderFactory.newInstance()
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false)
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+            factory.isXIncludeAware = false
+            factory.isExpandEntityReferences = false
+            val document = factory.newDocumentBuilder().parse(xmlBytes.inputStream())
             val text = StringBuilder()
-            var event = parser.eventType
-            while (event != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
-                when (event) {
-                    org.xmlpull.v1.XmlPullParser.TEXT,
-                    org.xmlpull.v1.XmlPullParser.CDSECT -> text.append(parser.text)
-                    org.xmlpull.v1.XmlPullParser.START_TAG -> when (parser.name.substringAfter(':')) {
-                        "tab" -> text.append('\t')
-                        "br" -> text.append('\n')
+            fun visit(node: org.w3c.dom.Node) {
+                when (node.nodeType) {
+                    org.w3c.dom.Node.TEXT_NODE, org.w3c.dom.Node.CDATA_SECTION_NODE ->
+                        text.append(node.nodeValue ?: "")
+                    org.w3c.dom.Node.ELEMENT_NODE -> {
+                        val tag = (node.localName ?: node.nodeName.substringAfter(':'))
+                        if (tag == "tab") text.append('\t')
+                        if (tag == "br") text.append('\n')
+                        val children = node.childNodes
+                        for (i in 0 until children.length) visit(children.item(i))
+                        if (tag == "p") text.append('\n')
                     }
-                    org.xmlpull.v1.XmlPullParser.END_TAG -> if (
-                        parser.name.substringAfter(':') == "p"
-                    ) text.append('\n')
+                    else -> {
+                        val children = node.childNodes
+                        for (i in 0 until children.length) visit(children.item(i))
+                    }
                 }
-                event = parser.next()
             }
+            visit(document.documentElement)
             text.toString()
                 .replace(Regex("[ \\t]+"), " ")
                 .replace(Regex(" *\\n *"), "\n")
