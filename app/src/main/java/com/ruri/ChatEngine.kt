@@ -15,13 +15,55 @@ object ChatEngine {
     const val OFFLINE_REPLY = "Связи нет. Отвечу, когда она вернётся."
     @Volatile private var lastSearchSourceUrls = JSONArray()
     @Volatile private var lastFinalMessageId: String? = null
+    private val responseLock = Any()
 
-    fun respond(root: File): String {
+    internal class ModelRequestFailure(
+        message: String,
+        val retryAfterMs: Long = 0L,
+        val failureKind: String = "provider"
+    ) : IllegalStateException(message)
+
+    fun respond(root: File, commanderMessageId: String? = null): String = synchronized(responseLock) {
         lastFinalMessageId = null
+        val targetId = commanderMessageId?.takeIf { it.isNotBlank() }
+            ?: CommanderReplyQueue.nextDue(root)?.optString("message_id")?.takeIf { it.isNotBlank() }
+            ?: latestCommanderMessageId(root)
+        if (!targetId.isNullOrBlank()) {
+            findSavedReply(root, targetId)?.let { (id, text) ->
+                lastFinalMessageId = id
+                return@synchronized text
+            }
+            CommanderReplyQueue.recordAttempt(root, targetId)
+        }
         setTurnInFlight(root, true)
-        return try { respondInternal(root, allowRecovery = true) }
-        finally { setTurnInFlight(root, false) }
+        try {
+            respondInternal(root, allowRecovery = true, commanderMessageId = targetId)
+        } catch (e: Exception) {
+            if (!targetId.isNullOrBlank()) {
+                val retryAfter = (e as? ModelRequestFailure)?.retryAfterMs ?: 0L
+                val kind = (e as? ModelRequestFailure)?.failureKind ?: "unexpected"
+                CommanderReplyQueue.recordFailure(root, targetId, kind, retryAfter)
+                OfflineQueue.markPending(root, targetId)
+            }
+            throw e
+        } finally {
+            setTurnInFlight(root, false)
+        }
     }
+
+    private fun latestCommanderMessageId(root: File): String? =
+        FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 1000)
+            .asReversed().asSequence().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+            .firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" &&
+                !Tombstone.isDeleted(root, it.optString("id")) }
+            ?.optString("id")?.takeIf { it.isNotBlank() }
+
+    private fun findSavedReply(root: File, commanderMessageId: String): Pair<String, String>? =
+        FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 2000)
+            .asReversed().asSequence().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+            .firstOrNull { it.optString("type") == "message" && it.optString("who") == "ruri" &&
+                it.optString("reply_to") == commanderMessageId }
+            ?.let { it.optString("id") to it.optString("text") }
 
     internal fun setTurnInFlight(root: File, value: Boolean) {
         val state = readJson(root, "memory/L4_state.json")
@@ -34,7 +76,12 @@ object ChatEngine {
     internal fun shouldIncludeInChatHistory(root: File, event: JSONObject): Boolean =
         event.optString("type") == "message" && !Tombstone.isDeleted(root, event.optString("id"))
 
-    private fun respondInternal(root: File, allowRecovery: Boolean, assumeReachable: Boolean = false): String {
+    private fun respondInternal(
+        root: File,
+        allowRecovery: Boolean,
+        assumeReachable: Boolean = false,
+        commanderMessageId: String? = null
+    ): String {
         val config = JSONObject(SecretStore.readRuntimeConfig(root))
         val models = config.optJSONArray("models") ?: JSONArray()
         val current = config.optInt("current", -1)
@@ -42,7 +89,7 @@ object ChatEngine {
             val reachableOrder = RouteSelector.orderedIndices(
                 root, models, current, Task.CHAT, online = true, vpn = NetState.vpn
             )
-            if (reachableOrder.isNotEmpty()) return respondInternal(root, allowRecovery = false, assumeReachable = true)
+            if (reachableOrder.isNotEmpty()) return respondInternal(root, allowRecovery = false, assumeReachable = true, commanderMessageId = commanderMessageId)
             OfflineQueue.markPending(root)
             val selected = models.optJSONObject(current)
             val name = selected?.optString("name")?.takeIf { it.isNotBlank() } ?: "выбранный маршрут"
@@ -137,19 +184,24 @@ object ChatEngine {
 
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", system))
         val lines = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 4000)
-        val history = lines.asReversed().mapNotNull { line ->
+        val newestFirstHistory = lines.asReversed().mapNotNull { line ->
             try {
                 val event = JSONObject(line)
                 if (!shouldIncludeInChatHistory(root, event)) return@mapNotNull null
                 val text = event.optString("text").trim()
                 if (text.isBlank()) return@mapNotNull null
                 val role = if (event.optString("who") == "ruri") "assistant" else "user"
-                JSONObject().put("role", role).put(
-                    "content",
-                    text
-                ).put("_ruri_event_id", event.optString("id"))
+                JSONObject().put("role", role).put("content", text)
+                    .put("_ruri_event_id", event.optString("id"))
             } catch (_: Exception) { null }
-        }.take(14).reversed()
+        }
+        val targetPosition = if (commanderMessageId.isNullOrBlank()) 0
+            else newestFirstHistory.indexOfFirst { it.optString("_ruri_event_id") == commanderMessageId }
+        if (!commanderMessageId.isNullOrBlank() && targetPosition < 0) {
+            throw IllegalStateException("Сообщение Командира не найдено в L0; оно осталось в очереди")
+        }
+        val history = (if (targetPosition >= 0) newestFirstHistory.drop(targetPosition) else newestFirstHistory)
+            .take(14).reversed()
         if (history.isEmpty() || history.last().optString("role") != "user") {
             throw IllegalStateException("Не найдено последнее сообщение командира")
         }
@@ -205,6 +257,8 @@ object ChatEngine {
         }
 
         var lastError = "Все настроенные модели недоступны"
+        var retryAfterMs = 0L
+        var lastFailureKind = "provider"
         var hadNetworkAttempt = false
         var allFailuresNetwork = true
         for (index in requestOrder) {
@@ -305,6 +359,16 @@ object ChatEngine {
                     diagnostic.put("stage", "HTTP")
                     diagnostic.put("result", "http_error")
                     val failureKind = RouteSelector.classify(code, null, responseText)
+                    if (code == 429) {
+                        val parsedRetryAfter = parseRetryAfterMillis(connection.getHeaderField("Retry-After"))
+                        retryAfterMs = maxOf(retryAfterMs, parsedRetryAfter.takeIf { it > 0L } ?: 60_000L)
+                        lastFailureKind = "rate_limit"
+                    } else if (code in 500..599) {
+                        retryAfterMs = maxOf(retryAfterMs, parseRetryAfterMillis(connection.getHeaderField("Retry-After")))
+                        lastFailureKind = "http_$code"
+                    } else {
+                        lastFailureKind = "http_$code"
+                    }
                     runCatching { RouteMeta.recordFailure(root, routeId, failureKind, task) }
                     lastError = RouteRecovery.describeHttpError(model.optString("name", model.optString("id")), code, failureKind)
                     diagnostic.put("failure_message", lastError)
@@ -394,7 +458,7 @@ object ChatEngine {
                 // Keep Routeway as primary; fallback success is temporary, not a reconfiguration.
                 appendFinalReply(
                     root, reply, emotion, meta,
-                    routeId
+                    routeId, commanderMessageId
                 )
                 runCatching { BackupPolicy.checkpointState(root) }
                 runCatching { OfflineQueue.clear(root) }
@@ -423,12 +487,22 @@ object ChatEngine {
         }
         if (hadNetworkAttempt && allFailuresNetwork && allowRecovery && Probe.claimRecoveryRefresh()) {
             Probe.refreshReachability(root, models, topOnly = false, force = true)
-            return respondInternal(root, allowRecovery = false, assumeReachable = true)
+            return respondInternal(root, allowRecovery = false, assumeReachable = true, commanderMessageId = commanderMessageId)
         }
         OfflineQueue.markPending(root)
-        throw IllegalStateException(lastError)
+        throw ModelRequestFailure(lastError, retryAfterMs, lastFailureKind)
     }
 
+    internal fun parseRetryAfterMillis(value: String?, now: Long = System.currentTimeMillis()): Long {
+        val raw = value?.trim().orEmpty()
+        if (raw.isBlank()) return 0L
+        raw.toLongOrNull()?.let { return (it.coerceAtLeast(0L) * 1000L).coerceAtMost(24L * 60L * 60L * 1000L) }
+        return runCatching {
+            val date = java.time.ZonedDateTime.parse(raw, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME)
+                .toInstant().toEpochMilli()
+            (date - now).coerceAtLeast(0L).coerceAtMost(24L * 60L * 60L * 1000L)
+        }.getOrDefault(0L)
+    }
 
     internal fun providerMessagesWithFullMemory(messages: JSONArray): JSONArray? {
         if (!hasFullMemoryContext(messages)) return null
@@ -709,12 +783,14 @@ object ChatEngine {
         reply: String,
         emotion: JSONObject? = null,
         meta: JSONObject? = null,
-        routeName: String = "маршрут"
+        routeName: String = "маршрут",
+        commanderMessageId: String? = null
     ): String {
         val sourceUrls = meta?.optJSONArray("source_urls") ?: JSONArray()
         val searchOk = meta?.takeIf { it.has("search_ok") }?.optBoolean("search_ok")
         return appendFinalReplyInternal(root, reply, routeName, sourceUrls, emotion, searchOk,
-            includeEmptySources = meta?.has("source_urls") == true)
+            includeEmptySources = meta?.has("source_urls") == true,
+            commanderMessageId = commanderMessageId)
     }
 
     internal fun appendFinalReply(
@@ -722,8 +798,10 @@ object ChatEngine {
         reply: String,
         routeName: String,
         sourceUrls: JSONArray = JSONArray(),
-        emotion: JSONObject? = null
-    ): String = appendFinalReplyInternal(root, reply, routeName, sourceUrls, emotion, null)
+        emotion: JSONObject? = null,
+        commanderMessageId: String? = null
+    ): String = appendFinalReplyInternal(root, reply, routeName, sourceUrls, emotion, null,
+        commanderMessageId = commanderMessageId)
 
     private fun appendFinalReplyInternal(
         root: File,
@@ -732,7 +810,8 @@ object ChatEngine {
         sourceUrls: JSONArray,
         emotion: JSONObject?,
         searchOk: Boolean?,
-        includeEmptySources: Boolean = false
+        includeEmptySources: Boolean = false,
+        commanderMessageId: String? = null
     ): String {
         val id = java.util.UUID.randomUUID().toString()
         val event = JSONObject().put("id", id).put("type", "message")
@@ -745,22 +824,32 @@ object ChatEngine {
                 .put("emotion_after", emotion.optJSONObject("after"))
                 .put("mood_label", emotion.optString("mood"))
         }
+        if (!commanderMessageId.isNullOrBlank()) event.put("reply_to", commanderMessageId)
         val saved = JSONObject(FileManager.appendEvent(root, event))
         if (diaryMirrorSaid(root)) Diary.append(root, reply, "ответ_командиру", emotion, "said")
         val savedId = saved.optString("id").ifBlank { id }
         Receipts.delivered(root, savedId)
         lastFinalMessageId = savedId
-        val lastCmd = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 500)
-            .asReversed().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
-            .firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" &&
-                !Tombstone.isDeleted(root, it.optString("id")) }
+        val lastCmd = if (!commanderMessageId.isNullOrBlank()) {
+            FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 2000)
+                .asReversed().asSequence().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+                .firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" &&
+                    it.optString("id") == commanderMessageId && !Tombstone.isDeleted(root, commanderMessageId) }
+        } else {
+            FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 500)
+                .asReversed().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+                .firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" &&
+                    !Tombstone.isDeleted(root, it.optString("id")) }
+        }
         if (lastCmd != null) {
             val state = readJson(root, "memory/L4_state.json")
-            state.put("last_seen_commander", lastCmd.optLong("ts",
-                lastCmd.optLong("timestamp", System.currentTimeMillis())))
+            val commanderTs = lastCmd.optLong("ts", lastCmd.optLong("timestamp", System.currentTimeMillis()))
+            state.put("last_seen_commander", maxOf(state.optLong("last_seen_commander", 0L), commanderTs))
             FileManager.write(root, "memory/L4_state.json", state.toString(2))
-            Receipts.repliedByRuri(root, lastCmd.optString("id"))
-            Receipts.readByRuri(root, lastCmd.optString("id"))
+            val commanderId = lastCmd.optString("id")
+            Receipts.repliedByRuri(root, commanderId)
+            Receipts.readByRuri(root, commanderId)
+            CommanderReplyQueue.markAnswered(root, commanderId, savedId)
         }
         val badge = JSONObject().put("ts", saved.optLong("ts"))
             .put("route", routeName).put("memory", "полная память")
