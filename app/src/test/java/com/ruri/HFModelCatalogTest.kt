@@ -96,4 +96,18 @@ class HFModelCatalogTest {
         assertEquals(1, result.freeProviders)
     }
 
+    @Test
+    fun nsfwFallbackRecognizesHubNsfwTagsWhenModelNameIsGeneric() {
+        val model = JSONObject().put("id", "community/Generic-Chat-8B")
+            .put("tags", org.json.JSONArray().put("text-generation").put("nsfw"))
+            .put("providers", org.json.JSONArray()
+                .put(JSONObject().put("provider", "free-provider").put("status", "live")
+                    .put("is_free", true)))
+        val result = HFModelCatalog.parseDetailed(
+            JSONObject().put("data", org.json.JSONArray().put(model)).toString(), "nsfw"
+        )
+        assertEquals(1, result.models.length())
+        assertEquals("community/Generic-Chat-8B", result.models.getJSONObject(0).getString("model"))
+    }
+
 }
