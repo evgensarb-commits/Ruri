@@ -691,7 +691,7 @@ class MainActivity : AppCompatActivity() {
                                 .sortedByDescending { it.optDouble("score", 0.0) }
                             val output = JSONArray()
                             sorted.take(30).forEach(output::put)
-                            return output to intArrayOf(hubCandidates.size, liveCount, freeCount)
+                            return output to intArrayOf(hubCandidates.size, liveCount, freeCount, matched.size)
                         }
 
                         var mode = "rp"
@@ -707,6 +707,8 @@ class MainActivity : AppCompatActivity() {
                         val statsJson = JSONObject()
                             .put("hub_models_seen", allHubModels.size)
                             .put("models_seen", allHubModels.size)
+                            .put("router_models_seen", routerModels.size)
+                            .put("router_candidate_matches", stats[3])
                             .put("candidate_mode", mode)
                             .put("roleplay_matches", if (mode == "rp") stats[0] else 0)
                             .put("nsfw_matches", if (mode == "nsfw") stats[0] else 0)
