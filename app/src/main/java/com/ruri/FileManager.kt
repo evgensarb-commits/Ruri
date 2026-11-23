@@ -206,6 +206,7 @@ object FileManager {
         // Import every existing key before route pruning so obsolete routes
         // never discard credentials from the encrypted SecretStore.
         SecretStore.migrateLegacyApiKeys(root)
+        SecretStore.migrateLegacySearchKey(root)
         migrateModelConfig(root)
         val configuredModels = runCatching {
             JSONObject(read(root, CONFIG_PATH)).optJSONArray("models")
