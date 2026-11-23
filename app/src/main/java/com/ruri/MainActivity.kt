@@ -463,11 +463,10 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun write(path: String, content: String): String {
             return try {
-                require(path != "memory/L4_state.json" && path != "core/search.json") {
-                    "Sensitive configuration is managed through dedicated native methods"
+                require(path == "core/character.json") {
+                    "Only character settings may be written through the generic WebView bridge"
                 }
-                if (path == "core/config.json") SecretStore.saveRuntimeConfig(filesDir, content)
-                else FileManager.write(filesDir, path, content)
+                FileManager.write(filesDir, path, content)
                 "OK"
             } catch (e: Exception) { "ERROR: " + (e.message ?: "write failed") }
         }
