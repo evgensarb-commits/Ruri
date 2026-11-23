@@ -325,6 +325,7 @@ object ChatEngine {
         var hadNetworkAttempt = false
         var allFailuresNetwork = true
         var followupRequests = 0
+        var hadPriorProviderFailure = false
         val baseAuditBreakdown = TokenAudit.breakdownLengths(
             "system_total" to system.length,
             "history" to history.sumOf { it.optString("content").length },
@@ -395,7 +396,7 @@ object ChatEngine {
             var stage = "CONFIG"
             var stageStartedAt = 0L
             var auditRecorded = false
-            val auditStage = if (attempt > 1) "retry_after_error" else "initial"
+            val auditStage = if (attempt > 1 || hadPriorProviderFailure) "retry_after_error" else "initial"
             try {
                 val base = model.optString("base_url").trimEnd('/')
                 require(base.startsWith("https://")) { "Для модели требуется HTTPS" }
@@ -472,6 +473,7 @@ object ChatEngine {
                     lastError = RouteRecovery.describeHttpError(model.optString("name", model.optString("id")), code, failureKind)
                     diagnostic.put("failure_message", lastError)
                     NetworkDiagnostics.record(root, diagnostic)
+                    hadPriorProviderFailure = true
                     if (!RouteRecovery.isNetworkFailure(failureKind)) allFailuresNetwork = false
                     if (code == 500 || code == 502 || code == 503 || code == 504) {
                         retryableModels.add(index)
@@ -497,6 +499,7 @@ object ChatEngine {
                     diagnostic.put("result", "empty_reply")
                     NetworkDiagnostics.record(root, diagnostic)
                     lastError = "Модель вернула пустой ответ"
+                    hadPriorProviderFailure = true
                     allFailuresNetwork = false
                     continue
                 }
@@ -550,6 +553,7 @@ object ChatEngine {
                         diagnostic = diagnostic
                     )) {
                     lastError = "Маршрут ${model.optString("name", model.optString("id"))} отклонил взрослую тему"
+                    hadPriorProviderFailure = true
                     allFailuresNetwork = false
                     continue
                 }
@@ -568,6 +572,7 @@ object ChatEngine {
                 runCatching { OfflineQueue.clear(root) }
                 return reply
             } catch (e: Exception) {
+                hadPriorProviderFailure = true
                 if (!auditRecorded) TokenAudit.record(root, auditStage, routeId, model.optString("model"), null,
                     JSONObject(baseAuditBreakdown.toString()), safeProviderMessages.length(), 0, attempt, commanderMessageId.orEmpty())
                 diagnostic.put("stage", stage)
