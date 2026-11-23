@@ -60,7 +60,8 @@ class AutonomyPackageIntegrationTest {
         assertTrue(fileManager.contains("minimax-m3.1-flash:free"))
         assertTrue(fileManager.contains("free_only"))
         assertTrue(fileManager.contains("RouteMeta.pruneToConfiguredRoutes"))
-        assertTrue(routeSelector.contains("minimax-m3.1-flash:free"))
+        assertTrue(routeSelector.contains("compareBy<Int>"))
+        assertTrue(routeSelector.contains("nsfw_override"))
         assertTrue(routeSelector.contains("Task.VISION"))
         assertFalse(fileManager.contains("Requesty · Google Gemma 4 Free"))
     }
