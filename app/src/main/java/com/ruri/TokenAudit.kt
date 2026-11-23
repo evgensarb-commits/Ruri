@@ -47,12 +47,18 @@ object TokenAudit {
         runCatching {
             val prompt = usage?.optLong("prompt_tokens", -1L) ?: -1L
             val completion = usage?.optLong("completion_tokens", -1L) ?: -1L
-            val total = usage?.optLong("total_tokens", -1L) ?: -1L
+            val reportedTotal = usage?.optLong("total_tokens", -1L) ?: -1L
+            val total = if (reportedTotal >= 0L) reportedTotal
+                else if (prompt >= 0L && completion >= 0L) prompt + completion else -1L
             val details = usage?.optJSONObject("prompt_tokens_details")
-            val cached = details?.optLong("cached_tokens", -1L)
-                ?: usage?.optLong("cache_read_input_tokens", -1L)
-                ?: usage?.optLong("cached_input_tokens", -1L)
-                ?: -1L
+            val detailsCached = details?.optLong("cached_tokens", -1L) ?: -1L
+            val directCached = usage?.optLong("cache_read_input_tokens", -1L) ?: -1L
+            val alternateCached = usage?.optLong("cached_input_tokens", -1L) ?: -1L
+            val cached = when {
+                detailsCached >= 0L -> detailsCached
+                directCached >= 0L -> directCached
+                else -> alternateCached
+            }
             val event = JSONObject()
                 .put("type", TYPE)
                 .put("ts", System.currentTimeMillis())
