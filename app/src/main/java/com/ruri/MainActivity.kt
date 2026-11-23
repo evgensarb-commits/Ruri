@@ -510,19 +510,82 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
-        fun saveOpenRouterKey(key: String): String {
+        fun saveHFKey(key: String): String {
             return try {
                 val value = key.trim()
-                require(value.isNotBlank()) { "Вставь OpenRouter API key" }
+                require(value.startsWith("hf_") && value.length >= 20) { "Проверь HF token (обычно начинается с hf_)" }
                 val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
                 val models = config.optJSONArray("models") ?: JSONArray()
-                val dolphin = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
-                    .firstOrNull { it.optString("id") == "openrouter-dolphin" }
-                    ?: throw IllegalStateException("Маршрут Dolphin не найден")
-                dolphin.put("api_key", value)
+                val hf = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
+                    .firstOrNull { it.optString("id") == "hf" }
+                    ?: throw IllegalStateException("Маршрут Hugging Face не найден")
+                hf.put("api_key", value).put("enabled", hf.optString("model").isNotBlank())
                 SecretStore.saveRuntimeConfig(filesDir, config.toString(2))
                 "OK"
-            } catch (e: Exception) { "ERROR: " + (e.message ?: "OpenRouter key save failed") }
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "HF token save failed") }
+        }
+
+        @JavascriptInterface
+        fun saveHFModel(modelId: String): String {
+            return try {
+                val value = modelId.trim()
+                require(value.isNotBlank() && value.length <= 300 && !value.any { it.isWhitespace() }) {
+                    "Выбери модель из полученного списка HF"
+                }
+                val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
+                val models = config.optJSONArray("models") ?: JSONArray()
+                val hf = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
+                    .firstOrNull { it.optString("id") == "hf" }
+                    ?: throw IllegalStateException("Маршрут Hugging Face не найден")
+                hf.put("model", value).put("enabled", true)
+                SecretStore.saveRuntimeConfig(filesDir, config.toString(2))
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "HF model save failed") }
+        }
+
+        @JavascriptInterface
+        fun fetchHFModels(): String {
+            return try {
+                val runtime = JSONObject(SecretStore.readRuntimeConfig(filesDir))
+                val models = runtime.optJSONArray("models") ?: JSONArray()
+                val hf = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
+                    .firstOrNull { it.optString("id") == "hf" }
+                    ?: throw IllegalStateException("Маршрут Hugging Face не найден")
+                val token = hf.optString("api_key")
+                require(token.isNotBlank()) { "Сначала сохрани HF token" }
+                routeExecutor.execute {
+                    var connection: java.net.HttpURLConnection? = null
+                    val result = try {
+                        connection = (java.net.URL("https://router.huggingface.co/v1/models")
+                            .openConnection() as java.net.HttpURLConnection)
+                        connection.requestMethod = "GET"
+                        connection.setRequestProperty("Authorization", "Bearer " + token)
+                        connection.setRequestProperty("Accept", "application/json")
+                        connection.connectTimeout = 15000
+                        connection.readTimeout = 20000
+                        val code = connection.responseCode
+                        if (code !in 200..299) JSONObject().put("ok", false).put("error", "HF HTTP " + code)
+                        else {
+                            val body = connection.inputStream.bufferedReader().use { it.readText() }
+                            val data = JSONObject(body).optJSONArray("data") ?: JSONArray()
+                            val ids = JSONArray()
+                            for (index in 0 until data.length()) {
+                                val id = data.optJSONObject(index)?.optString("id").orEmpty()
+                                if (id.isNotBlank()) ids.put(id)
+                            }
+                            JSONObject().put("ok", true).put("models", ids)
+                        }
+                    } catch (error: Exception) {
+                        JSONObject().put("ok", false).put("error", error.message ?: "HF model list failed")
+                    } finally { connection?.disconnect() }
+                    mainHandler.post {
+                        if (::web.isInitialized) web.evaluateJavascript(
+                            "window.onHFModelsResult && window.onHFModelsResult(" + JSONObject.quote(result.toString()) + ")", null
+                        )
+                    }
+                }
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "HF model discovery failed") }
         }
 
         @JavascriptInterface
