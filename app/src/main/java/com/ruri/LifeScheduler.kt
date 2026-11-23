@@ -142,7 +142,7 @@ class RuriLifeWorker(
 
             // Every failed turn remains queued; a provider error never acknowledges the message.
             if (commanderWake || OfflineQueue.hasPending(root) || CommanderReplyQueue.hasPending(root)) {
-                CommanderReplyQueue.recoverLatestUnanswered(root)
+                CommanderReplyQueue.recoverUnanswered(root)
                 while (true) {
                     val queued = CommanderReplyQueue.nextDue(root)
                     if (queued == null) {
