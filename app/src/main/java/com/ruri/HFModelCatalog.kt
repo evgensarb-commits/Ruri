@@ -18,7 +18,8 @@ internal object HFModelCatalog {
             val declaredTask = model.optString("task").ifBlank { model.optString("pipeline_tag") }
             if (declaredTask.isNotBlank() &&
                 !declaredTask.contains("text-generation", true) &&
-                !declaredTask.contains("chat-completion", true)) continue
+                !declaredTask.contains("chat-completion", true) &&
+                !declaredTask.contains("conversational", true)) continue
             val providers = model.optJSONArray("providers") ?: model.optJSONArray("inference_providers") ?: continue
             for (p in 0 until providers.length()) {
                 val provider = providers.optJSONObject(p) ?: continue
@@ -33,7 +34,7 @@ internal object HFModelCatalog {
                 if (providerId.isBlank() || !providerId.matches(Regex("[a-z0-9_-]{1,80}"))) continue
                 val context = provider.optInt("context_length", model.optInt("context_length", 0)).coerceAtLeast(0)
                 val throughput = number(provider, "throughput")
-                val latency = number(provider, "latency")
+                val latency = number(provider, "first_token_latency_ms") ?: number(provider, "latency")
                 val roleplayBoost = when {
                     modelId.contains("cydonia", true) || modelId.contains("rocinante", true) -> 100.0
                     modelId.contains("unslopnemo", true) || modelId.contains("magnum", true) -> 90.0
