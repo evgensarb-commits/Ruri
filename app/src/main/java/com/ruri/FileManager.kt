@@ -299,8 +299,8 @@ object FileManager {
         }
     }
 
-    fun readLastEvents(root: File, filter: String = "all", limit: Int = 100): JSONArray {
-        val bounded = limit.coerceIn(1, 100)
+    fun readLastEvents(root: File, filter: String = "all", limit: Int = 1000): JSONArray {
+        val bounded = limit.coerceIn(1, 1000)
         val allowed = setOf("message", "tool_call", "tool_result", "wake", "phone_notification",
             "shelf_file_ingested", "shelf_image_described", "shelf_image_unreadable", "recall_deep_used", "facts_extracted",
             "nsfw_refusal", "error")
