@@ -8,13 +8,27 @@ internal object HFModelCatalog {
     private val roleplay = Regex("(?i)(cydonia|rocinante|unslopnemo|magnum|roleplay|mythomax|stheno|noromaid|eva[-_ ]?llama|tiefighter|lumimaid|rpmax|anubis|dark[-_ ]?idol|fimbulvetr|sao10k|midnight[-_ ]?miqu|lewd|abliterat)")
     private val forbiddenLegacy = Regex("(?i)dolphin")
 
-    fun parse(raw: String): JSONArray {
+    data class CatalogResult(
+        val models: JSONArray,
+        val modelsSeen: Int,
+        val roleplayMatches: Int,
+        val liveProviders: Int,
+        val freeProviders: Int
+    )
+
+    fun parse(raw: String): JSONArray = parseDetailed(raw).models
+
+    fun parseDetailed(raw: String): CatalogResult {
         val data = JSONObject(raw).optJSONArray("data") ?: JSONArray()
         val candidates = mutableListOf<JSONObject>()
+        var roleplayMatches = 0
+        var liveProviders = 0
+        var freeProviders = 0
         for (i in 0 until data.length()) {
             val model = data.optJSONObject(i) ?: continue
             val modelId = model.optString("id").trim()
             if (modelId.isBlank() || !roleplay.containsMatchIn(modelId) || forbiddenLegacy.containsMatchIn(modelId)) continue
+            roleplayMatches++
             val declaredTask = model.optString("task").ifBlank { model.optString("pipeline_tag") }
             if (declaredTask.isNotBlank() &&
                 !declaredTask.contains("text-generation", true) &&
@@ -24,11 +38,16 @@ internal object HFModelCatalog {
             for (p in 0 until providers.length()) {
                 val provider = providers.optJSONObject(p) ?: continue
                 if (!provider.optString("status").equals("live", true)) continue
-                if (provider.has("is_free") && !provider.optBoolean("is_free")) continue
-                val pricing = provider.optJSONObject("pricing") ?: continue
-                val input = price(pricing, "input", "prompt")
-                val output = price(pricing, "output", "completion")
-                if (input == null || output == null || input != 0.0 || output != 0.0) continue
+                liveProviders++
+                val pricing = provider.optJSONObject("pricing")
+                val input = pricing?.let { price(it, "input", "prompt") }
+                val output = pricing?.let { price(it, "output", "completion") }
+                // HF may mark a temporary free promotion with is_free=true while
+                // retaining its regular price or omitting price metadata entirely.
+                val freePromo = provider.optBoolean("is_free", false)
+                val zeroPriced = input == 0.0 && output == 0.0
+                if (!freePromo && !zeroPriced) continue
+                freeProviders++
                 val providerId = provider.optString("provider").ifBlank { provider.optString("name") }
                     .trim().lowercase()
                 if (providerId.isBlank() || !providerId.matches(Regex("[a-z0-9_-]{1,80}"))) continue
@@ -47,8 +66,9 @@ internal object HFModelCatalog {
                     .put("provider", providerId)
                     .put("name", model.optString("name").ifBlank { modelId })
                     .put("free", true)
-                    .put("price_input", input)
-                    .put("price_output", output)
+                    .put("is_free_promo", freePromo)
+                    .put("price_input", input ?: JSONObject.NULL)
+                    .put("price_output", output ?: JSONObject.NULL)
                     .put("context_length", context)
                     .put("throughput", throughput ?: JSONObject.NULL)
                     .put("latency", latency ?: JSONObject.NULL)
@@ -61,7 +81,8 @@ internal object HFModelCatalog {
                 .thenBy { it.optString("model") }
                 .thenBy { it.optString("provider") }
         )
-        return JSONArray().also { out -> sorted.take(30).forEach(out::put) }
+        val result = JSONArray().also { out -> sorted.take(30).forEach(out::put) }
+        return CatalogResult(result, data.length(), roleplayMatches, liveProviders, freeProviders)
     }
 
     private fun price(pricing: JSONObject, primary: String, alternate: String): Double? {
