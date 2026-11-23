@@ -261,6 +261,20 @@ object SecretStore {
         }
     }
 
+    /** Removes the obsolete credential for a retired model route from encrypted storage. */
+    fun removeModelKey(root: File, routeId: String) = synchronized(lock) {
+        if (routeId.isBlank()) return@synchronized
+        try {
+            val secrets = readSecrets(root)
+            if (secrets.has(routeId)) {
+                secrets.remove(routeId)
+                writeSecrets(root, secrets)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Retired route credential could not be removed; encrypted secrets were preserved", e)
+        }
+    }
+
     private fun modelId(model: JSONObject, index: Int): String {
         val explicit = model.optString("id").trim()
         if (explicit.isNotEmpty()) return explicit
