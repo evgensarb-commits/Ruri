@@ -17,6 +17,10 @@ internal object HFModelCatalog {
         val freeProviders: Int
     )
 
+    fun isCandidateId(modelId: String, mode: String = "rp"): Boolean =
+        !forbiddenLegacy.containsMatchIn(modelId) &&
+            (if (mode.equals("nsfw", true)) nsfw.containsMatchIn(modelId) else roleplay.containsMatchIn(modelId))
+
     fun parse(raw: String): JSONArray = parseDetailed(raw).models
 
     fun parseDetailed(raw: String, mode: String = "rp"): CatalogResult {
@@ -28,8 +32,7 @@ internal object HFModelCatalog {
         for (i in 0 until data.length()) {
             val model = data.optJSONObject(i) ?: continue
             val modelId = model.optString("id").trim()
-            val isCandidate = if (mode.equals("nsfw", true)) nsfw.containsMatchIn(modelId) else roleplay.containsMatchIn(modelId)
-            if (modelId.isBlank() || !isCandidate || forbiddenLegacy.containsMatchIn(modelId)) continue
+            if (modelId.isBlank() || !isCandidateId(modelId, mode)) continue
             roleplayMatches++
             val declaredTask = model.optString("task").ifBlank { model.optString("pipeline_tag") }
             if (declaredTask.isNotBlank() &&
