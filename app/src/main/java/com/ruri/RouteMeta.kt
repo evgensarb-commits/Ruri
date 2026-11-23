@@ -226,12 +226,19 @@ object RouteMeta {
         if (it.optString("day_key") != today) {
             it.put("day_key", today)
             it.put("day_count", 0)
+            it.put("successes_today", 0)
+            it.put("failures_today", 0)
+            it.put("rate_limits_today", 0)
+            it.put("network_errors_today", 0)
+            it.put("timeouts_today", 0)
         }
         it.put("day_count", it.optInt("day_count", 0) + 1)
+        it.put("lifetime_requests", it.optLong("lifetime_requests", 0L) + 1L)
         it.put("last_attempt", System.currentTimeMillis())
     }
 
     fun recordSuccess(root: File, id: String, task: Task? = null) = update(root, id) {
+        it.put("successes_today", it.optInt("successes_today", 0) + 1)
         it.put("fail_streak", 0)
         val streak = it.optInt("success_streak", 0) + 1
         it.put("success_streak", streak)
@@ -240,6 +247,13 @@ object RouteMeta {
     }
 
     fun recordFailure(root: File, id: String, kind: String, task: Task? = null) = update(root, id) {
+        it.put("failures_today", it.optInt("failures_today", 0) + 1)
+        it.put("last_failure_kind", kind.take(40))
+        when (kind) {
+            "rate_limit" -> it.put("rate_limits_today", it.optInt("rate_limits_today", 0) + 1)
+            "network", "region" -> it.put("network_errors_today", it.optInt("network_errors_today", 0) + 1)
+            "timeout" -> it.put("timeouts_today", it.optInt("timeouts_today", 0) + 1)
+        }
         it.put("success_streak", 0)
         updateTaskScore(it, task, false)
         when (kind) {
