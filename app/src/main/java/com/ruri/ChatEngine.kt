@@ -476,7 +476,9 @@ object ChatEngine {
                 if (e is UnknownHostException) diagnostic.put("dns_status", "failed")
                 if (e is SocketTimeoutException) diagnostic.put("timeout_stage", stage)
                 val failureKind = RouteSelector.classify(null, e)
-                runCatching { RouteMeta.recordFailure(root, routeId, failureKind, task) }
+                if (e !is ModelRequestFailure) {
+                    runCatching { RouteMeta.recordFailure(root, routeId, failureKind, task) }
+                }
                 if (!RouteRecovery.isNetworkFailure(failureKind)) allFailuresNetwork = false
                 lastError = RouteRecovery.describeException(model.optString("name", model.optString("id")), stage, e, failureKind)
                 diagnostic.put("failure_message", lastError)
