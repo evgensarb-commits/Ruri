@@ -339,7 +339,7 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun readMemoryLayer(layer: String): String = when (layer) {
-            "L0" -> JSONArray(FileManager.readLastLines(filesDir, "memory/L0_raw.jsonl", maxLines = 100).map {
+            "L0" -> JSONArray(FileManager.readLastLines(filesDir, "memory/L0_raw.jsonl", maxLines = 1000).map {
                 runCatching { JSONObject(it) }.getOrNull() ?: JSONObject()
             }).toString()
             "L1" -> FileManager.read(filesDir, "memory/L1_facts.json")
