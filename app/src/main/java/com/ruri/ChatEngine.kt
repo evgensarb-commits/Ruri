@@ -344,7 +344,7 @@ object ChatEngine {
                 val emotion = if (emotionDelta != null) EmotionEngine.applyDelta(root, emotionDelta, "chat") else null
                 var finalReply = cleanedReply
                 var guard = 0
-                while (guard < 2) {
+                while (guard < 64) {
                     val (clean, diaryTexts, toolActions) = ToolLoop.stripActions(finalReply)
                     diaryTexts.forEach { routeChatDiaryAction(root, it, emotion) }
                     if (toolActions.isEmpty()) { finalReply = clean; break }
@@ -353,7 +353,7 @@ object ChatEngine {
                         val toolResult = executeTool(root, name, action)
                         FileManager.appendEvent(root, SecretRedactor.redactEvent(JSONObject().put("type", "tool_call").put("action", name).put("params", action)))
                         FileManager.appendEvent(root, SecretRedactor.redactEvent(JSONObject().put("type", "tool_result").put("action", name).put("ok", toolResult.first).put("text", toolResult.second.take(4000))))
-                        messages.put(JSONObject().put("role", "user").put("content", "[ИНСТРУМЕНТ $name]: ${toolResult.second.take(4000)}"))
+                        messages.put(JSONObject().put("role", "user").put("content", "[ИНСТРУМЕНТ $name]: ${toolResult.second.take(if (name == "read_shelf") 7600 else 4000)}"))
                     }
                     finalReply = requestToolFollowup(model, messages, root, routeId, task) ?: clean
                     guard++
@@ -481,7 +481,7 @@ object ChatEngine {
             "search", "recall" -> setOf("action", "query")
             "read_url" -> setOf("action", "url")
             "list_shelf" -> setOf("action")
-            "read_shelf" -> setOf("action", "name")
+            "read_shelf" -> setOf("action", "name", "offset")
             "remember_fact" -> setOf("action", "text")
             "self_check" -> setOf("action")
             else -> return null
@@ -490,7 +490,10 @@ object ChatEngine {
         while (keys.hasNext()) if (keys.next() !in allowed) return null
         when (name) {
             "search", "recall" -> if (action.optString("query").isBlank() || action.optString("query").length > 300) return null
-            "read_shelf" -> if (ShelfWatcher.safeName(action.optString("name")) == null) return null
+            "read_shelf" -> {
+                if (ShelfWatcher.safeName(action.optString("name")) == null) return null
+                if (action.has("offset") && action.optInt("offset", -1) < 0) return null
+            }
             "read_url" -> {
                 val url = action.optString("url").trim()
                 if (url.length > 2048 || !url.matches(Regex("(?i)^https?://.+"))) return null
@@ -559,11 +562,11 @@ object ChatEngine {
                     val (ok, text) = UrlReader.read(root, params.optString("url"))
                     ok to SecretRedactor.redactText(text)
                 }
-                "list_shelf" -> true to SecretRedactor.redactText(FileManager.list(root, "shelf"))
+                "list_shelf" -> true to SecretRedactor.redactText(shelfListing(root))
                 "read_shelf" -> {
                     val safe = ShelfWatcher.safeName(params.optString("name"))
                         ?: return false to "Недопустимое имя файла"
-                    true to SecretRedactor.redactText(shelfText(root, safe).take(12000))
+                    true to SecretRedactor.redactText(shelfText(root, safe, params.optInt("offset", 0)))
                 }
                 "recall" -> true to SecretRedactor.redactText(MemoryRetriever.recall(root, params.optString("query"), 5))
                 "remember_fact" -> true to SecretRedactor.redactText(rememberFact(root, params.optString("text")))
@@ -575,17 +578,52 @@ object ChatEngine {
         }
     }
 
-    internal fun shelfText(root: File, name: String): String {
+    internal fun shelfText(root: File, name: String, offset: Int = 0): String {
         val safe = ShelfWatcher.safeName(name) ?: return "Недопустимое имя файла"
         val file = File(root, "shelf/" + safe)
         if (!file.isFile) return "Файл не найден"
         val bytes = runCatching { file.readBytes() }.getOrElse { return "Файл недоступен" }
-        if (Vision.mimeOf(bytes) != null) {
-            return FileManager.read(root, "shelf/.desc/" + safe + ".txt")
-                .takeIf { it.isNotBlank() }?.take(4000)
-                ?: "[изображение без описания: vision недоступен]"
+        val mime = Vision.mimeOf(bytes)
+        val lower = safe.lowercase(java.util.Locale.ROOT)
+        val extracted = when {
+            mime != null -> FileManager.read(root, "shelf/.desc/" + safe + ".txt")
+                .takeIf { it.isNotBlank() } ?: return "[изображение без описания: vision недоступен]"
+            lower.endsWith(".docx") || lower.endsWith(".odt") -> ShelfWatcher.extractOffice(bytes, lower)
+                .ifBlank { return "[не удалось извлечь текст из офисного документа]" }
+            else -> ShelfWatcher.decodeText(bytes)
         }
-        return FileManager.read(root, "shelf/" + safe).take(12000)
+        val text = SecretRedactor.redactText(extracted)
+        if (offset > text.length) return "Смещение $offset за пределами текста (0 символов)"
+        if (offset == text.length) return "Документ прочитан полностью: $offset/0 символов."
+        val end = minOf(text.length, offset + 7000)
+        val part = text.substring(offset, end)
+        val partNumber = offset / 7000 + 1
+        val totalParts = (text.length + 6999) / 7000
+        return buildString {
+            append("Файл: ").append(safe).append("\n")
+            append("Часть ").append(partNumber).append(" из ").append(totalParts)
+                .append("; символы ").append(offset).append("–").append(end)
+                .append(" из ").append(text.length).append(".\n")
+            append(part)
+            if (end < text.length) append("\n[ПРОДОЛЖЕНИЕ ОБЯЗАТЕЛЬНО: вызови read_shelf с тем же name и offset=")
+                .append(end).append("; не делай выводов о документе до последней части.]")
+            else append("\n[КОНЕЦ ФАЙЛА: прочитан весь извлечённый текст.]")
+        }
+    }
+
+    private fun shelfListing(root: File): String {
+        val files = File(root, "shelf").listFiles()?.filter { it.isFile }?.sortedBy { it.name.lowercase() }.orEmpty()
+        if (files.isEmpty()) return "Полка пуста."
+        return files.joinToString("\n") { file ->
+            val lower = file.name.lowercase()
+            val kind = when {
+                lower.endsWith(".docx") || lower.endsWith(".odt") -> "office"
+                lower.endsWith(".txt") || lower.endsWith(".md") || lower.endsWith(".csv") -> "text"
+                Vision.mimeOf(runCatching { file.readBytes() }.getOrDefault(byteArrayOf())) != null -> "image"
+                else -> "file"
+            }
+            "${file.name} · ${file.length()} байт · $kind"
+        }
     }
 
     private fun rememberFact(root: File, rawText: String): String {
