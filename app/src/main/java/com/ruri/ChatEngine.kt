@@ -406,7 +406,8 @@ object ChatEngine {
                     ToolLoop.unwrapDiaryReply(root, initialReply, messages, meta) { nextMessages ->
                         requestToolFollowup(model, nextMessages, root, routeId, task)
                     }
-                val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(rawReply)
+                val (replyWithoutDecision, _) = EmotionEngine.parseInitiativeDecision(rawReply)
+                val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(replyWithoutDecision)
                 val emotion = if (emotionDelta != null) EmotionEngine.applyDelta(root, emotionDelta, "chat") else null
                 var finalReply = cleanedReply
                 var guard = 0
