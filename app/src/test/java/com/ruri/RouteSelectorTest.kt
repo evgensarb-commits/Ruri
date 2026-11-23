@@ -74,7 +74,7 @@ class RouteSelectorTest {
 }
 
 class OnlyTwoRoutesTest {
-    @Test fun migrationKeepsOnlyMeroMeroAndMiniMaxAndPrunesOldMetadata() {
+    @Test fun migrationKeepsOnlyMeroMeroAndDolphinAndPrunesOldMetadata() {
         val root = Files.createTempDirectory("ruri-only-two-routes").toFile()
         try {
             FileManager.init(root)
@@ -108,16 +108,18 @@ class OnlyTwoRoutesTest {
             val models = migrated.getJSONArray("models")
             assertEquals(2, models.length())
             assertTrue(models.getJSONObject(0).getString("model").contains("meromero"))
-            assertEquals("minimax-m3.1-flash:free", models.getJSONObject(1).getString("model"))
-            assertEquals(2, models.getJSONObject(0).getInt("priority"))
+            assertEquals("cognitivecomputations/dolphin3.0-mistral-24b:free", models.getJSONObject(1).getString("model"))
+            assertEquals(1, models.getJSONObject(0).getInt("priority"))
             assertTrue(models.getJSONObject(0).getBoolean("nsfw"))
             assertTrue(models.getJSONObject(0).getBoolean("vision"))
-            assertEquals(1, models.getJSONObject(1).getInt("priority"))
-            assertFalse(models.getJSONObject(1).getBoolean("nsfw"))
+            assertEquals(2, models.getJSONObject(1).getInt("priority"))
+            assertTrue(models.getJSONObject(1).getBoolean("nsfw"))
             assertFalse(models.getJSONObject(1).getBoolean("vision"))
+            assertEquals("openrouter-dolphin", models.getJSONObject(1).getString("id"))
+            assertEquals(50, models.getJSONObject(1).getInt("rpd"))
             assertTrue(migrated.getBoolean("nsfw_override"))
-            assertEquals("routeway-minimax", migrated.getString("selected_route_id"))
-            assertEquals(1, migrated.getInt("current"))
+            assertEquals("routeway", migrated.getString("selected_route_id"))
+            assertEquals(0, migrated.getInt("current"))
             val metadata = RouteMeta.load(root)
             assertTrue(metadata.has("routeway"))
             assertFalse(metadata.has("requesty"))
@@ -129,28 +131,12 @@ class OnlyTwoRoutesTest {
     }
 }
 
-class MinimaxFreeIdTest {
-    @Test fun configUsesOnlyTheExplicitFreeMiniMaxModelId() {
-        val root = Files.createTempDirectory("ruri-minimax-free-id").toFile()
-        try {
-            FileManager.init(root)
-            val models = JSONObject(FileManager.read(root, "core/config.json")).getJSONArray("models")
-            val minimax = (0 until models.length()).map { models.getJSONObject(it) }
-                .first { it.optString("id") == "routeway-minimax" }
-            assertEquals("minimax-m3.1-flash:free", minimax.getString("model"))
-            assertFalse(minimax.getString("model") == "minimax-m3.1-flash")
-        } finally {
-            root.deleteRecursively()
-        }
-    }
-}
-
 class VisionGemmaOnlyTest {
-    @Test fun cachedVisionRouteNeverReturnsMiniMax() {
+    @Test fun cachedVisionRouteNeverReturnsDolphin() {
         val root = Files.createTempDirectory("ruri-cached-vision-meromero").toFile()
         try {
             FileManager.init(root)
-            RouteMeta.setCapability(root, "routeway-minimax", "vision", true)
+            RouteMeta.setCapability(root, "openrouter-dolphin", "vision", true)
             RouteMeta.setCapability(root, "routeway", "vision", false)
             val config = JSONObject(FileManager.read(root, "core/config.json"))
             val configured = config.getJSONArray("models")
@@ -169,8 +155,8 @@ class VisionGemmaOnlyTest {
             val models = JSONArray()
                 .put(JSONObject().put("id", "routeway").put("model", "gemma-4-26b-a4b-it-meromero:free")
                     .put("tokens_per_day", 400000).put("vision", true).put("free_tier", true).put("enabled", true).put("api_key", "set"))
-                .put(JSONObject().put("id", "routeway-minimax").put("model", "minimax-m3.1-flash:free")
-                    .put("free_tier", true).put("enabled", true).put("api_key", "set"))
+                .put(JSONObject().put("id", "openrouter-dolphin").put("model", "cognitivecomputations/dolphin3.0-mistral-24b:free")
+                    .put("free_tier", true).put("enabled", true).put("api_key", "set").put("nsfw", true).put("vision", false))
             val order = RouteSelector.orderedIndices(root, models, current = 1, task = Task.VISION, online = true, vpn = false)
             assertEquals(listOf(0), order)
         } finally {
@@ -188,8 +174,8 @@ class QuotaOrderTest {
             val models = JSONArray()
                 .put(JSONObject().put("id", "routeway").put("model", "gemma-4-26b-a4b-it-meromero:free")
                     .put("tokens_per_day", 400000).put("free_tier", true).put("enabled", true).put("api_key", "set"))
-                .put(JSONObject().put("id", "routeway-minimax").put("model", "minimax-m3.1-flash:free")
-                    .put("free_tier", true).put("enabled", true).put("api_key", "set"))
+                .put(JSONObject().put("id", "openrouter-dolphin").put("model", "cognitivecomputations/dolphin3.0-mistral-24b:free")
+                    .put("free_tier", true).put("enabled", true).put("api_key", "set").put("priority", 2).put("nsfw", true).put("vision", false))
             val order = RouteSelector.orderedIndices(root, models, current = 0, task = Task.CHAT, online = true, vpn = false)
             assertEquals(listOf(0, 1), order)
         } finally {
