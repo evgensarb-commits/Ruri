@@ -134,7 +134,6 @@ class OnlyNsfwRoutesTest {
             assertEquals("nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", models.getJSONObject(1).getString("model"))
             assertTrue(models.getJSONObject(1).getBoolean("enabled"))
             assertTrue(models.getJSONObject(1).getBoolean("api_key_optional"))
-            assertTrue(models.getJSONObject(1).getBoolean("enabled"))
             assertEquals(1, models.getJSONObject(0).getInt("priority"))
             assertTrue(models.getJSONObject(0).getBoolean("nsfw"))
             assertTrue(models.getJSONObject(0).getBoolean("vision"))
