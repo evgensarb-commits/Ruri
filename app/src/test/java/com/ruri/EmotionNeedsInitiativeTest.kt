@@ -105,7 +105,7 @@ class DriveCheckIntervalTest {
     @Test fun driveCheckWaitsForConfiguredInterval() {
         assertFalse(LifeScheduler.driveCheckDue(2000000L, 1000000L, 45.0))
         assertTrue(LifeScheduler.driveCheckDue(3700000L, 1000000L, 45.0))
-        assertTrue(LifeScheduler.driveCheckDue(2000000L, 1000000L, 0.0).not())
+        assertFalse(LifeScheduler.driveCheckDue(2000000L, 1000000L, 0.0))
     }
 }
 
