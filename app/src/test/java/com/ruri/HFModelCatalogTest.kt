@@ -51,7 +51,7 @@ class HFModelCatalogTest {
             .put(JSONObject().put("id", "C/Rocinante-12B").put("providers", org.json.JSONArray()
                 .put(JSONObject().put("provider", "paid").put("status", "live")
                     .put("is_free", false)
-                    .put("pricing", JSONObject().put("input", 0.2).put("output", 0.4)))))
+                    .put("pricing", JSONObject().put("input", 0.2).put("output", 0.4))))))
         val result = HFModelCatalog.parse(raw.toString())
         assertEquals(2, result.length())
         assertTrue((0 until result.length()).all { result.getJSONObject(it).getBoolean("free") })
