@@ -123,10 +123,7 @@ object FactExtractor {
             val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
             runCatching { RouteMeta.recordAttempt(root, routeId) }
             val response = request(model, prompt, root, routeId)
-            if (response.isNullOrBlank()) {
-                runCatching { RouteMeta.recordFailure(root, routeId, "other", Task.REASON) }
-                continue
-            }
+            if (response.isNullOrBlank()) continue
             parsed = parseJson(response)
             if (parsed != null) {
                 runCatching { RouteMeta.recordSuccess(root, routeId, Task.REASON) }
@@ -357,12 +354,16 @@ object FactExtractor {
             val status = connection.responseCode
             RouteMeta.recordHttpStatus(root, routeId, status)
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
-            val raw = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: return null
-            if (status !in 200..299) return null
+            val raw = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (status !in 200..299) {
+                RouteMeta.recordFailure(root, routeId, RouteSelector.classify(status, null, raw), Task.REASON)
+                return null
+            }
             JSONObject(raw).optJSONArray("choices")
                 ?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
                 ?.takeIf { it.isNotBlank() }
         } catch (e: Exception) {
+            RouteMeta.recordFailure(root, routeId, RouteSelector.classify(null, e), Task.REASON)
             Log.w("Ruri", "Fact extraction provider request failed", e)
             null
         } finally {
