@@ -475,8 +475,12 @@ object ChatEngine {
                 diagnostic.put("error_type", e.javaClass.simpleName)
                 if (e is UnknownHostException) diagnostic.put("dns_status", "failed")
                 if (e is SocketTimeoutException) diagnostic.put("timeout_stage", stage)
-                val failureKind = RouteSelector.classify(null, e)
-                if (e !is ModelRequestFailure) {
+                val failureKind = (e as? ModelRequestFailure)?.failureKind
+                    ?: RouteSelector.classify(null, e)
+                if (e is ModelRequestFailure) {
+                    retryAfterMs = maxOf(retryAfterMs, e.retryAfterMs)
+                    lastFailureKind = e.failureKind
+                } else {
                     runCatching { RouteMeta.recordFailure(root, routeId, failureKind, task) }
                 }
                 if (!RouteRecovery.isNetworkFailure(failureKind)) allFailuresNetwork = false
