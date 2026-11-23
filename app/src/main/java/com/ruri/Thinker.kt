@@ -89,13 +89,6 @@ object Thinker {
             .put("battery", BatteryLevel.get(ctx))
             .put("hours_since_commander", hoursQuiet))
 
-        if (!NetState.online) {
-            // Local state and memory maintenance already ran in RuriLifeWorker.
-            state.put("last_thought", now)
-            persistStatePreservingTurnInFlight(root, state, baselineState)
-            return
-        }
-
         if (originalReason == "online_after_offline" && OfflineQueue.hasPending(root)) {
             val latestMessages = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 300)
                 .asReversed().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
