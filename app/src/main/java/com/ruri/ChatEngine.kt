@@ -156,7 +156,8 @@ object ChatEngine {
         val commanderText = history.last().optString("content")
         EmotionEngine.onCommanderMessage(root, commanderText, history.last().optString("_ruri_event_id"))
         val task = RouteSelector.detectTask(commanderText)
-        fun selectOrder(online: Boolean): List<Int> = RouteSelector.orderedIndices(root, models, current, task, online, NetState.vpn)
+        val adult = RouteSelector.isAdultTopic(commanderText) || RouteSelector.nsfwWindow(root)
+        fun selectOrder(online: Boolean): List<Int> = RouteSelector.orderedIndices(root, models, current, task, online, NetState.vpn, adult)
         var order = selectOrder(NetState.online || assumeReachable)
         if (order.isEmpty()) {
             OfflineQueue.markPending(root)
