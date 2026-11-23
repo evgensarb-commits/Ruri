@@ -19,7 +19,7 @@ object BackupPolicy {
     const val STATE_MS = 15L * 60L * 1000L
     const val KEEP = 5
     const val META = "backup/rolling_meta.json"
-    private const val MAX_ROLLING_BYTES = 32L * 1024L * 1024L
+    private const val MAX_ROLLING_BYTES = 16L * 1024L * 1024L
     private const val MIN_FORCED_INTERVAL_MS = 10L * 60L * 1000L
 
     private fun meta(root: File): JSONObject = try {
@@ -101,7 +101,7 @@ object BackupPolicy {
                 if (!source.isFile) continue
                 totalBytes += source.length()
                 if (totalBytes > MAX_ROLLING_BYTES) {
-                    android.util.Log.w("RuriBackup", "Rolling snapshot skipped: data exceeds 32 MiB")
+                    android.util.Log.w("RuriBackup", "Rolling snapshot skipped: data exceeds 16 MiB")
                     return
                 }
                 val content = FileManager.read(root, relative)
