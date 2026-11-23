@@ -178,9 +178,9 @@ object Thinker {
             config.put("current", successfulIndex)
             SecretStore.saveRuntimeConfig(root, config.toString(2))
         }
-        val (replyWithoutEmotion, emotionDelta) = EmotionEngine.parseAndStrip(reply)
+        val (replyWithoutDecision, decision) = EmotionEngine.parseInitiativeDecision(reply)
+        val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(replyWithoutDecision)
         val emotion = if (emotionDelta != null) EmotionEngine.applyDelta(root, emotionDelta, "thought") else null
-        val (cleanedReply, decision) = EmotionEngine.parseInitiativeDecision(replyWithoutEmotion)
         val (cleanThought, diaryTexts, _) = ToolLoop.stripActions(cleanedReply)
         val diaryText = cleanThought.ifBlank {
             diaryTexts.firstOrNull() ?: ToolLoop.diaryActionText(cleanedReply).orEmpty()
