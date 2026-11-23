@@ -530,7 +530,7 @@ class MainActivity : AppCompatActivity() {
         fun saveHFModel(modelsJson: String): String {
             return try {
                 val requested = JSONArray(modelsJson)
-                require(requested.length() in 1..30) { "Нет проверенных бесплатных roleplay-моделей" }
+                require(requested.length() in 1..30) { "Нет проверенных бесплатных RP/NSFW-моделей" }
                 val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
                 val models = config.optJSONArray("models") ?: JSONArray()
                 val hf = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
@@ -618,7 +618,7 @@ class MainActivity : AppCompatActivity() {
                         // Enumerate every paginated model currently served by any HF Inference Provider.
                         // This is broader than /v1/models, which may expose only a small router subset.
                         val allHubModels = linkedMapOf<String, JSONObject>()
-                        var nextUrl: String? = "https://huggingface.co/api/models?inference_provider=all&pipeline_tag=text-generation&limit=100&sort=downloads"
+                        var nextUrl: String? = "https://huggingface.co/api/models?inference_provider=all&pipeline_tag=text-generation&limit=100&sort=downloads&expand=tags"
                         val visitedPages = HashSet<String>()
                         while (nextUrl != null && visitedPages.add(nextUrl)) {
                             val (code, body, link) = get(nextUrl)
@@ -655,6 +655,8 @@ class MainActivity : AppCompatActivity() {
                                         val (code, body, _) = get("https://router.huggingface.co/v1/models/" + safeId)
                                         if (code in 200..299) {
                                             val detail = JSONObject(body)
+                                            val hubMeta = allHubModels[id]
+                                            if (hubMeta != null && hubMeta.has("tags")) detail.put("tags", hubMeta.optJSONArray("tags") ?: JSONArray())
                                             val wrapped = JSONObject().put("data", JSONArray().put(detail))
                                             val parsed = HFModelCatalog.parseDetailed(wrapped.toString(), mode)
                                             liveAndFree.addAndGet(0, parsed.liveProviders)
