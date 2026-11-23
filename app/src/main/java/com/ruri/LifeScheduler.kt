@@ -95,10 +95,7 @@ class RuriLifeWorker(
             NetState.refresh(appContext)
             ShelfWatcher.scan(appContext)
             detectResearchTask(appContext)
-            try { LocalBackupManager.createIfDue(root) }
-            catch (backupError: Exception) { Log.e("Ruri", "Automatic local backup failed; life cycle will continue", backupError) }
             val pending = EventQueue.snapshot(root)
-            runResearchTasks(root, pending)
             val reason = if (pending.isEmpty()) {
                 "проверка_состояния"
             } else {
@@ -108,18 +105,6 @@ class RuriLifeWorker(
                     .joinToString(",")
                     .take(300)
             }
-
-            // Cheap reachability probes are rate-limited locally and never consume model quota.
-            if (NetState.online) {
-                val routeConfig = try { JSONObject(SecretStore.readRuntimeConfig(root)) } catch (_: Exception) { JSONObject() }
-                if (reason.contains("net_change")) {
-                    Probe.refreshReachability(
-                        root, routeConfig.optJSONArray("models") ?: org.json.JSONArray(),
-                        topOnly = false, force = true
-                    )
-                }
-                Probe.heartbeat(root, routeConfig)
-                    }
 
             // Update local state before replying; this path does not require a model request.
             LifeStateEngine.process(appContext, reason)
@@ -173,6 +158,21 @@ class RuriLifeWorker(
                     }
                 }
                 runCatching { OfflineQueue.clear(root) }
+            }
+
+            // Non-model maintenance follows the Commander queue so it cannot delay a reply.
+            runResearchTasks(root, pending)
+            try { LocalBackupManager.createIfDue(root) }
+            catch (backupError: Exception) { Log.e("Ruri", "Automatic local backup failed; life cycle will continue", backupError) }
+            if (NetState.online) {
+                val routeConfig = try { JSONObject(SecretStore.readRuntimeConfig(root)) } catch (_: Exception) { JSONObject() }
+                if (reason.contains("net_change")) {
+                    Probe.refreshReachability(
+                        root, routeConfig.optJSONArray("models") ?: org.json.JSONArray(),
+                        topOnly = false, force = true
+                    )
+                }
+                Probe.heartbeat(root, routeConfig)
             }
 
             // Commander replies have priority over optional memory/model maintenance.
