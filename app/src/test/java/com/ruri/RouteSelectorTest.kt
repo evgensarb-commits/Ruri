@@ -10,7 +10,7 @@ import org.junit.Test
 
 class RouteSelectorTest {
     @Test
-    fun keepsConfiguredPrimaryAndScoreRanksFallbacksWithoutPaidRoutes() {
+    fun manualPriorityDefinesFallbackOrderWithoutPaidRoutes() {
         val root = Files.createTempDirectory("ruri-route-selector").toFile()
         try {
             val models = JSONArray()
@@ -31,7 +31,7 @@ class RouteSelectorTest {
             val fallbackScores = RouteSelector.orderedIndices(
                 root, models, current = -1, task = Task.WARMTH, online = true, vpn = false
             )
-            assertEquals(listOf(1, 0), fallbackScores)
+            assertEquals(listOf(0, 1), fallbackScores)
             assertTrue(order.none { models.getJSONObject(it).optString("id") == "paid" })
         } finally {
             root.deleteRecursively()
@@ -146,7 +146,7 @@ class VisionGemmaOnlyTest {
         try {
             val models = JSONArray()
                 .put(JSONObject().put("id", "routeway").put("model", "gemma-4-26b-a4b-it-meromero:free")
-                    .put("tokens_per_day", 400000).put("free_tier", true).put("enabled", true).put("api_key", "set"))
+                    .put("tokens_per_day", 400000).put("vision", true).put("free_tier", true).put("enabled", true).put("api_key", "set"))
                 .put(JSONObject().put("id", "routeway-minimax").put("model", "minimax-m3.1-flash:free")
                     .put("free_tier", true).put("enabled", true).put("api_key", "set"))
             val order = RouteSelector.orderedIndices(root, models, current = 1, task = Task.VISION, online = true, vpn = false)
@@ -169,7 +169,7 @@ class QuotaOrderTest {
                 .put(JSONObject().put("id", "routeway-minimax").put("model", "minimax-m3.1-flash:free")
                     .put("free_tier", true).put("enabled", true).put("api_key", "set"))
             val order = RouteSelector.orderedIndices(root, models, current = 0, task = Task.CHAT, online = true, vpn = false)
-            assertEquals(listOf(1, 0), order)
+            assertEquals(listOf(0, 1), order)
         } finally {
             root.deleteRecursively()
         }
