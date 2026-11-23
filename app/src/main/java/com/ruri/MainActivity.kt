@@ -283,6 +283,7 @@ class MainActivity : AppCompatActivity() {
         fun completeChat(callbackId: String, commanderMessageId: String): String {
             if (!callbackId.matches(Regex("[A-Za-z0-9_-]{1,80}"))) return "ERROR: invalid callback"
             if (!commanderMessageId.matches(Regex("[A-Za-z0-9_-]{1,200}"))) return "ERROR: invalid message id"
+            if (!ChatEngine.isCommanderMessage(filesDir, commanderMessageId)) return "ERROR: Commander message not found in L0"
             chatExecutor.execute {
                 try {
                     CommanderReplyQueue.enqueue(filesDir, commanderMessageId)
