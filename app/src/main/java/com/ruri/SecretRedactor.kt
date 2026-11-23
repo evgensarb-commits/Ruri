@@ -20,9 +20,14 @@ object SecretRedactor {
         Regex("(?iu)(?<![\\p{L}\\p{N}_])(bearer)\\s+([A-Za-z0-9._~+/-]{8,})")
     )
     private val cardCandidate = Regex("(?<!\\d)(?:\\d[ -]?){13,19}(?!\\d)")
+    private val unlabelledTokenPatterns = listOf(
+        Regex("(?i)\\b(?:sk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|AIza[0-9A-Za-z_-]{35}|AKIA[0-9A-Z]{16})\\b"),
+        Regex("(?u)\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\b")
+    )
 
     fun redactText(input: String): String {
         var text = input
+        for (pattern in unlabelledTokenPatterns) text = pattern.replace(text, PLACEHOLDER)
         for (pattern in labelledSecrets) {
             text = pattern.replace(text) { match ->
                 match.groupValues[1] + ": " + PLACEHOLDER
