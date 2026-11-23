@@ -541,7 +541,7 @@ class MainActivity : AppCompatActivity() {
                     runCatching { Receipts.delivered(filesDir, messageId) }
                     runCatching { OfflineQueue.markPending(filesDir, messageId) }
                     runCatching {
-                        LifeScheduler.enqueueEvent(this@MainActivity, "commander_message:" + messageId)
+                        LifeScheduler.enqueueEvent(this@MainActivity, "commander_messages_pending")
                     }
                 }
                 "OK"
