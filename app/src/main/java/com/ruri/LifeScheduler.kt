@@ -125,8 +125,18 @@ class RuriLifeWorker(
             FactExtractor.extractIfDue(appContext)
             MemoryConsolidator.consolidateIfDue(appContext)
 
-            // A queued Commander turn is answered once connectivity returns. The transient
-            // offline notice is never appended to L0; ChatEngine records only a real reply.
+            // Rehydrate per-message outbox entries from durable EventQueue markers after a
+            // process death between the L0 append and the outbox write.
+            pending.forEach { item ->
+                val eventReason = item.optString("reason")
+                if (eventReason.startsWith("commander_message:")) {
+                    val messageId = eventReason.removePrefix("commander_message:").trim()
+                    if (messageId.isNotBlank()) runCatching { CommanderReplyQueue.enqueue(root, messageId) }
+                        .onFailure { Log.w("Ruri", "Could not rehydrate Commander reply queue item", it) }
+                }
+            }
+
+            // Every failed turn remains queued; a provider error never acknowledges the message.
             if (OfflineQueue.hasPending(root) || CommanderReplyQueue.hasPending(root)) {
                 CommanderReplyQueue.recoverLatestUnanswered(root)
                 while (true) {
