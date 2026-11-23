@@ -76,4 +76,24 @@ class HFModelCatalogTest {
         assertEquals(2, result.length())
         assertEquals("B/Rocinante-12B", result.getJSONObject(0).getString("model"))
     }
+    @Test
+    fun nsfwFallbackAcceptsNsfwNamedModelsOnlyWhenProviderIsExplicitlyFree() {
+        val raw = JSONObject().put("data", org.json.JSONArray()
+            .put(JSONObject().put("id", "community/Uncensored-Chat-8B")
+                .put("providers", org.json.JSONArray()
+                    .put(JSONObject().put("provider", "free-provider").put("status", "live")
+                        .put("is_free", true))))
+            .put(JSONObject().put("id", "community/Adult-Roleplay-7B")
+                .put("providers", org.json.JSONArray()
+                    .put(JSONObject().put("provider", "paid-provider").put("status", "live")
+                        .put("pricing", JSONObject().put("input", 0.1).put("output", 0.2)))))
+            .put(JSONObject().put("id", "community/General-Chat-7B")
+                .put("providers", org.json.JSONArray()
+                    .put(JSONObject().put("provider", "unknown-price").put("status", "live")))))
+        val result = HFModelCatalog.parseDetailed(raw.toString(), "nsfw")
+        assertEquals(1, result.models.length())
+        assertEquals("community/Uncensored-Chat-8B", result.models.getJSONObject(0).getString("model"))
+        assertEquals(1, result.freeProviders)
+    }
+
 }
