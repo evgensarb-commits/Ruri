@@ -120,11 +120,12 @@ object EmotionEngine {
         val st = readState(root); val dtH = (now - st.optLong("updated_at", now)) / HOUR; if (dtH <= 0) return
         val v = readValues(root); val out = JSONObject()
         for ((n, c) in channels(root)) {
+            val b = c.optDouble("base", 50.0)
             if (n == "fatigue" || n == "boredom" || n == "longing") {
                 out.put(n, v.optDouble(n, b))
                 continue
             }
-            val b = c.optDouble("base", 50.0); val h = c.optDouble("half_life_h", 6.0).coerceAtLeast(0.1)
+            val h = c.optDouble("half_life_h", 6.0).coerceAtLeast(0.1)
             out.put(n, clamp(b + (v.optDouble(n, b) - b) * exp(-LN2 * dtH / h), c)) }
         writeState(root, out, now, st.optLong("last_tick_at", now), st.optLong("last_cycle_at", 0L))
     }
@@ -145,7 +146,7 @@ object EmotionEngine {
                 delta.put("boredom", growth)
                 delta.put("longing", growth)
             }
-            val hour = java.util.Calendar.getInstance().get(java.util.TimeZone.getDefault()).get(java.util.Calendar.HOUR_OF_DAY)
+            val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
             if (hour in 20..23 || hour in 0..4) delta.put("desire", d.optDouble("desire_evening_per_h", 1.5) * dtH)
             if (readValues(root).optDouble("affection", 0.0) > 70.0)
                 delta.put("desire", delta.optDouble("desire", 0.0) + d.optDouble("desire_from_affection_per_h", 1.0) * dtH)
