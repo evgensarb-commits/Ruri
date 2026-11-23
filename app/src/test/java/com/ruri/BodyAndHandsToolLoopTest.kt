@@ -83,7 +83,7 @@ class ToolLoopExecutesAndReasksTest : BodyHandsTestBase() {
 }
 
 class ToolHopLimitTest : BodyHandsTestBase() {
-    @Test fun permitsThreeActionsAndOneFinalRequest() {
+    @Test fun permitsSequentialActionsForLongDocument() {
         val messages = JSONArray()
         var reasks = 0
         val repeated = """{"action":"list_shelf"}"""
@@ -91,8 +91,8 @@ class ToolHopLimitTest : BodyHandsTestBase() {
             reasks++
             repeated
         }
-        assertEquals(3, reasks)
-        assertEquals(3, events("tool_call").size)
+        assertEquals(64, reasks)
+        assertEquals(64, events("tool_call").size)
         assertEquals(repeated, reply)
         assertTrue((0 until messages.length()).any {
             messages.getJSONObject(it).optString("content").contains("Лимит инструментов исчерпан")
