@@ -59,4 +59,17 @@ class SecretRedactorTest {
         val input = "Проект RU-R1, живу в Лилле, встреча в 19:30, версия 1.5."
         assertTrue(SecretRedactor.redactText(input).contains(input))
     }
+    @Test
+    fun redactsCommonUnlabelledProviderTokensAndJwtValues() {
+        val openAi = "sk-proj-" + "A".repeat(32)
+        val github = "ghp_" + "b".repeat(36)
+        val jwt = "eyJ" + "a".repeat(20) + "." + "b".repeat(20) + "." + "c".repeat(20)
+        val input = "tokens $openAi $github $jwt"
+        val safe = SecretRedactor.redactText(input)
+        assertFalse(safe.contains(openAi))
+        assertFalse(safe.contains(github))
+        assertFalse(safe.contains(jwt))
+        assertTrue(safe.split(SecretRedactor.PLACEHOLDER).size >= 4)
+    }
+
 }
