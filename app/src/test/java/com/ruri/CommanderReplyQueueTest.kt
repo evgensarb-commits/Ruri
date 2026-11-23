@@ -28,7 +28,7 @@ class CommanderReplyQueueTest {
         val delay = CommanderReplyQueue.recordFailure(root, "msg-429", "rate_limit", 120_000L, 300L)
         assertEquals(120_000L, delay)
         assertNull(CommanderReplyQueue.nextDue(root, 60_000L))
-        assertEquals(60_300L, CommanderReplyQueue.nextDelayMs(root, 0L))
+        assertEquals(120_300L, CommanderReplyQueue.nextDelayMs(root, 0L))
         assertEquals("msg-429", CommanderReplyQueue.nextDue(root, 120_300L)?.optString("message_id"))
         assertTrue(CommanderReplyQueue.hasPending(root))
         CommanderReplyQueue.markAnswered(root, "msg-429", "reply-1", 130_000L)
