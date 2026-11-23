@@ -860,6 +860,7 @@ object FileManager {
                 kept.optJSONObject(index)?.optString("id") == selectedId
             }
             val selectedCurrent = selectedIndex ?: 0
+            val selectedRouteId = kept.optJSONObject(selectedCurrent)?.optString("id") ?: "routeway"
             config.put("models", kept)
                 .put("current", selectedCurrent)
                 .put("free_only", true)
@@ -869,7 +870,7 @@ object FileManager {
                 .remove("api_key")
             if (!config.has("nsfw_override")) config.put("nsfw_override", true)
             if (firstNsfwMigration || !config.has("route_mode")) config.put("route_mode", "AUTO")
-            config.put("selected_route_id", "routeway")
+            config.put("selected_route_id", selectedRouteId)
 
             val normalized = config.toString(2)
             if (normalized != raw) atomicWrite(file, normalized)
