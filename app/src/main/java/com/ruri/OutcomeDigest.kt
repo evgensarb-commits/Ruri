@@ -163,7 +163,13 @@ object OutcomeDigest {
                     val safe = ShelfWatcher.safeName(name) ?: return@any false
                     val file = File(root, "shelf/" + safe)
                     val image = file.isFile && file.length() in 1..(8L * 1024L * 1024L) &&
-                        runCatching { Vision.mimeOf(file.readBytes()) != null }.getOrDefault(false)
+                        runCatching {
+                            file.inputStream().use { input ->
+                                val header = ByteArray(16)
+                                val count = input.read(header)
+                                count > 0 && Vision.mimeOf(header.copyOf(count)) != null
+                            }
+                        }.getOrDefault(false)
                     val description = FileManager.read(root, "shelf/.desc/" + safe + ".txt")
                     image && description.isNotBlank()
                 }
