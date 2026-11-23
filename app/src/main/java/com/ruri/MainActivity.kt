@@ -510,6 +510,22 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
+        fun saveOpenRouterKey(key: String): String {
+            return try {
+                val value = key.trim()
+                require(value.isNotBlank()) { "Вставь OpenRouter API key" }
+                val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
+                val models = config.optJSONArray("models") ?: JSONArray()
+                val dolphin = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
+                    .firstOrNull { it.optString("id") == "openrouter-dolphin" }
+                    ?: throw IllegalStateException("Маршрут Dolphin не найден")
+                dolphin.put("api_key", value)
+                SecretStore.saveRuntimeConfig(filesDir, config.toString(2))
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "OpenRouter key save failed") }
+        }
+
+        @JavascriptInterface
         fun saveRouteOrder(json: String): String {
             return try {
                 val payload = JSONObject(json)
