@@ -67,16 +67,15 @@ object SecretStore {
 
     fun readSearchConfig(root: File): JSONObject = synchronized(lock) {
         val config = JSONObject(FileManager.read(root, SEARCH_CONFIG_FILE).ifBlank { "{}" })
-        config.put("serper_key", readSecrets(root).optString(SEARCH_SECRET_ID))
+        val key = runCatching { readSecrets(root).optString(SEARCH_SECRET_ID) }.getOrDefault("")
+        config.put("serper_key", key)
         config.remove("has_serper_key")
         config
     }
 
     fun readPublicSearchConfig(root: File): String = synchronized(lock) {
-        searchConfigForWeb(
-            FileManager.read(root, SEARCH_CONFIG_FILE),
-            readSecrets(root).optString(SEARCH_SECRET_ID).isNotBlank()
-        )
+        val hasKey = runCatching { readSecrets(root).optString(SEARCH_SECRET_ID).isNotBlank() }.getOrDefault(false)
+        searchConfigForWeb(FileManager.read(root, SEARCH_CONFIG_FILE), hasKey)
     }
 
     internal fun searchConfigForWeb(rawConfig: String, hasKey: Boolean): String {
