@@ -175,7 +175,12 @@ object LocalBackupManager {
         if (!allowedRoots.any { relative.startsWith(it) }) return
         if (relative == "core/secrets.enc.json" || relative.startsWith("backup/")) return
         require(file.length() <= MAX_ENTRY_BYTES) { "Backup file too large: $relative" }
-        output[relative] = file.readBytes()
+        val bytes = when (relative) {
+            "core/config.json" -> SecretStore.configForBackup(file.readText(Charsets.UTF_8)).toByteArray(Charsets.UTF_8)
+            "core/search.json" -> SecretStore.searchConfigForBackup(file.readText(Charsets.UTF_8)).toByteArray(Charsets.UTF_8)
+            else -> file.readBytes()
+        }
+        output[relative] = bytes
     }
 
     private fun readAndVerify(file: File): Verification {
@@ -219,7 +224,14 @@ object LocalBackupManager {
                 require(record.optLong("size", -1L) == bytes.size.toLong()) { "Size mismatch: $path" }
                 require(record.optString("sha256") == sha256(bytes)) { "Checksum mismatch: $path" }
             }
-            Verification(true, content)
+            val sanitized = content.mapValues { (path, bytes) ->
+                when (path) {
+                    "core/config.json" -> SecretStore.configForBackup(bytes.toString(Charsets.UTF_8)).toByteArray(Charsets.UTF_8)
+                    "core/search.json" -> SecretStore.searchConfigForBackup(bytes.toString(Charsets.UTF_8)).toByteArray(Charsets.UTF_8)
+                    else -> bytes
+                }
+            }
+            Verification(true, sanitized)
         } catch (e: Exception) {
             Verification(false, emptyMap(), e.message ?: "Backup verification failed")
         }
