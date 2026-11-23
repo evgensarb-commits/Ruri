@@ -121,11 +121,9 @@ class RuriLifeWorker(
                 Probe.heartbeat(root, routeConfig)
                     }
 
-            // Do useful local work first; it does not require an API key or network.
+            // Update local state before replying; this path does not require a model request.
             LifeStateEngine.process(appContext, reason)
             ShelfWatcher.ingestPending(appContext, pending)
-            FactExtractor.extractIfDue(appContext)
-            MemoryConsolidator.consolidateIfDue(appContext)
 
             // Rehydrate per-message outbox entries from durable EventQueue markers after a
             // process death between the L0 append and the outbox write.
@@ -169,6 +167,15 @@ class RuriLifeWorker(
                     }
                 }
                 runCatching { OfflineQueue.clear(root) }
+            }
+
+            // Commander replies have priority over optional memory/model maintenance.
+            // Do not let extraction or consolidation consume provider capacity while a reply waits.
+            if (!OfflineQueue.hasPending(root) && !CommanderReplyQueue.hasPending(root)) {
+                FactExtractor.extractIfDue(appContext)
+                if (!OfflineQueue.hasPending(root) && !CommanderReplyQueue.hasPending(root)) {
+                    MemoryConsolidator.consolidateIfDue(appContext)
+                }
             }
 
             try {
