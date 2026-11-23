@@ -29,6 +29,18 @@ object SecretStore {
 
     private val lock = Any()
 
+    /** Safe WebView view: model keys are replaced by presence flags and never cross the bridge. */
+    fun readPublicRuntimeConfig(root: File): String = synchronized(lock) {
+        val config = JSONObject(readRuntimeConfig(root))
+        val models = config.optJSONArray("models") ?: JSONArray()
+        for (index in 0 until models.length()) {
+            val model = models.optJSONObject(index) ?: continue
+            model.put("has_key", model.optString("api_key").isNotBlank())
+            model.put("api_key", "")
+        }
+        config.toString()
+    }
+
     fun readRuntimeConfig(root: File): String = synchronized(lock) {
         val config = JSONObject(FileManager.read(root, CONFIG_FILE).ifBlank { "{}" })
         if (stripLegacyNsfwFields(config)) {
@@ -65,8 +77,9 @@ object SecretStore {
                 if (suppliedKey.isNotBlank()) secrets.put(id, suppliedKey)
             }
 
-            // Never persist provider secrets in core/config.json.
+            // Never persist provider secrets or UI-only key metadata in core/config.json.
             model.put("api_key", "")
+            model.remove("has_key")
             model.remove("clear_api_key")
         }
 
