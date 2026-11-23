@@ -88,6 +88,25 @@ object RouteSelector {
         return order
     }
 
+    internal fun applyManualRouteOrder(config: JSONObject, payload: JSONObject) {
+        val models = config.optJSONArray("models") ?: JSONArray()
+        val routes = payload.optJSONArray("routes") ?: JSONArray()
+        for (i in 0 until routes.length()) {
+            val route = routes.optJSONObject(i) ?: continue
+            val id = route.optString("id")
+            if (id.isBlank()) continue
+            for (j in 0 until models.length()) {
+                val model = models.optJSONObject(j) ?: continue
+                if (model.optString("id") == id) {
+                    model.put("priority", route.optInt("priority", 99).coerceAtLeast(1))
+                    model.put("nsfw", route.optBoolean("nsfw", false))
+                    model.put("vision", route.optBoolean("vision", false))
+                }
+            }
+        }
+        config.put("nsfw_override", payload.optBoolean("nsfw_override", true))
+    }
+
     fun classify(code: Int?, error: Exception?, responseBody: String = ""): String {
         val body = responseBody.lowercase()
         return when {
