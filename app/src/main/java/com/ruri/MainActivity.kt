@@ -529,14 +529,16 @@ class MainActivity : AppCompatActivity() {
         fun saveHFModel(modelId: String): String {
             return try {
                 val value = modelId.trim()
-                require(value.isNotBlank() && value.length <= 300 && !value.any { it.isWhitespace() }) {
-                    "Выбери модель из полученного списка HF"
+                require(value.isNotBlank() && value.length <= 300 && !value.any { it.isWhitespace() } &&
+                    Regex("(?i)(cydonia|rocinante|unslopnemo|dolphin|magnum)").containsMatchIn(value)) {
+                    "В списке нет известной roleplay-кандидатуры; оставайся на MeroMero"
                 }
                 val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
                 val models = config.optJSONArray("models") ?: JSONArray()
                 val hf = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
                     .firstOrNull { it.optString("id") == "hf" }
                     ?: throw IllegalStateException("Маршрут Hugging Face не найден")
+                require(hf.optString("api_key").isNotBlank()) { "Сначала сохрани HF token" }
                 hf.put("model", value).put("enabled", true)
                 SecretStore.saveRuntimeConfig(filesDir, config.toString(2))
                 "OK"
