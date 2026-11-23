@@ -739,7 +739,6 @@ object ChatEngine {
         val safeMessages = providerMessagesWithFullMemory(messages)
             ?: throw ModelRequestFailure("Не удалось собрать полный контекст памяти для продолжения ответа", 0L, "context_error")
         var connection: HttpURLConnection? = null
-        val startedAt = System.currentTimeMillis()
         try {
             if (root != null && routeId.isNotBlank()) RouteMeta.recordAttempt(root, routeId)
             connection = (URL(base + "/chat/completions").openConnection() as HttpURLConnection).apply {
