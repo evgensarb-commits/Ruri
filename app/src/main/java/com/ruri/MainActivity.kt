@@ -599,32 +599,103 @@ class MainActivity : AppCompatActivity() {
                 val token = hf.optString("api_key")
                 require(token.isNotBlank()) { "Сначала сохрани HF token" }
                 routeExecutor.execute {
-                    var connection: java.net.HttpURLConnection? = null
                     val result = try {
-                        connection = (java.net.URL("https://router.huggingface.co/v1/models")
-                            .openConnection() as java.net.HttpURLConnection)
-                        connection.requestMethod = "GET"
-                        connection.setRequestProperty("Authorization", "Bearer " + token)
-                        connection.setRequestProperty("Accept", "application/json")
-                        connection.connectTimeout = 15000
-                        connection.readTimeout = 20000
-                        val code = connection.responseCode
-                        if (code !in 200..299) JSONObject().put("ok", false).put("error", "HF HTTP " + code)
-                        else {
-                            val body = connection.inputStream.bufferedReader().use { it.readText() }
-                            val catalog = HFModelCatalog.parseDetailed(body)
-                            val candidates = catalog.models
-                            verifiedHFCatalog = JSONArray(candidates.toString())
-                            val stats = JSONObject()
-                                .put("models_seen", catalog.modelsSeen)
-                                .put("roleplay_matches", catalog.roleplayMatches)
-                                .put("live_providers", catalog.liveProviders)
-                                .put("free_providers", catalog.freeProviders)
-                            JSONObject().put("ok", true).put("models", candidates).put("stats", stats)
+                        fun get(url: String): Triple<Int, String, String?> {
+                            val connection = (java.net.URL(url).openConnection() as java.net.HttpURLConnection)
+                            try {
+                                connection.requestMethod = "GET"
+                                connection.setRequestProperty("Authorization", "Bearer " + token)
+                                connection.setRequestProperty("Accept", "application/json")
+                                connection.connectTimeout = 15000
+                                connection.readTimeout = 25000
+                                val code = connection.responseCode
+                                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                                val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                                return Triple(code, body, connection.getHeaderField("Link"))
+                            } finally { connection.disconnect() }
                         }
+
+                        // Enumerate every paginated model currently served by any HF Inference Provider.
+                        // This is broader than /v1/models, which may expose only a small router subset.
+                        val allHubModels = linkedMapOf<String, JSONObject>()
+                        var nextUrl: String? = "https://huggingface.co/api/models?inference_provider=all&pipeline_tag=text-generation&limit=100&sort=downloads"
+                        val visitedPages = HashSet<String>()
+                        while (nextUrl != null && visitedPages.add(nextUrl)) {
+                            val (code, body, link) = get(nextUrl)
+                            if (code !in 200..299) throw IllegalStateException("HF Hub HTTP " + code)
+                            val page = JSONArray(body)
+                            for (i in 0 until page.length()) {
+                                val model = page.optJSONObject(i) ?: continue
+                                val id = model.optString("id").trim()
+                                if (id.isNotBlank()) allHubModels.putIfAbsent(id, model)
+                            }
+                            val nextMatch = Regex("<([^>]+)>\\s*;\\s*rel=\"next\"").find(link.orEmpty())
+                            nextUrl = nextMatch?.groupValues?.getOrNull(1)
+                        }
+
+                        fun matches(model: JSONObject, mode: String): Boolean {
+                            val id = model.optString("id")
+                            if (HFModelCatalog.isCandidateId(id, mode)) return true
+                            val tags = model.optJSONArray("tags") ?: JSONArray()
+                            return (0 until tags.length()).any { i ->
+                                HFModelCatalog.isCandidateId(tags.optString(i), mode)
+                            }
+                        }
+
+                        fun inspect(mode: String): Pair<JSONArray, IntArray> {
+                            val ids = allHubModels.values.filter { matches(it, mode) }
+                                .map { it.optString("id") }.distinct()
+                            val found = java.util.Collections.synchronizedList(mutableListOf<JSONObject>())
+                            val liveAndFree = java.util.concurrent.atomic.AtomicIntegerArray(2)
+                            val pool = Executors.newFixedThreadPool(6)
+                            try {
+                                val tasks = ids.map { id ->
+                                    java.util.concurrent.Callable {
+                                        val safeId = id.replace(" ", "%20")
+                                        val (code, body, _) = get("https://router.huggingface.co/v1/models/" + safeId)
+                                        if (code in 200..299) {
+                                            val detail = JSONObject(body)
+                                            val wrapped = JSONObject().put("data", JSONArray().put(detail))
+                                            val parsed = HFModelCatalog.parseDetailed(wrapped.toString(), mode)
+                                            liveAndFree.addAndGet(0, parsed.liveProviders)
+                                            liveAndFree.addAndGet(1, parsed.freeProviders)
+                                            for (j in 0 until parsed.models.length()) {
+                                                found.add(parsed.models.getJSONObject(j))
+                                            }
+                                        }
+                                    }
+                                }
+                                pool.invokeAll(tasks).forEach { it.get() }
+                            } finally { pool.shutdownNow() }
+                            val sorted = found.sortedByDescending { it.optDouble("score", 0.0) }
+                            val output = JSONArray()
+                            sorted.take(30).forEach(output::put)
+                            return output to intArrayOf(ids.size, liveAndFree.get(0), liveAndFree.get(1))
+                        }
+
+                        var mode = "rp"
+                        var (candidates, stats) = inspect(mode)
+                        // If there are no confirmed free RP routes, broaden the search to NSFW-tagged
+                        // and NSFW-named models; the free-only provider filter remains unchanged.
+                        if (candidates.length() == 0) {
+                            mode = "nsfw"
+                            val fallback = inspect(mode)
+                            candidates = fallback.first
+                            stats = fallback.second
+                        }
+                        verifiedHFCatalog = JSONArray(candidates.toString())
+                        val statsJson = JSONObject()
+                            .put("hub_models_seen", allHubModels.size)
+                            .put("models_seen", allHubModels.size)
+                            .put("candidate_mode", mode)
+                            .put("roleplay_matches", if (mode == "rp") stats[0] else 0)
+                            .put("nsfw_matches", if (mode == "nsfw") stats[0] else 0)
+                            .put("live_providers", stats[1])
+                            .put("free_providers", stats[2])
+                        JSONObject().put("ok", true).put("models", candidates).put("stats", statsJson)
                     } catch (error: Exception) {
-                        JSONObject().put("ok", false).put("error", error.message ?: "HF model list failed")
-                    } finally { connection?.disconnect() }
+                        JSONObject().put("ok", false).put("error", error.message ?: "HF Hub discovery failed")
+                    }
                     mainHandler.post {
                         if (::web.isInitialized) web.evaluateJavascript(
                             "window.onHFModelsResult && window.onHFModelsResult(" + JSONObject.quote(result.toString()) + ")", null
