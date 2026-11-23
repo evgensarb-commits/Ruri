@@ -148,4 +148,21 @@ class ActiveTaskFatiguesTest {
         assertEquals(26.0, values.optDouble("fatigue"), 0.001)
         assertEquals(46.0, values.optDouble("boredom"), 0.001)
     }
+class AuditableInitiativeRollTest {
+    @Test fun rollIsDeterministicAndRecordedWithTheGateDecision() {
+        val root = needsTestRoot()
+        setEmotionValues(root, boredom = 50.0, longing = 50.0)
+        val now = 1_000_000L
+        val roll = EmotionEngine.initiativeRoll(now, 50.0, 100L, 0L)
+        assertEquals(roll, EmotionEngine.initiativeRoll(now, 50.0, 100L, 0L), 0.0)
+        assertTrue(roll >= 0.0 && roll < 1.0)
+        val chance = Math.pow((50.0 - 40.0) / 60.0, 1.5)
+        assertEquals(roll < chance, EmotionEngine.initiativeGate(root, 100L, now, false, 0L))
+        val event = FileManager.readLastLines(root, "memory/L0_raw.jsonl", 20)
+            .map { JSONObject(it) }.last { it.optString("type") == "initiative_gate_evaluated" }
+        assertEquals(roll, event.optDouble("roll"), 0.0000001)
+        assertEquals(chance, event.optDouble("chance"), 0.0000001)
+    }
+}
+
 }
