@@ -6,6 +6,7 @@ import org.json.JSONObject
 /** Strict free-only Hugging Face Inference Providers catalog. Unknown prices/status are excluded. */
 internal object HFModelCatalog {
     private val roleplay = Regex("(?i)(cydonia|rocinante|unslopnemo|magnum|roleplay|mythomax|stheno|noromaid|eva[-_ ]?llama|tiefighter|lumimaid|rpmax|anubis|dark[-_ ]?idol|fimbulvetr|sao10k|midnight[-_ ]?miqu|lewd|abliterat)")
+    private val nsfw = Regex("(?i)(nsfw|uncensored|abliterat|erp|lewd|adult|18\+|spicy|smut|erotic|not-safe-for-work|no-filter|uncensored[-_ ]?llama|dark[-_ ]?idol|lumimaid|noromaid|mythomax|sao10k)")
     private val forbiddenLegacy = Regex("(?i)dolphin")
 
     data class CatalogResult(
@@ -18,7 +19,7 @@ internal object HFModelCatalog {
 
     fun parse(raw: String): JSONArray = parseDetailed(raw).models
 
-    fun parseDetailed(raw: String): CatalogResult {
+    fun parseDetailed(raw: String, mode: String = "rp"): CatalogResult {
         val data = JSONObject(raw).optJSONArray("data") ?: JSONArray()
         val candidates = mutableListOf<JSONObject>()
         var roleplayMatches = 0
@@ -27,7 +28,8 @@ internal object HFModelCatalog {
         for (i in 0 until data.length()) {
             val model = data.optJSONObject(i) ?: continue
             val modelId = model.optString("id").trim()
-            if (modelId.isBlank() || !roleplay.containsMatchIn(modelId) || forbiddenLegacy.containsMatchIn(modelId)) continue
+            val isCandidate = if (mode.equals("nsfw", true)) nsfw.containsMatchIn(modelId) else roleplay.containsMatchIn(modelId)
+            if (modelId.isBlank() || !isCandidate || forbiddenLegacy.containsMatchIn(modelId)) continue
             roleplayMatches++
             val declaredTask = model.optString("task").ifBlank { model.optString("pipeline_tag") }
             if (declaredTask.isNotBlank() &&
