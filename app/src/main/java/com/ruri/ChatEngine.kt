@@ -325,6 +325,16 @@ object ChatEngine {
         var hadNetworkAttempt = false
         var allFailuresNetwork = true
         var followupRequests = 0
+        val baseAuditBreakdown = TokenAudit.breakdownLengths(
+            "system_total" to system.length,
+            "history" to history.sumOf { it.optString("content").length },
+            "recalled" to recalled.length,
+            "facts" to factContext.length,
+            "diary" to diaryContext.length,
+            "l3" to summary.length,
+            "notifications" to notificationContext.length,
+            "body_events" to bodyEventContext.length
+        )
         for (index in requestOrder) {
             val attempt = (attemptsByModel[index] ?: 0) + 1
             attemptsByModel[index] = attempt
@@ -344,7 +354,8 @@ object ChatEngine {
                     OfflineQueue.markPending(root)
                     throw IllegalStateException("Полная память не прошла проверку; запрос к маршруту не отправлен")
                 }
-            val requestNext: (JSONArray) -> String? = { nextMessages ->
+            var followupHop = 0
+            val requestNext: (JSONArray, String) -> String? = { nextMessages, requestStage ->
                 if (followupRequests >= 12) {
                     throw ModelRequestFailure(
                         "Достигнут безопасный лимит 12 дополнительных запросов к модели за один ответ; сообщение останется в очереди",
@@ -353,7 +364,14 @@ object ChatEngine {
                     )
                 }
                 followupRequests++
-                requestToolFollowup(model, nextMessages, root, routeId, task)
+                followupHop++
+                val followupBreakdown = JSONObject(baseAuditBreakdown.toString())
+                    .put("tool_results", TokenAudit.toolResultChars(nextMessages))
+                requestToolFollowup(
+                    model, nextMessages, root, routeId, task,
+                    stage = requestStage, hop = followupHop, attempt = attempt,
+                    breakdown = followupBreakdown, messageId = commanderMessageId.orEmpty()
+                )
             }
             hadNetworkAttempt = true
             runCatching { RouteMeta.recordAttempt(root, routeId) }
@@ -376,6 +394,8 @@ object ChatEngine {
                 .put("result", "failed")
             var stage = "CONFIG"
             var stageStartedAt = 0L
+            var auditRecorded = false
+            val auditStage = if (attempt > 1) "retry_after_error" else "initial"
             try {
                 val base = model.optString("base_url").trimEnd('/')
                 require(base.startsWith("https://")) { "Для модели требуется HTTPS" }
@@ -429,6 +449,9 @@ object ChatEngine {
                 diagnostic.put("response_body_ms", SystemClock.elapsedRealtime() - bodyReadStart)
                 if (code !in 200..299) {
                     val errorUsage = runCatching { JSONObject(responseText).optJSONObject("usage") }.getOrNull()
+                    TokenAudit.record(root, auditStage, routeId, model.optString("model"), errorUsage,
+                        JSONObject(baseAuditBreakdown.toString()), safeProviderMessages.length(), 0, attempt, commanderMessageId.orEmpty())
+                    auditRecorded = true
                     val errorTokens = errorUsage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
                         ?: ((errorUsage?.optLong("prompt_tokens", 0L) ?: 0L) + (errorUsage?.optLong("completion_tokens", 0L) ?: 0L))
                     if (errorTokens > 0) RouteMeta.addTokens(root, routeId, errorTokens)
@@ -461,6 +484,9 @@ object ChatEngine {
                 diagnostic.put("stage", stage)
                 val responseJson = JSONObject(responseText)
             val usage = responseJson.optJSONObject("usage")
+            TokenAudit.record(root, auditStage, routeId, model.optString("model"), usage,
+                JSONObject(baseAuditBreakdown.toString()), safeProviderMessages.length(), 0, attempt, commanderMessageId.orEmpty())
+            auditRecorded = true
             val tokenCount = usage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
                 ?: ((usage?.optLong("prompt_tokens", 0L) ?: 0L) + (usage?.optLong("completion_tokens", 0L) ?: 0L))
             if (tokenCount > 0) RouteMeta.addTokens(root, routeId, tokenCount)
@@ -479,7 +505,7 @@ object ChatEngine {
                 val initialDiaryText = ToolLoop.diaryActionText(initialReply)
                 val rawReply = if (initialDiaryText != null) "" else
                     ToolLoop.unwrapDiaryReply(root, initialReply, messages, meta) { nextMessages ->
-                        requestNext(nextMessages)
+                        requestNext(nextMessages, "tool_hop")
                     }
                 val (replyWithoutDecision, _) = EmotionEngine.parseInitiativeDecision(rawReply)
                 val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(replyWithoutDecision)
@@ -497,7 +523,7 @@ object ChatEngine {
                         FileManager.appendEvent(root, SecretRedactor.redactEvent(JSONObject().put("type", "tool_result").put("action", name).put("ok", toolResult.first).put("text", toolResult.second.take(4000))))
                         messages.put(JSONObject().put("role", "user").put("content", "[ИНСТРУМЕНТ $name]: ${toolResult.second.take(if (name == "read_shelf") 7600 else 4000)}"))
                     }
-                    finalReply = requestNext(messages) ?: clean
+                    finalReply = requestNext(messages, "tool_hop") ?: clean
                     guard++
                 }
                 val (cleanFinal, tailDiary, _) = ToolLoop.stripActions(finalReply)
@@ -507,7 +533,7 @@ object ChatEngine {
                 if (proseReply.isNullOrBlank() && initialDiaryText == null && tailDiary.isEmpty()) {
                     messages.put(JSONObject().put("role", "system")
                         .put("content", "Предыдущий ответ был действительно пустым. Ответь обычной прозой без JSON или верни write_diary с непустым text."))
-                    val retry = requestNext(messages).orEmpty()
+                    val retry = requestNext(messages, "prose_retry").orEmpty()
                     val (retryClean, retryDiary, _) = ToolLoop.stripActions(retry)
                     retryDiary.forEach { routeChatDiaryAction(root, it, emotion) }
                     proseReply = ToolLoop.proseCandidate(retryClean)
@@ -542,6 +568,8 @@ object ChatEngine {
                 runCatching { OfflineQueue.clear(root) }
                 return reply
             } catch (e: Exception) {
+                if (!auditRecorded) TokenAudit.record(root, auditStage, routeId, model.optString("model"), null,
+                    JSONObject(baseAuditBreakdown.toString()), safeProviderMessages.length(), 0, attempt, commanderMessageId.orEmpty())
                 diagnostic.put("stage", stage)
                 if (stage == "DNS" && diagnostic.isNull("dns_ms")) {
                     diagnostic.put("dns_ms", SystemClock.elapsedRealtime() - stageStartedAt)
@@ -817,7 +845,18 @@ object ChatEngine {
         return "Факт записан в твою L1-память с confidence 0.6."
     }
 
-    internal fun requestToolFollowup(model: JSONObject, messages: JSONArray, root: File? = null, routeId: String = "", task: Task? = null): String? {
+    internal fun requestToolFollowup(
+        model: JSONObject,
+        messages: JSONArray,
+        root: File? = null,
+        routeId: String = "",
+        task: Task? = null,
+        stage: String = "tool_hop",
+        hop: Int = 0,
+        attempt: Int = 0,
+        breakdown: JSONObject? = null,
+        messageId: String = ""
+    ): String? {
         val base = model.optString("base_url").trimEnd('/')
         if (!base.startsWith("https://", ignoreCase = true)) {
             throw ModelRequestFailure("Provider endpoint must use HTTPS", 0L, "invalid_endpoint")
@@ -825,6 +864,7 @@ object ChatEngine {
         val safeMessages = providerMessagesWithFullMemory(messages)
             ?: throw ModelRequestFailure("Не удалось собрать полный контекст памяти для продолжения ответа", 0L, "context_error")
         var connection: HttpURLConnection? = null
+        var auditRecorded = false
         try {
             if (root != null && routeId.isNotBlank()) RouteMeta.recordAttempt(root, routeId)
             connection = (URL(base + "/chat/completions").openConnection() as HttpURLConnection).apply {
@@ -854,6 +894,12 @@ object ChatEngine {
             if (root != null && routeId.isNotBlank() && tokens > 0) RouteMeta.addTokens(root, routeId, tokens)
             if (code !in 200..299) {
                 val kind = RouteSelector.classify(code, null, raw)
+                if (root != null) {
+                    TokenAudit.record(root, stage, routeId, model.optString("model"), usage,
+                        breakdown ?: TokenAudit.breakdownLengths("messages" to safeMessages.toString().length),
+                        safeMessages.length(), hop, attempt, messageId)
+                    auditRecorded = true
+                }
                 if (root != null && routeId.isNotBlank()) RouteMeta.recordFailure(root, routeId, kind, task)
                 val retryAfter = if (code == 429) {
                     parseRetryAfterMillis(connection.getHeaderField("Retry-After")).takeIf { it > 0L } ?: 60_000L
@@ -869,6 +915,12 @@ object ChatEngine {
                     .put("retry_after_ms", retryAfter))
                 throw ModelRequestFailure("HTTP $code при продолжении ответа", retryAfter, if (code == 429) "rate_limit" else kind)
             }
+            if (root != null) {
+                TokenAudit.record(root, stage, routeId, model.optString("model"), usage,
+                    breakdown ?: TokenAudit.breakdownLengths("messages" to safeMessages.toString().length),
+                    safeMessages.length(), hop, attempt, messageId)
+                auditRecorded = true
+            }
             val content = response.optJSONArray("choices")?.optJSONObject(0)
                 ?.optJSONObject("message")?.optString("content")?.trim().orEmpty()
             if (content.isBlank()) {
@@ -878,8 +930,14 @@ object ChatEngine {
             if (root != null && routeId.isNotBlank()) RouteMeta.recordSuccess(root, routeId, task)
             return content
         } catch (e: ModelRequestFailure) {
+            if (root != null && !auditRecorded) TokenAudit.record(root, stage, routeId, model.optString("model"), null,
+                breakdown ?: TokenAudit.breakdownLengths("messages" to safeMessages.toString().length),
+                safeMessages.length(), hop, attempt, messageId)
             throw e
         } catch (e: Exception) {
+            if (root != null && !auditRecorded) TokenAudit.record(root, stage, routeId, model.optString("model"), null,
+                breakdown ?: TokenAudit.breakdownLengths("messages" to safeMessages.toString().length),
+                safeMessages.length(), hop, attempt, messageId)
             if (root != null && routeId.isNotBlank()) {
                 val kind = if (e is java.net.SocketTimeoutException) "timeout" else "network"
                 RouteMeta.recordFailure(root, routeId, kind, task)
