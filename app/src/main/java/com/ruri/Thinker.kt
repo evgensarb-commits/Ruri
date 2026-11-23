@@ -100,7 +100,8 @@ object Thinker {
             return
         }
 
-        val prompt = buildPrompt(ctx, root, state, reason, initiative)
+        val promptBreakdown = JSONObject()
+        val prompt = buildPrompt(ctx, root, state, reason, initiative, promptBreakdown)
         val current = config.optInt("current", 0)
         val task = if (initiative) Task.WARMTH else Task.REASON
         val adult = RouteSelector.isAdultTopic(RouteSelector.latestCommanderText(root)) || RouteSelector.nsfwWindow(root)
@@ -119,6 +120,7 @@ object Thinker {
             // All cognition routes must carry the full memory context.
             if (model.optString("api_key").isBlank()) continue
             val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
+            var followupHop = 0
             val requestNext: (JSONArray) -> String? = { nextMessages ->
                 if (followupRequests >= 8) {
                     appendEvent(root, "model_request_budget_exhausted", JSONObject()
@@ -126,7 +128,13 @@ object Thinker {
                     null
                 } else {
                     followupRequests++
-                    ChatEngine.requestToolFollowup(model, nextMessages, root, routeId, task)
+                    followupHop++
+                    ChatEngine.requestToolFollowup(
+                        model, nextMessages, root, routeId, task,
+                        stage = "thinker_followup", hop = followupHop,
+                        breakdown = JSONObject(promptBreakdown.toString())
+                            .put("tool_results_chars", TokenAudit.toolResultChars(nextMessages))
+                    )
                 }
             }
             runCatching { RouteMeta.recordAttempt(root, routeId) }
@@ -135,7 +143,11 @@ object Thinker {
                 .put(JSONObject().put("role", "user").put("content",
                     if (initiative) "Напиши сообщение Командиру обычной прозой." else "Напиши внутреннюю мысль для дневника обычной прозой."))
             var requestFailureClassified = false
-            val initial = requestModel(model, messages, root, routeId, task) { requestFailureClassified = true }
+            val initial = requestModel(
+                model, messages, root, routeId, task,
+                stage = if (initiative) "thinker_initiative" else "thinker_initial",
+                breakdown = promptBreakdown
+            ) { requestFailureClassified = true }
             reply = if (initial.isNullOrBlank()) null else ToolLoop.unwrapDiaryReply(root, initial, messages) { next ->
                 requestNext(next)
             }
@@ -277,7 +289,14 @@ object Thinker {
         }
     }
 
-    private fun buildPrompt(ctx: Context, root: File, state: JSONObject, reason: String, initiative: Boolean): String {
+    private fun buildPrompt(
+        ctx: Context,
+        root: File,
+        state: JSONObject,
+        reason: String,
+        initiative: Boolean,
+        breakdown: JSONObject? = null
+    ): String {
         val character = readJson(root, "core/character.json")
         val priorities = readJson(root, "core/priorities.json")
         val constitution = readJson(root, "core/constitution.json")
@@ -383,11 +402,32 @@ object Thinker {
             "\nСейчас ты сама решила написать Командиру после долгой тишины. Выбери форму и объём сообщения по полю length_policy и текущему настроению."
         else common +
             "\nНапиши запись в дневник от первого лица, по-русски. Это внутренняя мысль, наблюдение или вывод, а не обращение к Командиру. Объём выбери по length_policy. Не выдумывай события."
-        return SecretRedactor.redactText(prompt)
+        val safePrompt = SecretRedactor.redactText(prompt)
+        breakdown?.put("system_total_chars", safePrompt.length)
+            ?.put("facts_chars", factText.length)
+            ?.put("diary_chars", diaryText.length)
+            ?.put("l3_chars", summary.length)
+            ?.put("recalled_chars", recalledMemories.length)
+            ?.put("notifications_chars", notificationText.length)
+            ?.put("body_events_chars", bodyEventText.length)
+            ?.put("shelf_chars", shelfText.length)
+        return safePrompt
     }
 
-    private fun requestModel(model: JSONObject, messages: JSONArray, root: File, routeId: String, task: Task, onClassifiedFailure: () -> Unit): String? {
+    private fun requestModel(
+        model: JSONObject,
+        messages: JSONArray,
+        root: File,
+        routeId: String,
+        task: Task,
+        stage: String = "thinker_initial",
+        breakdown: JSONObject? = null,
+        hop: Int = 0,
+        attempt: Int = 0,
+        onClassifiedFailure: () -> Unit
+    ): String? {
         var connection: HttpURLConnection? = null
+        var auditRecorded = false
         return try {
             val baseUrl = model.optString("base_url").trimEnd('/')
             require(baseUrl.startsWith("https://", ignoreCase = true)) { "Provider endpoint must use HTTPS" }
@@ -414,6 +454,10 @@ object Thinker {
             val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             if (code !in 200..299) {
                 val errorUsage = runCatching { JSONObject(text).optJSONObject("usage") }.getOrNull()
+                TokenAudit.record(root, stage, routeId, model.optString("model"), errorUsage,
+                    breakdown ?: TokenAudit.breakdownLengths("messages" to messages.toString().length),
+                    messages.length(), hop, attempt)
+                auditRecorded = true
                 val errorTokens = errorUsage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
                     ?: ((errorUsage?.optLong("prompt_tokens", 0L) ?: 0L) + (errorUsage?.optLong("completion_tokens", 0L) ?: 0L))
                 if (errorTokens > 0) RouteMeta.addTokens(root, routeId, errorTokens)
@@ -423,11 +467,18 @@ object Thinker {
             }
             val response = JSONObject(text)
             val usage = response.optJSONObject("usage")
+            TokenAudit.record(root, stage, routeId, model.optString("model"), usage,
+                breakdown ?: TokenAudit.breakdownLengths("messages" to messages.toString().length),
+                messages.length(), hop, attempt)
+            auditRecorded = true
             val tokens = usage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
                 ?: ((usage?.optLong("prompt_tokens", 0L) ?: 0L) + (usage?.optLong("completion_tokens", 0L) ?: 0L))
             if (tokens > 0) RouteMeta.addTokens(root, routeId, tokens)
             response.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
         } catch (e: Exception) {
+            if (!auditRecorded) TokenAudit.record(root, stage, routeId, model.optString("model"), null,
+                breakdown ?: TokenAudit.breakdownLengths("messages" to messages.toString().length),
+                messages.length(), hop, attempt)
             RouteMeta.recordFailure(root, routeId, RouteSelector.classify(null, e), task)
             onClassifiedFailure()
             Log.w("Ruri", "Model request failed", e)

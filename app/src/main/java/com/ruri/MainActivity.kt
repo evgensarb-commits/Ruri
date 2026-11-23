@@ -236,6 +236,12 @@ class MainActivity : AppCompatActivity() {
         fun getDiagnostics(): String = Diagnostics.run(this@MainActivity)
 
         @JavascriptInterface
+        fun tokenAuditSummary(): String = TokenAudit.aggregate(filesDir).toString()
+
+        @JavascriptInterface
+        fun exportTokenAudit(): String = TokenAudit.export(filesDir)
+
+        @JavascriptInterface
         fun forceRefreshRoutes(): String {
             routeExecutor.execute {
                 runCatching {

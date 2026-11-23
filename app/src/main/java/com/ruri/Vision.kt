@@ -125,6 +125,8 @@ object Vision {
 
     private fun call(model: JSONObject, messages: JSONArray, root: File? = null, routeId: String = ""): String? {
         var connection: HttpURLConnection? = null
+        var auditRecorded = false
+        val auditBreakdown = visionBreakdown(messages)
         return try {
             val base = model.optString("base_url").trimEnd('/')
             if (!base.startsWith("https://")) return null
@@ -143,13 +145,23 @@ object Vision {
             val code = connection.responseCode
             if (root != null && routeId.isNotBlank()) RouteMeta.recordHttpStatus(root, routeId, code)
             if (code !in 200..299) {
+                if (root != null) {
+                    TokenAudit.record(root, "vision", routeId, model.optString("model"), null,
+                        auditBreakdown, messages.length(), 0, 0)
+                    auditRecorded = true
+                }
                 if (root != null && routeId.isNotBlank()) {
                     RouteMeta.recordFailure(root, routeId, RouteSelector.classify(code, null), Task.VISION)
                 }
                 null
             } else {
-                val content = JSONObject(connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() })
-                    .getJSONArray("choices").getJSONObject(0).getJSONObject("message")
+                val response = JSONObject(connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() })
+                if (root != null) {
+                    TokenAudit.record(root, "vision", routeId, model.optString("model"), response.optJSONObject("usage"),
+                        auditBreakdown, messages.length(), 0, 0)
+                    auditRecorded = true
+                }
+                val content = response.getJSONArray("choices").getJSONObject(0).getJSONObject("message")
                     .getString("content").trim()
                 if (content.isBlank()) {
                     if (root != null && routeId.isNotBlank()) RouteMeta.recordFailure(root, routeId, "empty_response", Task.VISION)
@@ -157,6 +169,8 @@ object Vision {
                 } else content
             }
         } catch (e: Exception) {
+            if (root != null && !auditRecorded) TokenAudit.record(root, "vision", routeId, model.optString("model"), null,
+                auditBreakdown, messages.length(), 0, 0)
             if (root != null && routeId.isNotBlank()) {
                 RouteMeta.recordFailure(root, routeId, RouteSelector.classify(null, e), Task.VISION)
             }
@@ -164,5 +178,25 @@ object Vision {
         } finally {
             connection?.disconnect()
         }
+    }
+
+    private fun visionBreakdown(messages: JSONArray): JSONObject {
+        var textChars = 0
+        var imagePayloadChars = 0
+        for (i in 0 until messages.length()) {
+            val blocks = messages.optJSONObject(i)?.optJSONArray("content") ?: continue
+            for (j in 0 until blocks.length()) {
+                val block = blocks.optJSONObject(j) ?: continue
+                when (block.optString("type")) {
+                    "text" -> textChars += block.optString("text").length
+                    "image_url" -> imagePayloadChars += block.optJSONObject("image_url")
+                        ?.optString("url").orEmpty().length
+                }
+            }
+        }
+        return TokenAudit.breakdownLengths(
+            "vision_text" to textChars,
+            "image_payload_base64" to imagePayloadChars
+        )
     }
 }
