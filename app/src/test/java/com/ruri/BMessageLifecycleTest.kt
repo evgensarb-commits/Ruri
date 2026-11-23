@@ -227,4 +227,26 @@ class L4AtomicUpdateTest {
     }
 }
 
+class PerMessageReplyAssociationTest {
+    @Test fun onlyTheTargetCommanderMessageIsMarkedAnswered() {
+        val root = bTestRoot("ruri-reply-association")
+        try {
+            FileManager.init(root)
+            FileManager.appendEvent(root, JSONObject().put("id", "commander-a")
+                .put("type", "message").put("who", "commander").put("text", "Первое").put("ts", 100L))
+            FileManager.appendEvent(root, JSONObject().put("id", "commander-b")
+                .put("type", "message").put("who", "commander").put("text", "Второе").put("ts", 200L))
+            CommanderReplyQueue.enqueue(root, "commander-a")
+            CommanderReplyQueue.enqueue(root, "commander-b")
+            val replyId = ChatEngine.appendFinalReply(root, "Ответ на первое", commanderMessageId = "commander-a")
+            val reply = FileManager.readLastLines(root, "memory/L0_raw.jsonl", 10)
+                .map { JSONObject(it) }.first { it.optString("id") == replyId }
+            assertEquals("commander-a", reply.optString("reply_to"))
+            assertTrue(CommanderReplyQueue.isAnswered(root, "commander-a"))
+            assertFalse(CommanderReplyQueue.isAnswered(root, "commander-b"))
+            assertEquals(1, CommanderReplyQueue.pendingCount(root))
+        } finally { root.deleteRecursively() }
+    }
+}
+
 }
