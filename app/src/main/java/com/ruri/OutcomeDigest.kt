@@ -115,11 +115,7 @@ object OutcomeDigest {
     /** Call after adding build(root) to a prompt: the correction is then shown exactly once. */
     fun clearPresentedCorrection(root: File) {
         runCatching {
-            val state = JSONObject(FileManager.read(root, STATE_PATH))
-            if (state.has("pending_correction")) {
-                state.remove("pending_correction")
-                FileManager.write(root, STATE_PATH, state.toString(2))
-            }
+            FileManager.updateL4State(root) { state -> state.remove("pending_correction") }
         }
     }
 
@@ -185,9 +181,7 @@ object OutcomeDigest {
                 if (claimsVision) put("vision")
             })
             .put("recorded_at", System.currentTimeMillis())
-        val state = runCatching { JSONObject(FileManager.read(root, STATE_PATH)) }.getOrElse { JSONObject() }
-        state.put("pending_correction", correction)
-        FileManager.write(root, STATE_PATH, state.toString(2))
+        FileManager.updateL4State(root) { state -> state.put("pending_correction", correction) }
         FileManager.appendEvent(root, JSONObject()
             .put("type", "claim_mismatch")
             .put("snippet", SecretRedactor.redactText(reply).take(240))
