@@ -131,11 +131,15 @@ object CommanderReplyQueue {
         val pending = readState(root).optJSONArray("pending") ?: JSONArray()
         if (pending.length() > 0) return@synchronized null
         val receipts = runCatching { JSONObject(Receipts.export(root)) }.getOrElse { JSONObject() }
+        val lastSeen = runCatching {
+            JSONObject(FileManager.read(root, "memory/L4_state.json")).optLong("last_seen_commander", 0L)
+        }.getOrDefault(0L)
         val lines = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 1000)
         val latest = lines.asReversed().asSequence().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
             .firstOrNull { event ->
                 event.optString("type") == "message" && event.optString("who") == "commander" &&
                     event.optString("id").isNotBlank() &&
+                    event.optLong("ts", event.optLong("timestamp", 0L)) > lastSeen &&
                     !Tombstone.isDeleted(root, event.optString("id")) &&
                     !receipts.optJSONObject(event.optString("id"))?.optBoolean("replied_by_ruri", false).let { it == true }
             } ?: return@synchronized null
