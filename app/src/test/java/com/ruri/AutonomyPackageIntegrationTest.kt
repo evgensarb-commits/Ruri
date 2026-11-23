@@ -65,14 +65,16 @@ class AutonomyPackageIntegrationTest {
     }
 
     @Test
-    fun runtimeMigrationKeepsOnlyMeroMeroAndHFFreePool() {
+    fun runtimeMigrationKeepsOnlyMeroMeroAndNemotron() {
         val fileManager = source("src/main/java/com/ruri/FileManager.kt")
         val routeSelector = source("src/main/java/com/ruri/RouteSelector.kt")
         assertTrue(fileManager.contains("nsfw_only_routes_v2"))
         assertTrue(fileManager.contains("gemma-4-26b-a4b-it-meromero:free"))
-        assertTrue(fileManager.contains("Hugging Face · Serverless Roleplay"))
-        assertTrue(fileManager.contains("https://router.huggingface.co/v1"))
+        assertTrue(fileManager.contains("NVIDIA · Nemotron 3 Nano Omni Free"))
+        assertTrue(fileManager.contains("https://integrate.api.nvidia.com/v1"))
         assertTrue(fileManager.contains("free_only"))
+        assertFalse(fileManager.contains("huggingface.co"))
+        assertFalse(fileManager.contains("openrouter.ai"))
         assertTrue(fileManager.contains("RouteMeta.pruneToConfiguredRoutes"))
         assertTrue(routeSelector.contains("compareBy<Int>"))
         assertTrue(routeSelector.contains("nsfw_override"))
