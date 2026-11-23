@@ -13,9 +13,11 @@ class OfflineQueueTest {
         val root = Files.createTempDirectory("ruri-offline-chat").toFile()
         try {
             FileManager.write(root, "memory/L4_state.json", JSONObject().put("mood", "собранная").toString())
-            val response = ChatEngine.respond(root)
+            val outcome = runCatching { ChatEngine.respond(root) }
 
-            assertTrue(response.contains("Нет доступного маршрута"))
+            assertTrue(outcome.isFailure)
+            assertTrue(outcome.exceptionOrNull()?.message.orEmpty().contains("маршрут", ignoreCase = true) ||
+                outcome.exceptionOrNull()?.message.orEmpty().contains("route", ignoreCase = true))
             assertTrue(OfflineQueue.hasPending(root))
             assertFalse(FileManager.exists(root, "memory/L0_raw.jsonl"))
         } finally {
