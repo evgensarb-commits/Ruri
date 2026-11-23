@@ -139,7 +139,7 @@ object Thinker {
             reply = if (initial.isNullOrBlank()) null else ToolLoop.unwrapDiaryReply(root, initial, messages) { next ->
                 requestNext(next)
             }
-            if (reply.isNullOrBlank()) {
+            if (reply.isNullOrBlank() && !requestFailureClassified) {
                 messages.put(JSONObject().put("role", "system")
                     .put("content", "Предыдущий ответ был действительно пустым. Ответь обычной русской прозой или верни write_diary с непустым полем text."))
                 val retry = requestNext(messages)
@@ -153,6 +153,12 @@ object Thinker {
                     runCatching { RouteMeta.recordFailure(root, routeId, "other", task) }
                     continue
                 }
+            }
+            if (reply.isNullOrBlank() && requestFailureClassified) {
+                appendEvent(root, "model_error", JSONObject()
+                    .put("model", model.optString("name", "unknown"))
+                    .put("reason", "request_failed_no_immediate_retry"))
+                continue
             }
             if (!reply.isNullOrBlank() && initiative &&
                 RouteSelector.looksLikeRefusalOrDisclaimer(reply)) {
