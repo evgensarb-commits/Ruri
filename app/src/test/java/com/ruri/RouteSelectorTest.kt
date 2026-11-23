@@ -73,9 +73,9 @@ class RouteSelectorTest {
 
 }
 
-class OnlyTwoRoutesTest {
-    @Test fun migrationKeepsOnlyMeroMeroAndMiniMaxAndPrunesOldMetadata() {
-        val root = Files.createTempDirectory("ruri-only-two-routes").toFile()
+class ThreeFreeRoutesTest {
+    @Test fun migrationKeepsMeroMeroMiniMaxAndDarksoulAndPrunesOldMetadata() {
+        val root = Files.createTempDirectory("ruri-three-routes").toFile()
         try {
             FileManager.init(root)
             val config = JSONObject(FileManager.read(root, "core/config.json"))
@@ -99,7 +99,7 @@ class OnlyTwoRoutesTest {
 
             val migrated = JSONObject(FileManager.read(root, "core/config.json"))
             val models = migrated.getJSONArray("models")
-            assertEquals(2, models.length())
+            assertEquals(3, models.length())
             assertTrue(models.getJSONObject(0).getString("model").contains("meromero"))
             assertEquals("minimax-m3.1-flash:free", models.getJSONObject(1).getString("model"))
             assertEquals(2, models.getJSONObject(0).getInt("priority"))
@@ -108,6 +108,10 @@ class OnlyTwoRoutesTest {
             assertEquals(1, models.getJSONObject(1).getInt("priority"))
             assertFalse(models.getJSONObject(1).getBoolean("nsfw"))
             assertFalse(models.getJSONObject(1).getBoolean("vision"))
+            assertEquals("gemma-4-26b-a4b-it-darksoul:free", models.getJSONObject(2).getString("model"))
+            assertEquals(3, models.getJSONObject(2).getInt("priority"))
+            assertTrue(models.getJSONObject(2).getBoolean("nsfw"))
+            assertFalse(models.getJSONObject(2).getBoolean("vision"))
             assertTrue(migrated.getBoolean("nsfw_override"))
             val metadata = RouteMeta.load(root)
             assertTrue(metadata.has("routeway"))
