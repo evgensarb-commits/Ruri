@@ -58,4 +58,16 @@ class CommanderReplyQueueTest {
         assertEquals(2, CommanderReplyQueue.pendingCount(root))
         assertEquals("legacy-msg-1", CommanderReplyQueue.nextDue(root, System.currentTimeMillis())?.optString("message_id"))
     }
+    @Test fun newerCommanderMessageCannotJumpAheadOfOlderQueuedMessage() {
+        val root = root()
+        FileManager.init(root)
+        CommanderReplyQueue.enqueue(root, "older")
+        CommanderReplyQueue.enqueue(root, "newer")
+        val result = runCatching { ChatEngine.respond(root, "newer") }
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("более раннее"))
+        assertEquals(2, CommanderReplyQueue.pendingCount(root))
+        assertEquals("older", CommanderReplyQueue.firstPending(root)?.optString("message_id"))
+    }
+
 }
