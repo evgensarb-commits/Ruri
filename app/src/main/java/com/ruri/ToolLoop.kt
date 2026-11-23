@@ -75,9 +75,13 @@ object ToolLoop {
     ): String {
         var current = reply
         var hops = 0
+        fun finish(value: String): String {
+            if (hops > 0) EmotionEngine.onActiveTask(root)
+            return value
+        }
         while (true) {
-            val action = ChatEngine.parseAction(current) ?: return current
-            if (hops >= 3) return current
+            val action = ChatEngine.parseAction(current) ?: return finish(current)
+            if (hops >= 3) return finish(current)
             val name = action.optString("action")
             val params = JSONObject(action.toString()).apply { remove("action") }
             FileManager.appendEvent(root, SecretRedactor.redactEvent(
@@ -117,7 +121,7 @@ object ToolLoop {
             hops++
             if (hops == 3) messages.put(JSONObject().put("role", "system")
                 .put("content", "Лимит инструментов исчерпан — ответь обычной прозой"))
-            current = requestNext(messages) ?: return "Не удалось получить ответ после выполнения инструмента."
+            current = requestNext(messages) ?: return finish("Не удалось получить ответ после выполнения инструмента.")
         }
     }
 
