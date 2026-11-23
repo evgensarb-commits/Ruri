@@ -140,7 +140,10 @@ object EmotionEngine {
         val st = readState(root); val dtH = (now - st.optLong("updated_at", now)) / HOUR; if (dtH <= 0) return
         val v = readValues(root); val out = JSONObject()
         for ((n, c) in channels(root)) {
-            if (n == "fatigue" || n == "boredom" || n == "longing") continue
+            if (n == "fatigue" || n == "boredom" || n == "longing") {
+                out.put(n, v.optDouble(n, b))
+                continue
+            }
             val b = c.optDouble("base", 50.0); val h = c.optDouble("half_life_h", 6.0).coerceAtLeast(0.1)
             out.put(n, clamp(b + (v.optDouble(n, b) - b) * exp(-LN2 * dtH / h), c)) }
         writeState(root, out, now, st.optLong("last_tick_at", now), st.optLong("last_cycle_at", 0L))
