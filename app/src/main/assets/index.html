@@ -192,10 +192,8 @@ function loadDiary(){
 try{
 var entries=JSON.parse(read('memory/L2_diary.json')||'{"entries":[]}').entries||[];
 var box=$('#diary');box.innerHTML='';
-var mirrorSaid=false;try{mirrorSaid=!!JSON.parse(Ruri.readPublicRuntimeConfig()||'{}').diary_mirror_said;}catch(_){}
 var visible=entries.filter(function(e){
-var kind=e.kind||'thought';
-return (!e.id||!Ruri.isMessageDeleted(e.id))&&(kind==='thought'||(mirrorSaid&&kind==='said'));
+return (!e.id||!Ruri.isMessageDeleted(e.id))&&(e.kind||'thought')==='thought';
 }).slice(-100).reverse();
 visible.forEach(function(e){var d=messageNode('ruri',e.text,e.ts,e);var kind=e.kind==='said'?'СКАЗАЛА':'МЫСЛЬ';d.querySelector('.meta').firstChild.textContent=kind+' · '+new Date(e.ts||Date.now()).toLocaleString('ru-RU');box.appendChild(d);});
 }catch(e){$('#diary').textContent='Ошибка чтения дневника: '+e.message;}
