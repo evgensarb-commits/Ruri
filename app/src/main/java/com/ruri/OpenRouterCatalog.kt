@@ -15,7 +15,7 @@ internal object OpenRouterCatalog {
     private val adultAndRoleplay = Regex(
         "(?i)(nsfw|uncensored|abliterat|noromaid|lumimaid|mythomax|cydonia|rocinante|" +
             "unslopnemo|stheno|eva[-_ ]?llama|tiefighter|dark[-_ ]?idol|midnight[-_ ]?miqu|" +
-            "magnum|role[-_ ]?play|roleplay|erp|lewd|smut|erotic|adult|18[+]|no[-_ ]?filter|" +
+            "magnum|euryale|pygmalion|airoboros|kunoichi|fimbulvetr|toppy|capybara|role[-_ ]?play|roleplay|erp|lewd|smut|erotic|adult|18[+]|no[-_ ]?filter|" +
             "not[-_ ]?safe[-_ ]?for[-_ ]?work)"
     )
 
