@@ -170,7 +170,7 @@ class VisionGemmaOnlyTest {
 }
 
 class QuotaOrderTest {
-    @Test fun exhaustedMeroMeroBudgetMovesMiniMaxToTheFrontWithoutRemovingMeroMero() {
+    @Test fun exhaustedMeroMeroBudgetDoesNotChangeManualPriorityOrder() {
         val root = Files.createTempDirectory("ruri-quota-order").toFile()
         try {
             FileManager.init(root)
