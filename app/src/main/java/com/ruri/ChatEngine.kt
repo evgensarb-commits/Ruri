@@ -732,9 +732,15 @@ object ChatEngine {
 
     internal fun requestToolFollowup(model: JSONObject, messages: JSONArray, root: File? = null, routeId: String = "", task: Task? = null): String? {
         val base = model.optString("base_url").trimEnd('/')
-        if (!base.startsWith("https://")) return null
+        if (!base.startsWith("https://", ignoreCase = true)) {
+            throw ModelRequestFailure("Provider endpoint must use HTTPS", 0L, "invalid_endpoint")
+        }
+        val safeMessages = providerMessagesWithFullMemory(messages)
+            ?: throw ModelRequestFailure("Не удалось собрать полный контекст памяти для продолжения ответа", 0L, "context_error")
         var connection: HttpURLConnection? = null
-        return try {
+        val startedAt = System.currentTimeMillis()
+        try {
+            if (root != null && routeId.isNotBlank()) RouteMeta.recordAttempt(root, routeId)
             connection = (URL(base + "/chat/completions").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 18000
@@ -744,8 +750,6 @@ object ChatEngine {
                 val key = model.optString("api_key")
                 if (key.isNotBlank()) setRequestProperty("Authorization", "Bearer " + key)
             }
-            val safeMessages = providerMessagesWithFullMemory(messages) ?: return null
-            if (root != null && routeId.isNotBlank()) RouteMeta.recordAttempt(root, routeId)
             val body = JSONObject().put("model", model.optString("model"))
                 .put("messages", safeMessages)
                 .put("temperature", 0.9)
@@ -755,24 +759,37 @@ object ChatEngine {
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val raw = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            val raw = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
             val response = runCatching { JSONObject(raw) }.getOrNull() ?: JSONObject()
-            if (code !in 200..299) {
-                val failedUsage = response.optJSONObject("usage")
-                val failedTokens = failedUsage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
-                    ?: ((failedUsage?.optLong("prompt_tokens", 0L) ?: 0L) + (failedUsage?.optLong("completion_tokens", 0L) ?: 0L))
-                if (root != null && routeId.isNotBlank() && failedTokens > 0) RouteMeta.addTokens(root, routeId, failedTokens)
-                if (root != null && routeId.isNotBlank()) RouteMeta.recordFailure(root, routeId, RouteSelector.classify(code, null, raw), task)
-                return null
-            }
             val usage = response.optJSONObject("usage")
             val tokens = usage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
                 ?: ((usage?.optLong("prompt_tokens", 0L) ?: 0L) + (usage?.optLong("completion_tokens", 0L) ?: 0L))
             if (root != null && routeId.isNotBlank() && tokens > 0) RouteMeta.addTokens(root, routeId, tokens)
-            response.getJSONArray("choices").getJSONObject(0)
-                .getJSONObject("message").getString("content").trim()
-        } catch (_: Exception) {
-            null
+            if (code !in 200..299) {
+                val kind = RouteSelector.classify(code, null, raw)
+                if (root != null && routeId.isNotBlank()) RouteMeta.recordFailure(root, routeId, kind, task)
+                val retryAfter = if (code == 429) {
+                    parseRetryAfterMillis(connection.getHeaderField("Retry-After")).takeIf { it > 0L } ?: 60_000L
+                } else parseRetryAfterMillis(connection.getHeaderField("Retry-After"))
+                throw ModelRequestFailure("HTTP $code при продолжении ответа", retryAfter, if (code == 429) "rate_limit" else kind)
+            }
+            val content = response.optJSONArray("choices")?.optJSONObject(0)
+                ?.optJSONObject("message")?.optString("content")?.trim().orEmpty()
+            if (content.isBlank()) {
+                if (root != null && routeId.isNotBlank()) RouteMeta.recordFailure(root, routeId, "empty_response", task)
+                throw ModelRequestFailure("Провайдер вернул пустое продолжение ответа", 0L, "empty_response")
+            }
+            if (root != null && routeId.isNotBlank()) RouteMeta.recordSuccess(root, routeId, task)
+            return content
+        } catch (e: ModelRequestFailure) {
+            throw e
+        } catch (e: Exception) {
+            if (root != null && routeId.isNotBlank()) {
+                val kind = if (e is java.net.SocketTimeoutException) "timeout" else "network"
+                RouteMeta.recordFailure(root, routeId, kind, task)
+            }
+            val kind = if (e is java.net.SocketTimeoutException) "timeout" else "network"
+            throw ModelRequestFailure(e.message ?: "Ошибка сети при продолжении ответа", 0L, kind)
         } finally {
             connection?.disconnect()
         }
