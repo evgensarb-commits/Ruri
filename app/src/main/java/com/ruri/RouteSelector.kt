@@ -52,68 +52,42 @@ object RouteSelector {
     fun score(meta: JSONObject, task: Task): Double =
         meta.optJSONObject("scores")?.optDouble(task.name, 0.5)?.coerceIn(0.0, 1.0) ?: 0.5
 
+    fun latestCommanderText(root: File): String =
+        FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 300)
+            .asReversed().asSequence().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+            .firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" }
+            ?.optString("text").orEmpty()
+
     fun orderedIndices(
         root: File,
         models: JSONArray,
         current: Int,
         task: Task,
         online: Boolean = NetState.online,
-        vpn: Boolean = NetState.vpn
+        vpn: Boolean = NetState.vpn,
+        adult: Boolean = false
     ): List<Int> {
-        val candidates = mutableListOf<Pair<Int, Double>>()
-        val eligibleIndices = mutableSetOf<Int>()
-        for (index in 0 until models.length()) {
-            val model = models.optJSONObject(index) ?: continue
-            if (!model.optBoolean("free_tier", false) || !model.optBoolean("enabled", true)) continue
-            val id = model.optString("id").ifBlank { model.optString("name").ifBlank { "route_$index" } }
-            if (model.optString("api_key").isBlank()) continue
-
-            val meta = RouteMeta.route(root, id)
-            // Reachability, VPN and quota are transport/runtime concerns. Keep every eligible
-            // free route in the order; the caller/OfflineQueue handles connection failures.
-            eligibleIndices += index
-            candidates += index to score(meta, task)
+        val eligible = (0 until models.length()).filter { index ->
+            val model = models.optJSONObject(index) ?: return@filter false
+            model.optBoolean("free_tier", true) &&
+                model.optBoolean("enabled", true) &&
+                (model.optString("api_key").isNotBlank() || model.optBoolean("allow_anonymous", false))
         }
-
-        val meromeroIndex = (0 until models.length()).firstOrNull { index ->
-            val model = models.optJSONObject(index) ?: return@firstOrNull false
-            model.optString("model").contains("meromero", ignoreCase = true) ||
-                model.optString("id").contains("meromero", ignoreCase = true)
+        var order = eligible.sortedWith(
+            compareBy<Int> { models.optJSONObject(it)?.optInt("priority", 99) ?: 99 }
+                .thenBy { it }
+        )
+        val config = runCatching {
+            JSONObject(FileManager.read(root, "core/config.json"))
+        }.getOrElse { JSONObject() }
+        if (task == Task.VISION) {
+            order = order.filter { models.optJSONObject(it)?.optBoolean("vision", false) == true }
+        } else if (adult && config.optBoolean("nsfw_override", true)) {
+            val nsfw = order.filter { models.optJSONObject(it)?.optBoolean("nsfw", false) == true }
+            val other = order.filter { models.optJSONObject(it)?.optBoolean("nsfw", false) != true }
+            order = nsfw + other
         }
-        val minimaxIndex = (0 until models.length()).firstOrNull { index ->
-            models.optJSONObject(index)?.optString("model") == "minimax-m3.1-flash:free"
-        }
-        if (meromeroIndex != null || minimaxIndex != null) {
-            val meromero = meromeroIndex?.let { models.optJSONObject(it) }
-            val meromeroId = meromero?.optString("id").orEmpty()
-                .ifBlank { meromero?.optString("name").orEmpty() }
-            val meromeroTokensPerDay = meromero?.optLong("tokens_per_day", 0L) ?: 0L
-            val gemmaExhausted = meromeroTokensPerDay > 0L &&
-                meromeroId.isNotBlank() &&
-                RouteMeta.tokensToday(root, meromeroId) >= meromeroTokensPerDay
-
-            if (task == Task.VISION) {
-                return listOfNotNull(meromeroIndex?.takeIf { it in eligibleIndices })
-            }
-            val preferredOrder = if (gemmaExhausted) {
-                listOf(minimaxIndex, meromeroIndex)
-            } else {
-                listOf(meromeroIndex, minimaxIndex)
-            }
-            return preferredOrder.filterNotNull().filter { it in eligibleIndices }
-        }
-
-        return candidates.sortedWith(
-            compareBy<Pair<Int, Double>> { if (it.first == current) 0 else 1 }
-                .thenByDescending { it.second }
-                .thenBy { models.optJSONObject(it.first)?.optInt("priority", 100) ?: 100 }
-                .thenByDescending {
-                    val model = models.optJSONObject(it.first)
-                    val id = model?.optString("id").orEmpty()
-                        .ifBlank { model?.optString("name").orEmpty().ifBlank { "route_${it.first}" } }
-                    RouteMeta.route(root, id).optLong("last_ok", 0L)
-                }
-        ).map { it.first }
+        return order
     }
 
     fun classify(code: Int?, error: Exception?, responseBody: String = ""): String {
