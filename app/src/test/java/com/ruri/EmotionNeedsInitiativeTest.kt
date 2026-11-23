@@ -165,4 +165,33 @@ class AuditableInitiativeRollTest {
     }
 }
 
+class EmotionDeltaCrashSafetyTest {
+    @Test fun commanderMessageDeltaIsNotAppliedTwiceIfL4MarkerWriteWasInterrupted() {
+        val root = needsTestRoot()
+        setEmotionValues(root, fatigue = 10.0, boredom = 20.0, longing = 30.0)
+        EmotionEngine.onCommanderMessage(root, "Обычное сообщение", "msg-crash-safe")
+        val afterFirst = EmotionEngine.readValues(root)
+        FileManager.updateL4State(root) { it.remove("last_emotion_msg_id") }
+        EmotionEngine.onCommanderMessage(root, "Обычное сообщение", "msg-crash-safe")
+        val afterRetry = EmotionEngine.readValues(root)
+        assertEquals(afterFirst.optDouble("fatigue"), afterRetry.optDouble("fatigue"), 0.0)
+        assertEquals(afterFirst.optDouble("boredom"), afterRetry.optDouble("boredom"), 0.0)
+        assertEquals(afterFirst.optDouble("longing"), afterRetry.optDouble("longing"), 0.0)
+    }
+
+    @Test fun commanderReplyDeltaIsNotAppliedTwiceIfL4MarkerWriteWasInterrupted() {
+        val root = needsTestRoot()
+        setEmotionValues(root, fatigue = 10.0, boredom = 20.0, longing = 30.0)
+        EmotionEngine.onCommanderReply(root, "msg-reply-crash-safe")
+        val afterFirst = EmotionEngine.readValues(root)
+        FileManager.updateL4State(root) { it.remove("last_reply_emotion_msg_id") }
+        EmotionEngine.onCommanderReply(root, "msg-reply-crash-safe")
+        val afterRetry = EmotionEngine.readValues(root)
+        assertEquals(afterFirst.optDouble("anger"), afterRetry.optDouble("anger"), 0.0)
+        assertEquals(afterFirst.optDouble("sadness"), afterRetry.optDouble("sadness"), 0.0)
+        assertEquals(afterFirst.optDouble("joy"), afterRetry.optDouble("joy"), 0.0)
+        assertEquals(afterFirst.optDouble("longing"), afterRetry.optDouble("longing"), 0.0)
+    }
+}
+
 }
