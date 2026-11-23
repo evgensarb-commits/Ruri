@@ -858,6 +858,15 @@ object ChatEngine {
                 val retryAfter = if (code == 429) {
                     parseRetryAfterMillis(connection.getHeaderField("Retry-After")).takeIf { it > 0L } ?: 60_000L
                 } else parseRetryAfterMillis(connection.getHeaderField("Retry-After"))
+                if (root != null) NetworkDiagnostics.record(root, JSONObject()
+                    .put("timestamp", System.currentTimeMillis())
+                    .put("provider", model.optString("name", model.optString("id")))
+                    .put("model", model.optString("model"))
+                    .put("stage", "TOOL_FOLLOWUP_HTTP")
+                    .put("http_status", code)
+                    .put("result", "http_error")
+                    .put("failure_message", "HTTP $code при продолжении ответа")
+                    .put("retry_after_ms", retryAfter))
                 throw ModelRequestFailure("HTTP $code при продолжении ответа", retryAfter, if (code == 429) "rate_limit" else kind)
             }
             val content = response.optJSONArray("choices")?.optJSONObject(0)
