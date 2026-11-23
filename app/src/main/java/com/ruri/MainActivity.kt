@@ -510,47 +510,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
-        fun saveNvidiaKey(key: String): String {
-            return try {
-                val value = key.trim()
-                require(value.length >= 20) { "Проверь NVIDIA API key" }
-                val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
-                val models = config.optJSONArray("models") ?: JSONArray()
-                var route = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
-                    .firstOrNull { it.optString("id") == "nemotron" }
-                if (route == null) {
-                    val template = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
-                        .firstOrNull { it.optString("id") == "routeway" }
-                        ?: throw IllegalStateException("Не найден основной маршрут MeroMero")
-                    route = JSONObject(template.toString()).apply {
-                        put("id", "nemotron")
-                        put("name", "NVIDIA · Nemotron 3 Nano Omni Free")
-                        put("base_url", "https://integrate.api.nvidia.com/v1")
-                        put("model", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning")
-                        put("api_key", "")
-                        put("enabled", false)
-                        put("free_tier", true)
-                        put("nsfw", false)
-                        put("vision", false)
-                        put("priority", 2)
-                    }
-                    models.put(route)
-                }
-                route.remove("api_key_ref")
-                route.put("api_key", value)
-                    .put("enabled", true)
-                    .put("base_url", "https://integrate.api.nvidia.com/v1")
-                    .put("model", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning")
-                    .put("free_tier", true)
-                    .put("nsfw", false)
-                    .put("vision", false)
-                    .put("priority", 2)
-                SecretStore.saveRuntimeConfig(filesDir, config.toString(2))
-                "OK"
-            } catch (e: Exception) { "ERROR: " + (e.message ?: "NVIDIA key save failed") }
-        }
-
-        @JavascriptInterface
         fun saveRouteOrder(json: String): String {
             return try {
                 val payload = JSONObject(json)
