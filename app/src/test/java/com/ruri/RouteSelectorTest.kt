@@ -73,8 +73,8 @@ class RouteSelectorTest {
 
 }
 
-class OnlyTwoRoutesTest {
-    @Test fun migrationKeepsOnlyMeroMeroAndDolphinAndPrunesOldMetadata() {
+class OnlyNsfwRoutesTest {
+    @Test fun migrationKeepsOnlyMeroMeroAndHFAndPrunesOldMetadata() {
         val root = Files.createTempDirectory("ruri-only-two-routes").toFile()
         try {
             FileManager.init(root)
@@ -112,15 +112,16 @@ class OnlyTwoRoutesTest {
             val models = migrated.getJSONArray("models")
             assertEquals(2, models.length())
             assertTrue(models.getJSONObject(0).getString("model").contains("meromero"))
-            assertEquals("cognitivecomputations/dolphin3.0-mistral-24b:free", models.getJSONObject(1).getString("model"))
+            assertEquals("", models.getJSONObject(1).getString("model"))
+            assertFalse(models.getJSONObject(1).getBoolean("enabled"))
             assertEquals(1, models.getJSONObject(0).getInt("priority"))
             assertTrue(models.getJSONObject(0).getBoolean("nsfw"))
             assertTrue(models.getJSONObject(0).getBoolean("vision"))
             assertEquals(2, models.getJSONObject(1).getInt("priority"))
             assertTrue(models.getJSONObject(1).getBoolean("nsfw"))
             assertFalse(models.getJSONObject(1).getBoolean("vision"))
-            assertEquals("openrouter-dolphin", models.getJSONObject(1).getString("id"))
-            assertEquals(50, models.getJSONObject(1).getInt("rpd"))
+            assertEquals("hf", models.getJSONObject(1).getString("id"))
+            assertEquals(0, models.getJSONObject(1).getInt("rpd"))
             assertTrue(migrated.getBoolean("nsfw_override"))
             assertEquals("AUTO", migrated.getString("route_mode"))
             assertEquals("routeway", migrated.getString("selected_route_id"))
@@ -137,12 +138,12 @@ class OnlyTwoRoutesTest {
     }
 }
 
-class VisionGemmaOnlyTest {
+class VisionMeroMeroOnlyTest {
     @Test fun cachedVisionRouteNeverReturnsDolphin() {
         val root = Files.createTempDirectory("ruri-cached-vision-meromero").toFile()
         try {
             FileManager.init(root)
-            RouteMeta.setCapability(root, "openrouter-dolphin", "vision", true)
+            RouteMeta.setCapability(root, "hf", "vision", true)
             RouteMeta.setCapability(root, "routeway", "vision", false)
             val config = JSONObject(FileManager.read(root, "core/config.json"))
             val configured = config.getJSONArray("models")
@@ -161,7 +162,7 @@ class VisionGemmaOnlyTest {
             val models = JSONArray()
                 .put(JSONObject().put("id", "routeway").put("model", "gemma-4-26b-a4b-it-meromero:free")
                     .put("tokens_per_day", 400000).put("vision", true).put("free_tier", true).put("enabled", true).put("api_key", "set"))
-                .put(JSONObject().put("id", "openrouter-dolphin").put("model", "cognitivecomputations/dolphin3.0-mistral-24b:free")
+                .put(JSONObject().put("id", "hf").put("model", "TheDrummer/Cydonia-24B-v4.1")
                     .put("free_tier", true).put("enabled", true).put("api_key", "set").put("nsfw", true).put("vision", false))
             val order = RouteSelector.orderedIndices(root, models, current = 1, task = Task.VISION, online = true, vpn = false)
             assertEquals(listOf(0), order)
@@ -181,7 +182,7 @@ class QuotaOrderTest {
                 .put(JSONObject().put("id", "routeway").put("model", "gemma-4-26b-a4b-it-meromero:free")
                     .put("tokens_per_day", 400000).put("priority", 1).put("nsfw", true).put("vision", true)
                     .put("free_tier", true).put("enabled", true).put("api_key", "set"))
-                .put(JSONObject().put("id", "openrouter-dolphin").put("model", "cognitivecomputations/dolphin3.0-mistral-24b:free")
+                .put(JSONObject().put("id", "hf").put("model", "TheDrummer/Cydonia-24B-v4.1")
                     .put("free_tier", true).put("enabled", true).put("api_key", "set").put("priority", 2).put("nsfw", true).put("vision", false))
             val order = RouteSelector.orderedIndices(root, models, current = 0, task = Task.CHAT, online = true, vpn = false)
             assertEquals(listOf(0, 1), order)
@@ -192,24 +193,27 @@ class QuotaOrderTest {
 }
 
 
-class NsfwDolphinPoolTest {
+class NsfwHfPoolTest {
     private fun configured(root: java.io.File): JSONArray {
         FileManager.init(root)
-        return JSONObject(FileManager.read(root, "core/config.json")).getJSONArray("models")
+        val models = JSONObject(FileManager.read(root, "core/config.json")).getJSONArray("models")
+        models.getJSONObject(1).put("model", "TheDrummer/Cydonia-24B-v4.1").put("enabled", true).put("api_key", "hf_test")
+        return models
     }
 
     @Test
-    fun onlyMeroMeroAndDolphinFreeRemainConfigured() {
+    fun onlyMeroMeroAndHFRemainConfigured() {
         val root = Files.createTempDirectory("ruri-nsfw-only-routes").toFile()
         try {
             val models = configured(root)
             assertEquals(2, models.length())
             assertEquals("routeway", models.getJSONObject(0).getString("id"))
             assertEquals("gemma-4-26b-a4b-it-meromero:free", models.getJSONObject(0).getString("model"))
-            assertEquals("openrouter-dolphin", models.getJSONObject(1).getString("id"))
-            assertEquals("cognitivecomputations/dolphin3.0-mistral-24b:free", models.getJSONObject(1).getString("model"))
+            assertEquals("hf", models.getJSONObject(1).getString("id"))
+            assertEquals("hf", models.getJSONObject(1).getString("id"))
             assertTrue((0 until models.length()).all { models.getJSONObject(it).getBoolean("nsfw") })
             assertFalse(models.toString().contains("minimax"))
+            assertFalse(models.toString().contains("horde"))
             assertFalse(models.toString().contains("groq"))
         } finally {
             root.deleteRecursively()
@@ -245,12 +249,12 @@ class NsfwDolphinPoolTest {
     }
 
     @Test
-    fun real429IsClassifiedAndDolphinRemainsNextFallbackWithoutPreflightFiltering() {
+    fun real429IsClassifiedAndHFRemainsNextFallbackWithoutPreflightFiltering() {
         val root = Files.createTempDirectory("ruri-nsfw-real-fallback").toFile()
         try {
             val models = configured(root)
-            RouteMeta.setNeedsVpn(root, "openrouter-dolphin", true)
-            RouteMeta.update(root, "openrouter-dolphin") { it.put("ru_reachable", false) }
+            RouteMeta.setNeedsVpn(root, "hf", true)
+            RouteMeta.update(root, "hf") { it.put("ru_reachable", false) }
             RouteMeta.addTokens(root, "routeway", 400000L)
             assertEquals("rate_limit", RouteSelector.classify(429, null, "Too many requests"))
             assertEquals(
@@ -263,11 +267,11 @@ class NsfwDolphinPoolTest {
     }
 
     @Test
-    fun openRouterKeyIsRedactedFromWebRuntimeConfig() {
+    fun hfTokenIsRedactedFromWebRuntimeConfig() {
         val raw = JSONObject()
             .put("models", JSONArray().put(JSONObject()
-                .put("id", "openrouter-dolphin")
-                .put("api_key", "sk-or-secret")
+                .put("id", "hf")
+                .put("api_key", "hf_secret_token")
             )).toString()
         val public = JSONObject(SecretStore.redactRuntimeConfigForWeb(raw))
         val dolphin = public.getJSONArray("models").getJSONObject(0)
