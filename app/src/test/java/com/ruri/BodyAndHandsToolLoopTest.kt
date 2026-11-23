@@ -122,8 +122,14 @@ class KiloRemovedTest : BodyHandsTestBase() {
         FileManager.write(root, "core/config.json", JSONObject()
             .put("models", JSONArray()).put("current", 0).put("free_only", true).toString())
         FileManager.write(root, "memory/L4_state.json", JSONObject().toString())
-        val outcome = runCatching { ChatEngine.respond(root) }
-        assertTrue(outcome.isSuccess || outcome.exceptionOrNull()?.message.orEmpty().contains("маршрутов"))
+        val messageId = "empty-route-commander-message"
+        FileManager.appendEvent(root, JSONObject().put("id", messageId)
+            .put("type", "message").put("who", "commander").put("text", "Ответь мне")
+            .put("ts", System.currentTimeMillis()))
+        CommanderReplyQueue.enqueue(root, messageId)
+        val outcome = runCatching { ChatEngine.respond(root, messageId) }
+        assertTrue(outcome.isFailure)
+        assertTrue(CommanderReplyQueue.hasPending(root))
         assertTrue(OfflineQueue.hasPending(root))
     }
 }
