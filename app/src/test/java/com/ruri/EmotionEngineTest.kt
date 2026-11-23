@@ -123,6 +123,7 @@ class InitiativeGateEmotionTest : EmotionEngineTestBase() {
 
     @Test fun waitingForReplyAlwaysBlocksInitiative() {
         val now = System.currentTimeMillis()
+        EmotionEngine.applyDelta(root, JSONObject().put("boredom", 80.0).put("longing", 80.0), "test_pressure")
         assertEquals(false, EmotionEngine.initiativeGate(
             root, now - 12L * EMOTION_TEST_HOUR_MS, now, true, 0L
         ))
