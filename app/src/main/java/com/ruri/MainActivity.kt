@@ -168,7 +168,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         activityResumed = true
         NetState.refresh(this)
-        if (OfflineQueue.hasPending(filesDir) && NetState.online) {
+        if ((OfflineQueue.hasPending(filesDir) || CommanderReplyQueue.hasPending(filesDir)) && NetState.online) {
             LifeScheduler.enqueueEvent(this, "commander_reply_resume")
         }
         if (::web.isInitialized) {
@@ -500,9 +500,9 @@ class MainActivity : AppCompatActivity() {
                 if (event.optString("type") == "message" && event.optString("who") == "commander") {
                     val messageId = saved.optString("id")
                     Receipts.delivered(filesDir, messageId)
-                    CommanderReplyQueue.enqueue(filesDir, messageId)
-                    OfflineQueue.markPending(filesDir, messageId)
                     LifeScheduler.enqueueEvent(this@MainActivity, "commander_message:" + messageId)
+                    CommanderReplyQueue.enqueue(filesDir, messageId)
+                    runCatching { OfflineQueue.markPending(filesDir, messageId) }
                 }
                 "OK"
             } catch (e: Exception) { "ERROR: " + (e.message ?: "event append failed") }
