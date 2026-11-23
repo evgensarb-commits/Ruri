@@ -475,10 +475,10 @@ function hfCandidate(id){return /cydonia|rocinante|unslopnemo|dolphin|magnum/i.t
 window.onHFModelsResult=function(raw){try{
 var result=typeof raw==='string'?JSON.parse(raw):raw,select=$('#hfModel');select.innerHTML='';hfAvailableModels=[];
 if(!result||!result.ok){select.appendChild(new Option('Список недоступен',''));$('#hfStatus').textContent='Не удалось получить список HF: '+((result&&result.error)||'ошибка');$('#hfCandidates').textContent='Работаю на MeroMero; HF не включён.';return;}
-hfAvailableModels=Array.isArray(result.models)?result.models:[];var candidates=hfAvailableModels.filter(hfCandidate);
-hfAvailableModels.forEach(function(id){select.appendChild(new Option((hfCandidate(id)?'★ ROLEPLAY · ':'')+id,id));});
+var allModels=Array.isArray(result.models)?result.models:[];hfAvailableModels=allModels.filter(hfCandidate);var candidates=hfAvailableModels;
+hfAvailableModels.forEach(function(id){select.appendChild(new Option('★ ROLEPLAY · '+id,id));});
 if(!hfAvailableModels.length){select.appendChild(new Option('HF не вернул моделей',''));$('#hfStatus').textContent='HF free сейчас не отдаёт модели — работаю на MeroMero.';$('#hfCandidates').textContent='Список пуст; HF остаётся выключенным.';}
-else{$('#hfStatus').textContent='Получено моделей: '+hfAvailableModels.length+'. Roleplay-кандидатов по имени: '+candidates.length+'.';$('#hfCandidates').textContent=candidates.length?'Кандидаты: '+candidates.join(' · ')+'. Это фильтр по названию, не подтверждение uncensored.':'В списке не найдено известных roleplay-кандидатов — работаю на MeroMero.';}
+else{$('#hfStatus').textContent='Моделей в списке: '+allModels.length+'. Roleplay-кандидатов по имени: '+candidates.length+'.';$('#hfCandidates').textContent=candidates.length?'Кандидаты: '+candidates.join(' · ')+'. Это фильтр по названию, не подтверждение uncensored.':'В списке не найдено известных roleplay-кандидатов — работаю на MeroMero.';}
 }catch(e){$('#hfStatus').textContent='Ошибка разбора ответа HF: '+e.message;}};
 $('#saveHFKey').addEventListener('click',function(){try{var key=$('#hfKey').value.trim();if(!key)throw new Error('Вставь HF token');var result=Ruri.saveHFKey(key);if(String(result).indexOf('ERROR:')===0)throw new Error(result);$('#hfKey').value='';$('#hfStatus').textContent='HF token сохранён в Android Keystore. Теперь загрузи список моделей.';loadRoutes();}catch(e){alert('Не удалось сохранить HF token: '+e.message);}});
 $('#fetchHFModels').addEventListener('click',function(){try{var result=Ruri.fetchHFModels();if(String(result).indexOf('ERROR:')===0)throw new Error(result);$('#hfStatus').textContent='Запрашиваю список моделей у Hugging Face…';}catch(e){$('#hfStatus').textContent=e.message;}});
