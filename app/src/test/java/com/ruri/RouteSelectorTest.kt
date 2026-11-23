@@ -192,3 +192,23 @@ class QuotaOrderTest {
     }
 }
 
+
+
+class AdultRouteOrderTest {
+    @Test fun nsfwOverridePutsBothFreeRoleplayRoutesAheadOfMiniMax() {
+        val root = Files.createTempDirectory("ruri-adult-route-order").toFile()
+        try {
+            FileManager.init(root)
+            val config = JSONObject(FileManager.read(root, "core/config.json"))
+            val models = config.getJSONArray("models")
+            assertEquals(3, models.length())
+            assertEquals(
+                listOf("routeway", "routeway-darksoul", "routeway-minimax"),
+                RouteSelector.orderedIndices(root, models, 0, Task.CREATIVE, adult = true)
+                    .map { models.getJSONObject(it).getString("id") }
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+}
