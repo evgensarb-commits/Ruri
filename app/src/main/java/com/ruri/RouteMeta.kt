@@ -250,7 +250,7 @@ object RouteMeta {
         it.put("failures_today", it.optInt("failures_today", 0) + 1)
         it.put("last_failure_kind", kind.take(40))
         when (kind) {
-            "rate_limit" -> it.put("rate_limits_today", it.optInt("rate_limits_today", 0) + 1)
+            "quota", "rate_limit" -> it.put("rate_limits_today", it.optInt("rate_limits_today", 0) + 1)
             "network", "region" -> it.put("network_errors_today", it.optInt("network_errors_today", 0) + 1)
             "timeout" -> it.put("timeouts_today", it.optInt("timeouts_today", 0) + 1)
         }
