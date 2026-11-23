@@ -6,10 +6,10 @@ import android.service.notification.StatusBarNotification
 import android.util.Log
 import org.json.JSONObject
 
-class NotificationMonitor : NotificationListenerService() {
+internal object NotificationDeduper {
     private val lastContentByKey = LinkedHashMap<String, Int>()
 
-    internal fun shouldRecordNotification(key: String, fingerprint: Int): Boolean = synchronized(lastContentByKey) {
+    fun shouldRecord(key: String, fingerprint: Int): Boolean = synchronized(lastContentByKey) {
         if (lastContentByKey[key] == fingerprint) return@synchronized false
         lastContentByKey[key] = fingerprint
         while (lastContentByKey.size > 256) {
@@ -19,6 +19,10 @@ class NotificationMonitor : NotificationListenerService() {
         true
     }
 
+    fun remove(key: String) = synchronized(lastContentByKey) { lastContentByKey.remove(key) }
+}
+
+class NotificationMonitor : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         if (sbn == null || sbn.packageName == packageName) return
         try {
@@ -29,7 +33,7 @@ class NotificationMonitor : NotificationListenerService() {
                 excludedKeys = setOf(Notification.EXTRA_TITLE)
             )
             val fingerprint = (title + "\u0000" + text).hashCode()
-            if (!shouldRecordNotification(sbn.key, fingerprint)) return
+            if (!NotificationDeduper.shouldRecord(sbn.key, fingerprint)) return
             FileManager.appendEvent(
                 filesDir,
                 JSONObject()
@@ -49,7 +53,7 @@ class NotificationMonitor : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         if (sbn == null || sbn.packageName == packageName) return
-        synchronized(lastContentByKey) { lastContentByKey.remove(sbn.key) }
+        NotificationDeduper.remove(sbn.key)
         try {
             FileManager.appendEvent(
                 filesDir,
