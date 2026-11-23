@@ -55,7 +55,7 @@ internal object HFModelCatalog {
                 .thenBy { it.optString("model") }
                 .thenBy { it.optString("provider") }
         )
-        return JSONArray().also { out -> sorted.forEach(out::put) }
+        return JSONArray().also { out -> sorted.take(30).forEach(out::put) }
     }
 
     private fun price(pricing: JSONObject, primary: String, alternate: String): Double? {
