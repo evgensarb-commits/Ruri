@@ -283,7 +283,6 @@ class RuriLifeWorker(
         if (!driveCheckEvent && !notificationEvent && !explicitSelfTask) return false
 
         val config = try { JSONObject(SecretStore.readRuntimeConfig(root)) } catch (_: Exception) { return false }
-        if (!NetState.online) return false
         val models = config.optJSONArray("models") ?: return false
         val task = if (driveCheckEvent) Task.WARMTH else if (explicitSelfTask) Task.TOOLS else Task.REASON
         return FreeModelRouter.orderedIndices(
