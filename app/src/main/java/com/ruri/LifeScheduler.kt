@@ -192,8 +192,10 @@ class RuriLifeWorker(
                 Log.e("Ruri", "Rolling backup checkpoint failed; life cycle will continue", backupError)
             }
 
-            // Avoid spending tokens on every 30-minute maintenance wake-up.
-            if (shouldRunRemoteCognition(appContext, reason)) {
+            // A pending Commander reply takes priority over optional autonomous cognition.
+            // This is task ordering, not an online/quota/battery preflight.
+            val commanderReplyPending = OfflineQueue.hasPending(root) || CommanderReplyQueue.hasPending(root)
+            if (!commanderReplyPending && shouldRunRemoteCognition(appContext, reason)) {
                 if (!Thinker.runScheduledCycle(appContext, reason)) return Result.retry()
             }
 
