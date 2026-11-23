@@ -271,7 +271,7 @@ class RuriLifeWorker(
     private fun shouldRunRemoteCognition(context: Context, reason: String): Boolean {
         val root = context.filesDir
         val now = System.currentTimeMillis()
-        val notificationEvent = reason.contains("phone_notification")
+        val notificationEvent = reason.contains("phone_notification") && !reason.contains("removed")
         val explicitSelfTask = reason.contains("research_task") || reason.contains("capability_gap")
         val driveCheckEvent = reason.contains("drive_check")
 
