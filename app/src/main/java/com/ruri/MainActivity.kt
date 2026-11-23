@@ -168,7 +168,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         activityResumed = true
         NetState.refresh(this)
-        if ((OfflineQueue.hasPending(filesDir) || CommanderReplyQueue.hasPending(filesDir)) && NetState.online) {
+        if (OfflineQueue.hasPending(filesDir) || CommanderReplyQueue.hasPending(filesDir)) {
             LifeScheduler.enqueueEvent(this, "commander_reply_resume")
         }
         if (::web.isInitialized) {
