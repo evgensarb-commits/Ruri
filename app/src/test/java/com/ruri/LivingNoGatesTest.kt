@@ -26,16 +26,13 @@ class LivingNoGatesTest {
         assertEquals(listOf("Мне спокойно"), diary); assertTrue(tools.isEmpty())
     }
 
-    @Test fun DiaryMirrorTest() {
+    @Test fun DiaryRemainsThoughtsOnlyTest() {
         val root = root()
-        val defaultConfig = JSONObject()
-        val enabledConfig = JSONObject().put("diary_mirror_said", true)
-        assertFalse(ChatEngine.diaryMirrorSaid(defaultConfig))
-        assertTrue(ChatEngine.diaryMirrorSaid(enabledConfig))
-        val kind = if (ChatEngine.diaryMirrorSaid(enabledConfig)) "said" else "thought"
-        Diary.append(root, "Сказанная фраза", "ответ_командиру", null, kind)
+        Diary.append(root, "Внутренняя мысль", "test", null, "thought")
+        Diary.append(root, "Сказанная фраза", "ответ_командиру", null, "said")
         val entries = JSONObject(FileManager.read(root, "memory/L2_diary.json")).getJSONArray("entries")
-        assertEquals("said", entries.getJSONObject(entries.length() - 1).optString("kind"))
+        assertEquals(1, entries.length())
+        assertEquals("thought", entries.getJSONObject(0).optString("kind"))
     }
 
     @Test fun DiaryKindDedupTest() {
