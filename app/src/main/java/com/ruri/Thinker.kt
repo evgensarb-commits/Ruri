@@ -113,11 +113,22 @@ object Thinker {
         var reply: String? = null
         var successfulIndex = -1
         var successfulRouteId = ""
+        var followupRequests = 0
         for (index in order) {
             val model = models.optJSONObject(index) ?: continue
             // All cognition routes must carry the full memory context.
             if (model.optString("api_key").isBlank()) continue
             val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
+            val requestNext: (JSONArray) -> String? = { nextMessages ->
+                if (followupRequests >= 8) {
+                    appendEvent(root, "model_request_budget_exhausted", JSONObject()
+                        .put("route", routeId).put("limit", 8).put("cycle", "autonomous"))
+                    null
+                } else {
+                    followupRequests++
+                    ChatEngine.requestToolFollowup(model, nextMessages, root, routeId, task)
+                }
+            }
             runCatching { RouteMeta.recordAttempt(root, routeId) }
             val messages = JSONArray()
                 .put(JSONObject().put("role", "system").put("content", prompt))
@@ -126,12 +137,12 @@ object Thinker {
             var requestFailureClassified = false
             val initial = requestModel(model, messages, root, routeId, task) { requestFailureClassified = true }
             reply = if (initial.isNullOrBlank()) null else ToolLoop.unwrapDiaryReply(root, initial, messages) { next ->
-                ChatEngine.requestToolFollowup(model, next, root, routeId, task)
+                requestNext(next)
             }
             if (reply.isNullOrBlank()) {
                 messages.put(JSONObject().put("role", "system")
                     .put("content", "Предыдущий ответ был действительно пустым. Ответь обычной русской прозой или верни write_diary с непустым полем text."))
-                val retry = ChatEngine.requestToolFollowup(model, messages, root, routeId, task)
+                val retry = requestNext(messages)
                 reply = if (retry.isNullOrBlank()) null else ToolLoop.unwrapDiaryReply(root, retry, messages) { next ->
                     ChatEngine.requestToolFollowup(model, next, root, routeId, task)
                 }
