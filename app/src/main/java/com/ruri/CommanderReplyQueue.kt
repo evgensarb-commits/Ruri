@@ -124,7 +124,7 @@ object CommanderReplyQueue {
     }
 
     /** Recovery for installations that only had the legacy pending_reply boolean. */
-    fun recoverLatestUnanswered(root: File): String? = synchronized(lock) {
+    fun recoverUnanswered(root: File): String? = synchronized(lock) {
         val state = readState(root)
         val pending = state.optJSONArray("pending") ?: JSONArray()
         val queuedIds = (0 until pending.length()).mapNotNull { pending.optJSONObject(it)?.optString("message_id") }.toSet()
