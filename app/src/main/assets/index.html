@@ -149,7 +149,7 @@ function status(s){var summary='';try{summary=Ruri.quotaSummary()||('Vision: '+(
 function read(p){return Ruri.read(p)||'';}
 function write(p,v){var r=Ruri.write(p,v);if(typeof r==='string'&&r.indexOf('ERROR:')===0)throw new Error(r);return r;}
 function appendLog(obj){var result=Ruri.appendEvent(JSON.stringify(obj));if(typeof result==='string'&&result.indexOf('ERROR:')===0)throw new Error(result);}
-function routeBadges(){var map={};try{read('memory/route_badges.jsonl').split('\n').forEach(function(line){if(!line.trim())return;var b=JSON.parse(line);map[String(b.ts)]=b;});}catch(_){}return map;}
+function routeBadges(){var map={};try{JSON.parse(Ruri.readLastLines('memory/route_badges.jsonl',500)||'[]').forEach(function(line){if(!line.trim())return;var b=JSON.parse(line);map[String(b.ts)]=b;});}catch(_){}return map;}
 var messageReceipts={};
 function refreshMessageReceipts(){try{messageReceipts=JSON.parse(Ruri.readReceipts()||'{}');}catch(_){messageReceipts={};}}
 function messageNode(who,text,ts,extra,route){
@@ -182,7 +182,7 @@ return d;
 }
 function loadChat(){
 var box=$('#chat');box.innerHTML='';var badges=routeBadges();
-var events=read('memory/L0_raw.jsonl').split('\n').map(function(line){try{return JSON.parse(line);}catch(_){return null;}}).filter(function(e){return e&&e.type==='message'&&e.who&&!Ruri.isMessageDeleted(e.id||'');});
+var events=JSON.parse(Ruri.readLastEvents('message',100)||'[]').map(function(item){return item.event;}).reverse().filter(function(e){return e&&e.who&&!Ruri.isMessageDeleted(e.id||'');});
 events.forEach(function(e){if(e.who==='ruri'&&e.id)Ruri.markReadByCommander(e.id);});
 refreshMessageReceipts();
 events.forEach(function(e){var b=badges[String(e.ts)];box.appendChild(messageNode(e.who,e.text,e.ts,e,e.route||(b&&b.route)));});
@@ -203,7 +203,7 @@ visible.forEach(function(e){var d=messageNode('ruri',e.text,e.ts,e);var kind=e.k
 
 function historyForModel(){
 var items=[];
-read('memory/L0_raw.jsonl').split('\n').slice(-80).forEach(function(line){try{var e=JSON.parse(line);if(e.type==='message'&&e.who&&e.text)items.push({role:e.who==='ruri'?'assistant':'user',content:e.text});}catch(_){}});
+JSON.parse(Ruri.readLastEvents('message',80)||'[]').map(function(item){return item.event;}).reverse().forEach(function(e){if(e&&e.who&&e.text)items.push({role:e.who==='ruri'?'assistant':'user',content:e.text});});
 return items.slice(-14);
 }
 var nativeChatCallbacks={};
