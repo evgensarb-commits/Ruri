@@ -56,7 +56,7 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) web.settings.safeBrowsingEnabled = true
         web.webViewClient = object : WebViewClient() {
             private fun isTrustedLocalAsset(url: String?): Boolean =
-                url?.startsWith("file:///android_asset/") == true
+                url == "file:///android_asset/index.html"
 
             override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean {
                 val target = request?.url?.toString()
