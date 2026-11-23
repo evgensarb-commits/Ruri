@@ -128,6 +128,15 @@ button.action.secondary{background:transparent;color:var(--gold)}
 <button class="action" id="run-diag" style="margin-bottom:12px">ОБНОВИТЬ ДАННЫЕ</button>
 <button class="action secondary" id="forceRefreshRoutes" style="margin-bottom:12px">ПЕРЕПРОВЕРИТЬ ДОСТУПНОСТЬ</button>
 <pre id="diag-out" style="background:#050810;border:1px solid #32456d;color:#dde3ec;padding:12px;font:12px/1.5 monospace;border-radius:4px;white-space:pre-wrap;overflow-wrap:anywhere">Нажми «ОБНОВИТЬ ДАННЫЕ»</pre>
+<div class="card" id="tokenAuditCard">
+<b>ТОКЕН-АУДИТ</b>
+<p>Фактический usage из ответов провайдера по этапам. Если провайдер не прислал usage, токены отмечаются как неизвестные. Разбивка контекста — символы, не токены; тексты запросов и ключи не сохраняются.</p>
+<div class="actions"><button class="action secondary" id="tokenAuditRefresh">ОБНОВИТЬ ЗАМЕРЫ</button><button class="action secondary" id="tokenAuditExport">ЭКСПОРТ JSON</button><button class="action secondary" id="tokenAuditCopy">КОПИРОВАТЬ JSON</button></div>
+<div id="tokenAuditStatus" class="small">Замеров пока нет.</div>
+<div id="tokenAuditTable" style="overflow:auto;margin-top:10px"></div>
+<pre id="tokenAuditBreakdown" style="white-space:pre-wrap;overflow-wrap:anywhere;font:10px/1.5 monospace;color:#9cafcb;margin-top:10px"></pre>
+<textarea id="tokenAuditJson" rows="10" hidden readonly style="font:10px/1.4 monospace"></textarea>
+</div>
 <div class="card" id="l0Journal">
 <b>ЖУРНАЛ L0</b>
 <div class="field"><label for="l0Filter">ТИП ЗАПИСИ</label><select id="l0Filter">
@@ -520,7 +529,7 @@ $('#file').addEventListener('change',function(e){var f=e.target.files&&e.target.
 
 $('#settingsToggle').addEventListener('click',function(){document.querySelectorAll('.pane').forEach(function(p){p.classList.remove('on');});$('#pane-brain').classList.add('on');loadCharacter();loadAutomaticBackups();});
 $('#closeSettings').addEventListener('click',function(){$('#pane-brain').classList.remove('on');$('#pane-chat').classList.add('on');document.querySelectorAll('nav button').forEach(function(b){b.classList.toggle('on',b.dataset.pane==='chat');});});
-$('#showDiagnostics').addEventListener('click',function(){$('#pane-brain').classList.remove('on');$('#pane-diag').classList.add('on');$('#run-diag').click();});
+$('#showDiagnostics').addEventListener('click',function(){$('#pane-brain').classList.remove('on');$('#pane-diag').classList.add('on');$('#run-diag').click();loadTokenAudit();});
 $('#closeDiagnostics').addEventListener('click',function(){$('#pane-diag').classList.remove('on');$('#pane-brain').classList.add('on');});
 $('#attach').addEventListener('click',function(){$('#attachFile').click();});
 $('#attachFile').addEventListener('change',function(e){
@@ -532,6 +541,35 @@ reader.onerror=function(){alert('Не удалось прочитать файл
 reader.readAsDataURL(f);
 });
 
+function loadTokenAudit(){
+ try{
+  var data=JSON.parse(Ruri.tokenAuditSummary()||'{}'), stages=data.stages||{}, names=Object.keys(stages).sort();
+  var box=$('#tokenAuditTable');box.innerHTML='';
+  if(!names.length){$('#tokenAuditStatus').textContent='Замеров пока нет. Выполни несколько запросов и обнови.';$('#tokenAuditBreakdown').textContent='';return;}
+  var table=document.createElement('table');table.style.cssText='width:100%;border-collapse:collapse;font:10px/1.5 monospace';
+  var head=document.createElement('tr');
+  ['ЭТАП','N','INPUT','OUTPUT','CACHED','TOTAL','СРЕДН. INPUT'].forEach(function(v){var th=document.createElement('th');th.textContent=v;th.style.cssText='text-align:left;padding:6px 4px;border-bottom:1px solid #354a70;color:#f4c94f';head.appendChild(th);});
+  table.appendChild(head);
+  var detail=[];
+  names.forEach(function(name){
+   var x=stages[name]||{},known=Number(x.known_usage)||0,avg=known?Math.round((Number(x.prompt)||0)/known):'—';
+   var tr=document.createElement('tr');
+   [name,x.count||0,x.prompt||0,x.completion||0,x.cached||0,x.total||0,avg].forEach(function(v){var td=document.createElement('td');td.textContent=String(v);td.style.cssText='padding:6px 4px;border-bottom:1px solid #273653;white-space:nowrap';tr.appendChild(td);});
+   table.appendChild(tr);
+   var bd=x.breakdown||{};detail.push(name+': '+Object.keys(bd).sort().map(function(k){return k+'='+bd[k]+' символов';}).join(' · '));
+  });
+  box.appendChild(table);
+  $('#tokenAuditStatus').textContent='Событий: '+(data.events||0)+' · этапов: '+names.length+' · среднее INPUT считается только по ответам с usage.';
+  $('#tokenAuditBreakdown').textContent='РАЗБИВКА КОНТЕКСТА (СИМВОЛЫ)\n'+detail.join('\n');
+ }catch(e){$('#tokenAuditStatus').textContent='Ошибка чтения аудита: '+e.message;}
+}
+function showTokenAuditExport(){
+ try{var raw=Ruri.exportTokenAudit()||'[]';var area=$('#tokenAuditJson');area.hidden=false;area.value=raw;area.focus();area.select();var copied=false;try{copied=document.execCommand('copy');}catch(_){}$('#tokenAuditStatus').textContent='Экспортировано записей: '+JSON.parse(raw).length+(copied?' · JSON скопирован':' · JSON показан ниже — выдели и скопируй');}
+ catch(e){$('#tokenAuditStatus').textContent='Ошибка экспорта: '+e.message;}
+}
+$('#tokenAuditRefresh').addEventListener('click',loadTokenAudit);
+$('#tokenAuditExport').addEventListener('click',showTokenAuditExport);
+$('#tokenAuditCopy').addEventListener('click',function(){var area=$('#tokenAuditJson');if(area.hidden){showTokenAuditExport();return;}area.focus();area.select();try{var ok=document.execCommand('copy');$('#tokenAuditStatus').textContent=ok?'JSON скопирован':'Выдели текст в поле JSON и скопируй вручную.';}catch(_){$('#tokenAuditStatus').textContent='Выдели текст в поле JSON и скопируй вручную.';}});
 try{loadChat();status('НА СВЯЗИ');loadRoutes();loadBackupVisibility();refreshOnboarding();}catch(e){status('ОШИБКА ЗАПУСКА');}
 </script>
 </body></html>
