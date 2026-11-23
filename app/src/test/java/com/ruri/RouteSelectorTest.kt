@@ -73,9 +73,9 @@ class RouteSelectorTest {
 
 }
 
-class ThreeFreeRoutesTest {
-    @Test fun migrationKeepsMeroMeroMiniMaxAndDarksoulAndPrunesOldMetadata() {
-        val root = Files.createTempDirectory("ruri-three-routes").toFile()
+class OnlyTwoRoutesTest {
+    @Test fun migrationKeepsOnlyMeroMeroAndMiniMaxAndPrunesOldMetadata() {
+        val root = Files.createTempDirectory("ruri-only-two-routes").toFile()
         try {
             FileManager.init(root)
             val config = JSONObject(FileManager.read(root, "core/config.json"))
@@ -99,7 +99,7 @@ class ThreeFreeRoutesTest {
 
             val migrated = JSONObject(FileManager.read(root, "core/config.json"))
             val models = migrated.getJSONArray("models")
-            assertEquals(3, models.length())
+            assertEquals(2, models.length())
             assertTrue(models.getJSONObject(0).getString("model").contains("meromero"))
             assertEquals("minimax-m3.1-flash:free", models.getJSONObject(1).getString("model"))
             assertEquals(2, models.getJSONObject(0).getInt("priority"))
@@ -108,10 +108,6 @@ class ThreeFreeRoutesTest {
             assertEquals(1, models.getJSONObject(1).getInt("priority"))
             assertFalse(models.getJSONObject(1).getBoolean("nsfw"))
             assertFalse(models.getJSONObject(1).getBoolean("vision"))
-            assertEquals("gemma-4-26b-a4b-it-darksoul:free", models.getJSONObject(2).getString("model"))
-            assertEquals(3, models.getJSONObject(2).getInt("priority"))
-            assertTrue(models.getJSONObject(2).getBoolean("nsfw"))
-            assertFalse(models.getJSONObject(2).getBoolean("vision"))
             assertTrue(migrated.getBoolean("nsfw_override"))
             val metadata = RouteMeta.load(root)
             assertTrue(metadata.has("routeway"))
@@ -186,27 +182,6 @@ class QuotaOrderTest {
                     .put("free_tier", true).put("enabled", true).put("api_key", "set"))
             val order = RouteSelector.orderedIndices(root, models, current = 0, task = Task.CHAT, online = true, vpn = false)
             assertEquals(listOf(0, 1), order)
-        } finally {
-            root.deleteRecursively()
-        }
-    }
-}
-
-
-
-class AdultRouteOrderTest {
-    @Test fun nsfwOverridePutsBothFreeRoleplayRoutesAheadOfMiniMax() {
-        val root = Files.createTempDirectory("ruri-adult-route-order").toFile()
-        try {
-            FileManager.init(root)
-            val config = JSONObject(FileManager.read(root, "core/config.json"))
-            val models = config.getJSONArray("models")
-            assertEquals(3, models.length())
-            assertEquals(
-                listOf("routeway", "routeway-darksoul", "routeway-minimax"),
-                RouteSelector.orderedIndices(root, models, 0, Task.CREATIVE, adult = true)
-                    .map { models.getJSONObject(it).getString("id") }
-            )
         } finally {
             root.deleteRecursively()
         }
