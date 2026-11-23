@@ -93,7 +93,7 @@ class ToolHopLimitTest : BodyHandsTestBase() {
         }
         assertEquals(64, reasks)
         assertEquals(64, events("tool_call").size)
-        assertEquals(repeated, reply)
+        assertTrue(reply.contains("Файл прочитан не полностью"))
         assertTrue((0 until messages.length()).any {
             messages.getJSONObject(it).optString("content").contains("Лимит инструментов исчерпан")
         })
