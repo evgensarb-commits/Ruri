@@ -44,7 +44,7 @@ class HFModelCatalogTest {
             .put(JSONObject().put("id", "A/Magnum-12B").put("providers", org.json.JSONArray()
                 .put(JSONObject().put("provider", "promo-priced").put("status", "live")
                     .put("is_free", true)
-                    .put("pricing", JSONObject().put("input", 1.2).put("output", 2.4))))
+                    .put("pricing", JSONObject().put("input", 1.2).put("output", 2.4)))))
             .put(JSONObject().put("id", "B/Cydonia-12B").put("providers", org.json.JSONArray()
                 .put(JSONObject().put("provider", "promo-no-price").put("status", "live")
                     .put("is_free", true))))
