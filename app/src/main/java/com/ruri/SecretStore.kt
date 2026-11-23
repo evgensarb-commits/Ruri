@@ -34,6 +34,27 @@ object SecretStore {
         redactRuntimeConfigForWeb(readRuntimeConfig(root))
     }
 
+    internal fun configForBackup(rawConfig: String): String {
+        val config = JSONObject(rawConfig.ifBlank { "{}" })
+        config.remove("api_key")
+        val models = config.optJSONArray("models") ?: JSONArray()
+        for (index in 0 until models.length()) {
+            val model = models.optJSONObject(index) ?: continue
+            model.put("api_key", "")
+            model.remove("has_key")
+            model.remove("clear_api_key")
+        }
+        return config.toString(2)
+    }
+
+    internal fun searchConfigForBackup(rawConfig: String): String {
+        val config = JSONObject(rawConfig.ifBlank { "{}" })
+        config.put("serper_key", "")
+        config.remove("has_serper_key")
+        config.remove("clear_serper_key")
+        return config.toString(2)
+    }
+
     internal fun redactRuntimeConfigForWeb(rawConfig: String): String {
         val config = JSONObject(rawConfig)
         val models = config.optJSONArray("models") ?: JSONArray()
