@@ -360,6 +360,8 @@ object Thinker {
             ". Длина ответа: " + character.optString("length_policy") +
             ". Эмоции: " + character.optString("emotions") +
             ". Регуляторы: " + (character.optJSONArray("regulators")?.toString() ?: "[]") +
+            ". Примеры разнообразного входа (варианты, не шаблоны): " + (character.optJSONArray("opening_exemplars")?.toString() ?: "[]") +
+            ". " + StyleGuard.repetitiveOpeningNote(root) +
             ". Запрещённые фразы: " + (character.optJSONArray("banned_phrases")?.toString() ?: "[]") + ".\n" +
             Capabilities.bodySection(root) + "\n" +
             EmotionEngine.promptSection(root) + "\n" +
@@ -402,7 +404,10 @@ object Thinker {
             val body = JSONObject()
                 .put("model", model.optString("model"))
                 .put("messages", messages)
-                .put("temperature", 0.85)
+                .put("temperature", 0.9)
+                .put("presence_penalty", 0.6)
+                .put("frequency_penalty", 0.4)
+                .put("seed", (System.currentTimeMillis() % 100000L).toInt())
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
