@@ -39,6 +39,26 @@ class RouteSelectorTest {
     }
 
     @Test
+    fun meroMeroRemainsFirstAndHFPoolFallsBackInRankedOrderWhileVisionStaysMeroOnly() {
+        val root = Files.createTempDirectory("ruri-hf-pool-order").toFile()
+        try {
+            val models = JSONArray()
+                .put(JSONObject().put("id", "routeway").put("free_tier", true).put("enabled", true)
+                    .put("api_key", "key").put("priority", 1).put("nsfw", true).put("vision", true))
+                .put(JSONObject().put("id", "hf_pool_a").put("free_tier", true).put("enabled", true)
+                    .put("api_key", "key").put("priority", 2).put("nsfw", true).put("vision", false))
+                .put(JSONObject().put("id", "hf_pool_b").put("free_tier", true).put("enabled", true)
+                    .put("api_key", "key").put("priority", 3).put("nsfw", true).put("vision", false))
+            assertEquals(listOf(0, 1, 2),
+                RouteSelector.orderedIndices(root, models, 0, Task.CHAT, online = true, vpn = false))
+            assertEquals(listOf(0),
+                RouteSelector.orderedIndices(root, models, 0, Task.VISION, online = true, vpn = false))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun classifiesPerMinute429AsRateLimitAndQuota429AsQuota() {
         assertEquals("rate_limit", RouteSelector.classify(429, null, "Too many requests per minute"))
         assertEquals("rate_limit", RouteSelector.classify(429, null, "RPM limit"))
