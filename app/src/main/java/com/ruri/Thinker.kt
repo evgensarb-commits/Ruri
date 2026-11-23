@@ -50,6 +50,7 @@ object Thinker {
     private fun runCycle(ctx: Context, originalReason: String) {
         val root = ctx.filesDir
         val state = readStateStrict(root)
+        val baselineState = JSONObject(state.toString())
         val inFlight = readJson(root, "memory/L4_state.json").optBoolean("turn_in_flight", false)
         val now = System.currentTimeMillis()
         EmotionEngine.tick(root, now, state.optLong("last_seen_commander", 0L),
@@ -79,7 +80,7 @@ object Thinker {
 
         if (originalReason.contains("drive_check") && !initiative) {
             state.put("last_thought", now)
-            persistStatePreservingTurnInFlight(root, state)
+            persistStatePreservingTurnInFlight(root, state, baselineState)
             return
         }
 
@@ -91,7 +92,7 @@ object Thinker {
         if (!NetState.online) {
             // Local state and memory maintenance already ran in RuriLifeWorker.
             state.put("last_thought", now)
-            persistStatePreservingTurnInFlight(root, state)
+            persistStatePreservingTurnInFlight(root, state, baselineState)
             return
         }
 
@@ -114,7 +115,7 @@ object Thinker {
         val models = config.optJSONArray("models") ?: JSONArray()
         if (models.length() == 0) {
             state.put("last_thought", now)
-            persistStatePreservingTurnInFlight(root, state)
+            persistStatePreservingTurnInFlight(root, state, baselineState)
             return
         }
 
@@ -125,7 +126,7 @@ object Thinker {
         val order = RouteSelector.orderedIndices(root, models, current, task, adult = adult)
         if (order.isEmpty()) {
             state.put("last_thought", now)
-            persistStatePreservingTurnInFlight(root, state)
+            persistStatePreservingTurnInFlight(root, state, baselineState)
             return
         }
         var reply: String? = null
@@ -189,7 +190,7 @@ object Thinker {
 
         if (reply.isNullOrBlank()) {
             state.put("last_thought", now)
-            persistStatePreservingTurnInFlight(root, state)
+            persistStatePreservingTurnInFlight(root, state, baselineState)
             return
         }
         if (successfulIndex >= 0 && successfulIndex != current) {
@@ -209,7 +210,7 @@ object Thinker {
                 .put("reason", "truly_empty")
                 .put("route", successfulRouteId))
             state.put("last_thought", now)
-            persistStatePreservingTurnInFlight(root, state)
+            persistStatePreservingTurnInFlight(root, state, baselineState)
             return
         }
 
@@ -228,7 +229,7 @@ object Thinker {
             if (effective == "veto") appendEvent(root, "initiative_vetoed",
                 JSONObject().put("reason", decision.ifBlank { "veto_without_reason" }))
             state.put("last_thought", now)
-            persistStatePreservingTurnInFlight(root, state)
+            persistStatePreservingTurnInFlight(root, state, baselineState)
             return
         }
 
@@ -242,7 +243,7 @@ object Thinker {
                 state.put("last_thought", now)
                 state.put("mood", EmotionEngine.moodLabel(EmotionEngine.readValues(root)))
                 state.put("energy", energyFor())
-                persistStatePreservingTurnInFlight(root, state)
+                persistStatePreservingTurnInFlight(root, state, baselineState)
                 return
             }
             Diary.append(root, safeReply, reason, emotion, "thought")
@@ -260,7 +261,7 @@ object Thinker {
         state.put("last_thought", now)
         state.put("mood", EmotionEngine.moodLabel(EmotionEngine.readValues(root)))
         state.put("energy", energyFor())
-        persistStatePreservingTurnInFlight(root, state)
+        persistStatePreservingTurnInFlight(root, state, baselineState)
         val stillInFlight = readJson(root, "memory/L4_state.json").optBoolean("turn_in_flight", false)
         if (!inFlight && !stillInFlight) Notifier.thought(ctx, safeReply, notificationMessageId)
     }
@@ -462,10 +463,40 @@ object Thinker {
         return true
     }
 
-    private fun persistStatePreservingTurnInFlight(root: File, state: JSONObject) {
-        state.put("turn_in_flight", readJson(root, "memory/L4_state.json")
-            .optBoolean("turn_in_flight", false))
-        FileManager.write(root, "memory/L4_state.json", state.toString(2))
+    private fun persistStatePreservingTurnInFlight(root: File, state: JSONObject, baseline: JSONObject) {
+        val desired = JSONObject(state.toString())
+        val before = JSONObject(baseline.toString())
+        val merged = FileManager.updateL4State(root) { current ->
+            val keys = LinkedHashSet<String>()
+            before.keys().forEach { keys.add(it) }
+            desired.keys().forEach { keys.add(it) }
+            keys.forEach { key ->
+                val beforeHas = before.has(key)
+                val desiredHas = desired.has(key)
+                val changed = beforeHas != desiredHas ||
+                    (beforeHas && jsonValueSignature(before.opt(key)) != jsonValueSignature(desired.opt(key)))
+                if (changed) {
+                    if (desiredHas) current.put(key, desired.opt(key)) else current.remove(key)
+                }
+            }
+        }
+        replaceJsonObject(state, merged)
+        replaceJsonObject(baseline, merged)
+    }
+
+    private fun jsonValueSignature(value: Any?): String = when (value) {
+        null, JSONObject.NULL -> "null"
+        is JSONObject, is JSONArray -> value.toString()
+        else -> value.toString()
+    }
+
+    private fun replaceJsonObject(target: JSONObject, source: JSONObject) {
+        target.keys().asSequence().toList().forEach { target.remove(it) }
+        val keys = source.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            target.put(key, source.opt(key))
+        }
     }
 
     private fun readJson(root: File, path: String): JSONObject =
