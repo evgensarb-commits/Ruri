@@ -35,8 +35,6 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var activityResumed = false
     @Volatile private var visionStatusProbeQueued = false
     private var pendingMessageId: String? = null
-    @Volatile private var verifiedHFCatalog = JSONArray()
-    @Volatile private var verifiedOpenRouterCatalog = JSONArray()
     private val importFileRequestCode = 2002
 
     @SuppressLint("SetJavaScriptEnabled", "AddJavascriptInterface")
@@ -512,402 +510,43 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
-        fun saveHFKey(key: String): String {
+        fun saveNvidiaKey(key: String): String {
             return try {
                 val value = key.trim()
-                require(value.startsWith("hf_") && value.length >= 20) { "Проверь HF token (обычно начинается с hf_)" }
-                val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
-                val models = config.optJSONArray("models") ?: JSONArray()
-                val hf = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
-                    .firstOrNull { it.optString("id") == "hf" }
-                    ?: throw IllegalStateException("Маршрут Hugging Face не найден")
-                hf.put("api_key", value).put("enabled", hf.optString("model").isNotBlank())
-                SecretStore.saveRuntimeConfig(filesDir, config.toString(2))
-                "OK"
-            } catch (e: Exception) { "ERROR: " + (e.message ?: "HF token save failed") }
-        }
-
-        @JavascriptInterface
-        fun saveHFModel(modelsJson: String): String {
-            return try {
-                val requested = JSONArray(modelsJson)
-                require(requested.length() in 1..30) { "Нет проверенных бесплатных RP/NSFW-моделей" }
-                val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
-                val models = config.optJSONArray("models") ?: JSONArray()
-                val hf = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
-                    .firstOrNull { it.optString("id") == "hf" }
-                    ?: throw IllegalStateException("Маршрут Hugging Face не найден")
-                require(hf.optString("api_key").isNotBlank()) { "Сначала сохрани HF token" }
-                val verified = (0 until verifiedHFCatalog.length()).mapNotNull { verifiedHFCatalog.optJSONObject(it) }
-                require(verified.isNotEmpty()) { "Сначала заново загрузи проверенный каталог HF" }
-                val selected = mutableListOf<JSONObject>()
-                for (i in 0 until requested.length()) {
-                    val candidate = requested.optJSONObject(i) ?: continue
-                    val modelId = candidate.optString("model")
-                    val provider = candidate.optString("provider")
-                    val trusted = verified.firstOrNull {
-                        it.optString("model") == modelId && it.optString("provider") == provider
-                    } ?: throw IllegalArgumentException("Модель отсутствует в проверенном каталоге HF")
-                    val freePromo = trusted.optBoolean("is_free_promo")
-                    val zeroPriced = trusted.optDouble("price_input", -1.0) == 0.0 &&
-                        trusted.optDouble("price_output", -1.0) == 0.0
-                    require(trusted.optBoolean("free") && (freePromo || zeroPriced)) {
-                        "Разрешены только подтверждённо бесплатные модели"
-                    }
-                    selected.add(trusted)
-                }
-                require(selected.isNotEmpty()) { "Список моделей пуст" }
-                for (i in models.length() - 1 downTo 0) {
-                    if (models.optJSONObject(i)?.optString("id").orEmpty().startsWith("hf_pool_")) models.remove(i)
-                }
-                hf.put("model", "").put("enabled", false).put("vision", false)
-                selected.forEachIndexed { index, candidate ->
-                    val modelId = candidate.getString("model")
-                    val provider = candidate.getString("provider")
-                    val stableId = "hf_pool_" + Integer.toHexString((modelId + "@" + provider).hashCode())
-                    val route = JSONObject(hf.toString())
-                    route.put("id", stableId)
-                        .put("name", "HF · " + modelId + " · " + provider)
-                        .put("model", modelId + ":" + provider)
-                        .put("api_key", "")
-                        .put("api_key_ref", "hf")
-                        .put("enabled", true)
-                        .put("free_tier", true)
-                        .put("nsfw", true)
-                        .put("vision", false)
-                        .put("priority", index + 2)
-                        .put("hf_model", modelId)
-                        .put("hf_provider", provider)
-                        .put("hf_price_input", candidate.opt("price_input") ?: JSONObject.NULL)
-                        .put("hf_price_output", candidate.opt("price_output") ?: JSONObject.NULL)
-                        .put("hf_context_length", candidate.optInt("context_length"))
-                        .put("hf_score", candidate.optDouble("score"))
-                    models.put(route)
-                }
-                SecretStore.saveRuntimeConfig(filesDir, config.toString(2))
-                "OK"
-            } catch (e: Exception) { "ERROR: " + (e.message ?: "HF model pool save failed") }
-        }
-
-        @JavascriptInterface
-        fun fetchHFModels(): String {
-            return try {
-                val runtime = JSONObject(SecretStore.readRuntimeConfig(filesDir))
-                val models = runtime.optJSONArray("models") ?: JSONArray()
-                val hf = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
-                    .firstOrNull { it.optString("id") == "hf" }
-                    ?: throw IllegalStateException("Маршрут Hugging Face не найден")
-                val token = hf.optString("api_key")
-                require(token.isNotBlank()) { "Сначала сохрани HF token" }
-                routeExecutor.execute {
-                    val result = try {
-                        fun get(url: String): Triple<Int, String, String?> {
-                            val connection = (java.net.URL(url).openConnection() as java.net.HttpURLConnection)
-                            try {
-                                connection.requestMethod = "GET"
-                                connection.setRequestProperty("Authorization", "Bearer " + token)
-                                connection.setRequestProperty("Accept", "application/json")
-                                connection.connectTimeout = 15000
-                                connection.readTimeout = 25000
-                                val code = connection.responseCode
-                                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-                                val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-                                return Triple(code, body, connection.getHeaderField("Link"))
-                            } finally { connection.disconnect() }
-                        }
-
-                        // Enumerate every paginated model currently served by any HF Inference Provider.
-                        // This is broader than /v1/models, which may expose only a small router subset.
-                        val allHubModels = linkedMapOf<String, JSONObject>()
-                        var nextUrl: String? = "https://huggingface.co/api/models?inference_provider=all&pipeline_tag=text-generation&limit=100&sort=downloads&expand=tags"
-                        val visitedPages = HashSet<String>()
-                        while (nextUrl != null && visitedPages.add(nextUrl)) {
-                            val (code, body, link) = get(nextUrl)
-                            if (code !in 200..299) throw IllegalStateException("HF Hub HTTP " + code)
-                            val page = JSONArray(body)
-                            for (i in 0 until page.length()) {
-                                val model = page.optJSONObject(i) ?: continue
-                                val id = model.optString("id").trim()
-                                if (id.isNotBlank()) allHubModels.putIfAbsent(id, model)
-                            }
-                            val nextMatch = Regex("<([^>]+)>\\s*;\\s*rel=\"next\"").find(link.orEmpty())
-                            nextUrl = nextMatch?.groupValues?.getOrNull(1)
-                        }
-
-                        fun matches(model: JSONObject, mode: String): Boolean {
-                            val id = model.optString("id")
-                            val name = model.optString("name")
-                            val description = model.optString("description")
-                            if (HFModelCatalog.isCandidateId(id, mode) ||
-                                HFModelCatalog.isCandidateId(name, mode) ||
-                                HFModelCatalog.isCandidateId(description, mode)) return true
-                            val tags = model.optJSONArray("tags") ?: JSONArray()
-                            return (0 until tags.length()).any { i ->
-                                HFModelCatalog.isCandidateId(tags.optString(i), mode)
-                            }
-                        }
-
-                        // Use the router's authoritative live model listing, which already includes
-                        // every provider/status/price record. The Hub catalog supplies discovery
-                        // names and tags; avoid hundreds of fragile per-model detail requests.
-                        val (routerCode, routerBody, _) = get("https://router.huggingface.co/v1/models")
-                        if (routerCode !in 200..299) {
-                            throw IllegalStateException("HF Inference Providers catalog HTTP " + routerCode)
-                        }
-                        val routerData = JSONObject(routerBody).optJSONArray("data") ?: JSONArray()
-                        val routerModels = linkedMapOf<String, JSONObject>()
-                        for (i in 0 until routerData.length()) {
-                            val model = routerData.optJSONObject(i) ?: continue
-                            val id = model.optString("id").trim()
-                            if (id.isNotBlank()) routerModels[id] = model
-                        }
-
-                        fun inspect(mode: String): Pair<JSONArray, IntArray> {
-                            val hubCandidates = allHubModels.values.filter { matches(it, mode) }
-                            val candidateIds = hubCandidates.map { it.optString("id") }.toSet()
-                            val found = JSONArray()
-                            val matched = routerModels.values.filter { it.optString("id") in candidateIds }
-                            var liveCount = 0
-                            var freeCount = 0
-                            for (routerModel in matched) {
-                                val id = routerModel.optString("id")
-                                val hubMeta = allHubModels[id]
-                                val enriched = JSONObject(routerModel.toString())
-                                if (hubMeta != null) {
-                                    enriched.put("name", hubMeta.optString("name").ifBlank { id })
-                                    enriched.put("description", hubMeta.optString("description"))
-                                    enriched.put("tags", hubMeta.optJSONArray("tags") ?: JSONArray())
-                                }
-                                val parsed = HFModelCatalog.parseDetailed(
-                                    JSONObject().put("data", JSONArray().put(enriched)).toString(), mode
-                                )
-                                liveCount += parsed.liveProviders
-                                freeCount += parsed.freeProviders
-                                for (j in 0 until parsed.models.length()) {
-                                    found.put(parsed.models.getJSONObject(j))
-                                }
-                            }
-                            val sorted = (0 until found.length()).mapNotNull { found.optJSONObject(it) }
-                                .sortedByDescending { it.optDouble("score", 0.0) }
-                            val output = JSONArray()
-                            sorted.take(30).forEach(output::put)
-                            return output to intArrayOf(hubCandidates.size, liveCount, freeCount, matched.size)
-                        }
-
-                        var mode = "rp"
-                        var (candidates, stats) = inspect(mode)
-                        // If there are no confirmed free RP routes, broaden the search to NSFW-tagged
-                        // and NSFW-named models; the free-only provider filter remains unchanged.
-                        if (candidates.length() == 0) {
-                            mode = "nsfw"
-                            val fallback = inspect(mode)
-                            candidates = fallback.first
-                            stats = fallback.second
-                        }
-                        val statsJson = JSONObject()
-                            .put("hub_models_seen", allHubModels.size)
-                            .put("models_seen", allHubModels.size)
-                            .put("router_models_seen", routerModels.size)
-                            .put("router_candidate_matches", stats[3])
-                            .put("candidate_mode", mode)
-                            .put("roleplay_matches", if (mode == "rp") stats[0] else 0)
-                            .put("nsfw_matches", if (mode == "nsfw") stats[0] else 0)
-                            .put("live_providers", stats[1])
-                            .put("free_providers", stats[2])
-                        JSONObject().put("ok", true).put("models", candidates).put("stats", statsJson)
-                    } catch (error: Exception) {
-                        JSONObject().put("ok", false).put("error", error.message ?: "HF Hub discovery failed")
-                    }
-                    mainHandler.post {
-                        if (::web.isInitialized) web.evaluateJavascript(
-                            "window.onHFModelsResult && window.onHFModelsResult(" + JSONObject.quote(result.toString()) + ")", null
-                        )
-                    }
-                }
-                "OK"
-            } catch (e: Exception) { "ERROR: " + (e.message ?: "HF model discovery failed") }
-        }
-
-        @JavascriptInterface
-        fun saveOpenRouterKey(key: String): String {
-            return try {
-                val value = key.trim()
-                require(value.startsWith("sk-or-") && value.length >= 30) {
-                    "Проверь OpenRouter API key (обычно начинается с sk-or-v1-)"
-                }
+                require(value.length >= 20) { "Проверь NVIDIA API key" }
                 val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
                 val models = config.optJSONArray("models") ?: JSONArray()
                 var route = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
-                    .firstOrNull { it.optString("id") == "openrouter" }
+                    .firstOrNull { it.optString("id") == "nemotron" }
                 if (route == null) {
                     val template = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
-                        .firstOrNull { it.optString("id") == "hf" }
-                        ?: throw IllegalStateException("Не найден шаблон маршрута для OpenRouter")
+                        .firstOrNull { it.optString("id") == "routeway" }
+                        ?: throw IllegalStateException("Не найден основной маршрут MeroMero")
                     route = JSONObject(template.toString()).apply {
-                        put("id", "openrouter")
-                        remove("api_key_ref")
-                        remove("hf_model")
-                        remove("hf_provider")
-                        put("name", "OpenRouter · free NSFW pool")
-                        put("model", "")
-                        put("base_url", "https://openrouter.ai/api/v1")
+                        put("id", "nemotron")
+                        put("name", "NVIDIA · Nemotron 3 Nano Omni Free")
+                        put("base_url", "https://integrate.api.nvidia.com/v1")
+                        put("model", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning")
+                        put("api_key", "")
                         put("enabled", false)
+                        put("free_tier", true)
+                        put("nsfw", false)
                         put("vision", false)
-                        put("priority", 999)
+                        put("priority", 2)
                     }
                     models.put(route)
                 }
                 route.put("api_key", value)
-                    .put("base_url", "https://openrouter.ai/api/v1")
-                    .put("enabled", false)
-                    .put("model", "")
-                route.remove("api_key_ref")
-                SecretStore.saveRuntimeConfig(filesDir, config.toString(2))
-                "OK"
-            } catch (e: Exception) { "ERROR: " + (e.message ?: "OpenRouter key save failed") }
-        }
-
-        @JavascriptInterface
-        fun fetchOpenRouterModels(): String {
-            return try {
-                val runtime = JSONObject(SecretStore.readRuntimeConfig(filesDir))
-                val models = runtime.optJSONArray("models") ?: JSONArray()
-                val openRouter = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
-                    .firstOrNull { it.optString("id") == "openrouter" }
-                    ?: throw IllegalStateException("Сначала сохрани OpenRouter API key")
-                val token = openRouter.optString("api_key")
-                require(token.isNotBlank()) { "Сначала сохрани OpenRouter API key" }
-                routeExecutor.execute {
-                    val result = try {
-                        val connection = (java.net.URL("https://openrouter.ai/api/v1/models").openConnection()
-                            as java.net.HttpURLConnection)
-                        try {
-                            connection.requestMethod = "GET"
-                            connection.setRequestProperty("Authorization", "Bearer " + token)
-                            connection.setRequestProperty("Accept", "application/json")
-                            connection.setRequestProperty("HTTP-Referer", "https://ruri.app")
-                            connection.setRequestProperty("X-Title", "Ruri")
-                            connection.connectTimeout = 15000
-                            connection.readTimeout = 30000
-                            val code = connection.responseCode
-                            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-                            val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-                            if (code !in 200..299) {
-                                val detail = runCatching { JSONObject(body).optString("message") }.getOrDefault("")
-                                throw IllegalStateException("OpenRouter catalog HTTP " + code +
-                                    if (detail.isBlank()) "" else ": " + detail.take(240))
-                            }
-                            val parsed = OpenRouterCatalog.parseDetailed(body)
-                            verifiedOpenRouterCatalog = JSONArray(parsed.models.toString())
-                            JSONObject()
-                                .put("ok", true)
-                                .put("models", parsed.models)
-                                .put("stats", parsed.toJson())
-                        } finally { connection.disconnect() }
-                    } catch (error: Exception) {
-                        JSONObject().put("ok", false)
-                            .put("error", error.message ?: "OpenRouter catalog discovery failed")
-                    }
-                    mainHandler.post {
-                        if (::web.isInitialized) web.evaluateJavascript(
-                            "window.onOpenRouterModelsResult && window.onOpenRouterModelsResult(" +
-                                JSONObject.quote(result.toString()) + ")", null
-                        )
-                    }
-                }
-                "OK"
-            } catch (e: Exception) { "ERROR: " + (e.message ?: "OpenRouter model discovery failed") }
-        }
-
-        @JavascriptInterface
-        fun saveOpenRouterModels(modelsJson: String): String {
-            return try {
-                val requested = JSONArray(modelsJson)
-                require(requested.length() in 1..30) { "Нет подтверждённых бесплатных NSFW/RP-моделей OpenRouter" }
-                var config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
-                var models = config.optJSONArray("models") ?: JSONArray()
-                var openRouter = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
-                    .firstOrNull { it.optString("id") == "openrouter" }
-                if (openRouter == null) {
-                    // Recover a missing base route from the HF route template. Its credential
-                    // is already stored independently under the stable "openrouter" secret ID.
-                    val template = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
-                        .firstOrNull { it.optString("id") == "hf" }
-                        ?: throw IllegalStateException("Не найден шаблон маршрута для OpenRouter")
-                    openRouter = JSONObject(template.toString()).apply {
-                        put("id", "openrouter")
-                        put("name", "OpenRouter · free NSFW pool")
-                        put("model", "")
-                        put("base_url", "https://openrouter.ai/api/v1")
-                        put("enabled", false)
-                        put("vision", false)
-                        put("priority", 999)
-                        remove("api_key_ref")
-                        remove("hf_model")
-                        remove("hf_provider")
-                    }
-                    models.put(openRouter)
-                    SecretStore.saveRuntimeConfig(filesDir, config.toString(2))
-                    config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
-                    models = config.optJSONArray("models") ?: JSONArray()
-                    openRouter = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
-                        .firstOrNull { it.optString("id") == "openrouter" }
-                }
-                val baseRoute = openRouter ?: throw IllegalStateException("Не удалось восстановить маршрут OpenRouter")
-                require(baseRoute.optString("api_key").isNotBlank()) {
-                    "Ключ OpenRouter не найден в Android Keystore — сохрани его заново"
-                }
-                val verified = (0 until verifiedOpenRouterCatalog.length())
-                    .mapNotNull { verifiedOpenRouterCatalog.optJSONObject(it) }
-                require(verified.isNotEmpty()) { "Сначала заново загрузи проверенный каталог OpenRouter" }
-                val selected = mutableListOf<JSONObject>()
-                for (i in 0 until requested.length()) {
-                    val requestedModel = requested.optJSONObject(i) ?: continue
-                    val modelId = requestedModel.optString("model")
-                    val trusted = verified.firstOrNull { it.optString("model") == modelId }
-                        ?: throw IllegalArgumentException("Модель отсутствует в проверенном каталоге OpenRouter")
-                    require(modelId.endsWith(":free", ignoreCase = true) &&
-                        trusted.optBoolean("free") &&
-                        trusted.optDouble("price_input", -1.0) == 0.0 &&
-                        trusted.optDouble("price_output", -1.0) == 0.0) {
-                        "Разрешены только варианты :free с нулевыми ценами input/output"
-                    }
-                    selected.add(trusted)
-                }
-                require(selected.isNotEmpty()) { "Список моделей пуст" }
-                for (i in models.length() - 1 downTo 0) {
-                    if (models.optJSONObject(i)?.optString("id").orEmpty().startsWith("or_pool_")) models.remove(i)
-                }
-                baseRoute.put("model", "")
-                    .put("enabled", false)
+                    .put("enabled", true)
+                    .put("base_url", "https://integrate.api.nvidia.com/v1")
+                    .put("model", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning")
+                    .put("free_tier", true)
+                    .put("nsfw", false)
                     .put("vision", false)
-                    .put("base_url", "https://openrouter.ai/api/v1")
-                selected.forEachIndexed { index, candidate ->
-                    val modelId = candidate.getString("model")
-                    val stableId = "or_pool_" + Integer.toHexString(modelId.hashCode())
-                    val route = JSONObject(baseRoute.toString())
-                    route.put("id", stableId)
-                        .put("name", "OpenRouter · " + candidate.optString("name", modelId))
-                        .put("model", modelId)
-                        .put("base_url", "https://openrouter.ai/api/v1")
-                        .put("api_key", "")
-                        .put("api_key_ref", "openrouter")
-                        .put("enabled", true)
-                        .put("free_tier", true)
-                        .put("nsfw", true)
-                        .put("vision", false)
-                        .put("priority", index + 50)
-                        .put("openrouter_model", modelId)
-                        .put("openrouter_free", true)
-                        .put("openrouter_price_input", candidate.optDouble("price_input"))
-                        .put("openrouter_price_output", candidate.optDouble("price_output"))
-                        .put("openrouter_context_length", candidate.optInt("context_length"))
-                        .put("openrouter_score", candidate.optDouble("score"))
-                    models.put(route)
-                }
+                    .put("priority", 2)
                 SecretStore.saveRuntimeConfig(filesDir, config.toString(2))
                 "OK"
-            } catch (e: Exception) { "ERROR: " + (e.message ?: "OpenRouter model pool save failed") }
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "NVIDIA key save failed") }
         }
 
         @JavascriptInterface
