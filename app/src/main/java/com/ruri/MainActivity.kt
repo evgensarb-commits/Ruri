@@ -651,20 +651,22 @@ class MainActivity : AppCompatActivity() {
                             try {
                                 val tasks = ids.map { id ->
                                     java.util.concurrent.Callable {
-                                        val safeId = id.replace(" ", "%20")
-                                        val (code, body, _) = get("https://router.huggingface.co/v1/models/" + safeId)
-                                        if (code in 200..299) {
-                                            val detail = JSONObject(body)
-                                            val hubMeta = allHubModels[id]
-                                            if (hubMeta != null && hubMeta.has("tags")) detail.put("tags", hubMeta.optJSONArray("tags") ?: JSONArray())
-                                            val wrapped = JSONObject().put("data", JSONArray().put(detail))
-                                            val parsed = HFModelCatalog.parseDetailed(wrapped.toString(), mode)
-                                            liveAndFree.addAndGet(0, parsed.liveProviders)
-                                            liveAndFree.addAndGet(1, parsed.freeProviders)
-                                            for (j in 0 until parsed.models.length()) {
-                                                found.add(parsed.models.getJSONObject(j))
+                                        runCatching {
+                                            val safeId = id.replace(" ", "%20")
+                                            val (code, body, _) = get("https://router.huggingface.co/v1/models/" + safeId)
+                                            if (code in 200..299) {
+                                                val detail = JSONObject(body)
+                                                val hubMeta = allHubModels[id]
+                                                if (hubMeta != null && hubMeta.has("tags")) detail.put("tags", hubMeta.optJSONArray("tags") ?: JSONArray())
+                                                val wrapped = JSONObject().put("data", JSONArray().put(detail))
+                                                val parsed = HFModelCatalog.parseDetailed(wrapped.toString(), mode)
+                                                liveAndFree.addAndGet(0, parsed.liveProviders)
+                                                liveAndFree.addAndGet(1, parsed.freeProviders)
+                                                for (j in 0 until parsed.models.length()) {
+                                                    found.add(parsed.models.getJSONObject(j))
+                                                }
                                             }
-                                        }
+                                        }.onFailure { android.util.Log.w("Ruri", "HF candidate check failed for " + id, it) }
                                     }
                                 }
                                 pool.invokeAll(tasks).forEach { it.get() }
