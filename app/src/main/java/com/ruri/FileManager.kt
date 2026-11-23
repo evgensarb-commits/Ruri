@@ -487,9 +487,12 @@ object FileManager {
         val target = safe(root, "memory/L4_state.json")
             ?: throw IllegalArgumentException("Invalid L4 path")
         synchronized(lockFor(target)) {
-            val state = if (target.isFile) {
-                runCatching { JSONObject(target.readText(Charsets.UTF_8)) }.getOrElse { JSONObject() }
-            } else JSONObject()
+            val raw = if (target.isFile) target.readText(Charsets.UTF_8) else ""
+            val state = if (raw.isBlank()) JSONObject() else try {
+                JSONObject(raw)
+            } catch (e: Exception) {
+                throw IllegalStateException("L4 is malformed; original state was preserved", e)
+            }
             mutate(state)
             atomicWrite(target, state.toString(2))
             return JSONObject(state.toString())
