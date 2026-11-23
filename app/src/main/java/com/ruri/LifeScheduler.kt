@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit
 object LifeScheduler {
     private const val PERIODIC_NAME = "ru-r1-periodic-life"
     private const val EVENT_NAME = "ru-r1-event-cognition"
+    private const val REPLY_RETRY_NAME = "ru-r1-commander-reply-retry"
     @Volatile private var networkCallbackRegistered = false
 
     internal fun driveCheckDue(now: Long, lastDriveCheck: Long, intervalMinutes: Double): Boolean =
@@ -50,6 +51,17 @@ object LifeScheduler {
             })
             networkCallbackRegistered = true
         }
+    }
+
+    fun scheduleCommanderReplyRetry(context: Context, delayMs: Long) {
+        val delay = delayMs.coerceAtLeast(1_000L)
+        val request = OneTimeWorkRequestBuilder<RuriLifeWorker>()
+            .setInitialDelay(delay, TimeUnit.MILLISECONDS)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+            .addTag(REPLY_RETRY_NAME)
+            .build()
+        WorkManager.getInstance(context.applicationContext)
+            .enqueueUniqueWork(REPLY_RETRY_NAME, ExistingWorkPolicy.REPLACE, request)
     }
 
     fun enqueueEvent(context: Context, reason: String) {
@@ -115,14 +127,33 @@ class RuriLifeWorker(
 
             // A queued Commander turn is answered once connectivity returns. The transient
             // offline notice is never appended to L0; ChatEngine records only a real reply.
-            if (NetState.online && OfflineQueue.hasPending(root)) {
-                try {
-                    val reply = ChatEngine.respond(root)
-                    val messageId = ChatEngine.lastSavedReplyId()
-                    if (reply != ChatEngine.OFFLINE_REPLY) Notifier.thought(appContext, reply, messageId)
-                } catch (drainError: Exception) {
-                    Log.w("Ruri", "Offline reply remains queued until a route is available", drainError)
+            if (NetState.online && (OfflineQueue.hasPending(root) || CommanderReplyQueue.hasPending(root))) {
+                CommanderReplyQueue.recoverLatestUnanswered(root)
+                while (true) {
+                    val queued = CommanderReplyQueue.nextDue(root)
+                    if (queued == null) {
+                        val delay = CommanderReplyQueue.nextDelayMs(root)
+                        if (delay != null && delay > 0L) LifeScheduler.scheduleCommanderReplyRetry(appContext, delay)
+                        break
+                    }
+                    val commanderId = queued.optString("message_id")
+                    if (commanderId.isBlank()) break
+                    if (Tombstone.isDeleted(root, commanderId)) {
+                        CommanderReplyQueue.markDeleted(root, commanderId)
+                        continue
+                    }
+                    try {
+                        val reply = ChatEngine.respond(root, commanderId)
+                        val replyId = ChatEngine.lastSavedReplyId()
+                        if (reply != ChatEngine.OFFLINE_REPLY) Notifier.thought(appContext, reply, replyId)
+                    } catch (drainError: Exception) {
+                        val delay = CommanderReplyQueue.nextDelayMs(root) ?: 30_000L
+                        LifeScheduler.scheduleCommanderReplyRetry(appContext, delay)
+                        Log.w("Ruri", "Commander reply remains queued; retry scheduled", drainError)
+                        break
+                    }
                 }
+                runCatching { OfflineQueue.clear(root) }
             }
 
             try {
