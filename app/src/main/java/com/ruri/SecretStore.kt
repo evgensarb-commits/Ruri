@@ -89,7 +89,11 @@ object SecretStore {
         val config = JSONObject(rawConfig)
         val secrets = readSecrets(root)
         val suppliedKey = config.optString("serper_key")
-        if (suppliedKey.isNotBlank()) secrets.put(SEARCH_SECRET_ID, suppliedKey)
+        if (config.optBoolean("clear_serper_key", false)) {
+            secrets.remove(SEARCH_SECRET_ID)
+        } else if (suppliedKey.isNotBlank()) {
+            secrets.put(SEARCH_SECRET_ID, suppliedKey)
+        }
         config.put("serper_key", "")
         config.remove("has_serper_key")
         config.remove("clear_serper_key")
