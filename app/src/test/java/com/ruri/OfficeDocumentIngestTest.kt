@@ -139,9 +139,9 @@ class ReadShelfDocxFullTest {
             var offset = 0
             while (offset < extracted.length) {
                 val chunk = ChatEngine.shelfText(root, "full.docx", offset)
-                val headerEnd = chunk.indexOf(" из ").let { chunk.indexOf("\\n", it) + 1 }
+                val headerEnd = chunk.indexOf(" из ").let { chunk.indexOf("\n", it) + 1 }
                 val bodyStart = headerEnd
-                val bodyEnd = chunk.indexOf("\\n[", bodyStart).let { if (it < 0) chunk.length else it }
+                val bodyEnd = chunk.indexOf("\n[", bodyStart).let { if (it < 0) chunk.length else it }
                 rebuilt.append(chunk.substring(bodyStart, bodyEnd))
                 offset = minOf(offset + 7000, extracted.length)
             }
