@@ -176,8 +176,8 @@ object ShelfWatcher {
             }
             text.toString()
                 .replace(Regex("[ \\t]+"), " ")
-                .replace(Regex(" *\\n *"), "\\n")
-                .replace(Regex("\\n{2,}"), "\\n")
+                .replace(Regex(" *\\n *"), "\n")
+                .replace(Regex("\\n{2,}"), "\n")
                 .trim()
         }.getOrDefault("")
     }
