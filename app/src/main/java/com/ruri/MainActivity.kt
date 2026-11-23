@@ -322,7 +322,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
-        fun read(path: String): String = FileManager.read(filesDir, path)
+        fun read(path: String): String = when (path.replace('\\\\', '/').trimStart('/')) {
+            "core/config.json" -> readPublicRuntimeConfig()
+            "core/search.json" -> readPublicSearchConfig()
+            "core/secrets.enc.json" -> ""
+            else -> FileManager.read(filesDir, path)
+        }
 
         @JavascriptInterface
         fun readLastEvents(filter: String, limit: Int): String =
