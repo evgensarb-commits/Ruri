@@ -593,8 +593,9 @@ object ChatEngine {
             else -> ShelfWatcher.decodeText(bytes)
         }
         val text = SecretRedactor.redactText(extracted)
-        if (offset > text.length) return "Смещение $offset за пределами текста (0 символов)"
-        if (offset == text.length) return "Документ прочитан полностью: $offset/0 символов."
+        if (mime != null && offset == 0 && text.length <= 7000) return text
+        if (offset > text.length) return "Смещение $offset за пределами текста (${text.length} символов)"
+        if (offset == text.length) return "Документ прочитан полностью: $offset/${text.length} символов."
         val end = minOf(text.length, offset + 7000)
         val part = text.substring(offset, end)
         val partNumber = offset / 7000 + 1
