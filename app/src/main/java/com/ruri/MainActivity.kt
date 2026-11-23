@@ -451,10 +451,19 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun write(path: String, content: String): String {
             return try {
+                require(path != "memory/L4_state.json") { "L4 is managed through atomic native updates" }
                 if (path == "core/config.json") SecretStore.saveRuntimeConfig(filesDir, content)
                 else FileManager.write(filesDir, path, content)
                 "OK"
             } catch (e: Exception) { "ERROR: " + (e.message ?: "write failed") }
+        }
+
+        @JavascriptInterface
+        fun markOnboardingDone(): String {
+            return try {
+                FileManager.updateL4State(filesDir) { it.put("onboarding_done", true) }
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "onboarding update failed") }
         }
 
         @JavascriptInterface
