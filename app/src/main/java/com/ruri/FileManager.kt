@@ -170,8 +170,7 @@ object FileManager {
         put(root, CONFIG_PATH, """
             {
               "models": [
-                { "id": "routeway", "name": "Routeway · Gemma MeroMero Free", "base_url": "https://api.routeway.ai/v1", "api_key": "", "model": "gemma-4-26b-a4b-it-meromero:free", "priority": 1, "tokens_per_day": 400000, "free_tier": true, "enabled": true },
-                { "id": "routeway-minimax", "name": "MiniMax M3.1 Flash Free", "base_url": "https://api.routeway.ai/v1", "api_key": "", "model": "minimax-m3.1-flash:free", "priority": 2, "free_tier": true, "enabled": true }
+                { "id": "routeway", "name": "Routeway · Gemma MeroMero Free", "base_url": "https://api.routeway.ai/v1", "api_key": "", "model": "gemma-4-26b-a4b-it-meromero:free", "priority": 1, "tokens_per_day": 400000, "free_tier": true, "enabled": true, "nsfw": true, "vision": true }
               ],
               "current": 0,
               "free_only": true,
@@ -821,41 +820,34 @@ object FileManager {
                 meromeroModel.put("tokens_per_day", 400000L)
             }
 
-            val dolphinSource = (0 until sourceModels.length()).mapNotNull { sourceModels.optJSONObject(it) }
-                .firstOrNull {
-                    it.optString("id") == "openrouter-dolphin" ||
-                        it.optString("model") == "cognitivecomputations/dolphin3.0-mistral-24b:free"
-                }
-            val dolphin = dolphinSource?.let { JSONObject(it.toString()) } ?: JSONObject()
-            dolphin.put("id", "openrouter-dolphin")
-                .put("name", "OpenRouter · Dolphin 3.0 Mistral 24B Free")
-                .put("base_url", "https://openrouter.ai/api/v1")
-                .put("model", "cognitivecomputations/dolphin3.0-mistral-24b:free")
+            val hfSource = (0 until sourceModels.length()).mapNotNull { sourceModels.optJSONObject(it) }
+                .firstOrNull { it.optString("id") == "hf" }
+            val hf = hfSource?.let { JSONObject(it.toString()) } ?: JSONObject()
+            val selectedHfModel = hf.optString("model")
+                .takeIf { it != "cognitivecomputations/dolphin3.0-mistral-24b:free" }.orEmpty()
+            hf.put("id", "hf")
+                .put("name", "Hugging Face · Serverless Roleplay")
+                .put("base_url", "https://router.huggingface.co/v1")
+                .put("model", selectedHfModel)
                 .put("api_key", "")
                 .put("free_tier", true)
-                .put("enabled", true)
+                .put("enabled", selectedHfModel.isNotBlank())
                 .put("nsfw", true)
                 .put("vision", false)
-                .put("rpd", 50)
-                .put("requests_per_day", 50)
+                .put("rpd", 0)
                 .put("tokens_per_day", 0)
-            if (!config.optBoolean("nsfw_only_routes_v1", false)) {
-                dolphin.put("priority", 2)
-            } else if (!dolphin.has("priority")) {
-                dolphin.put("priority", 2)
-            }
+            if (!config.optBoolean("nsfw_only_routes_v2", false)) hf.put("priority", 2)
+            else if (!hf.has("priority")) hf.put("priority", 2)
 
-            val kept = JSONArray().put(meromeroModel).put(dolphin)
-            val keepIds = setOf("routeway", "openrouter-dolphin")
+            val kept = JSONArray().put(meromeroModel).put(hf)
+            val keepIds = setOf("routeway", "hf")
             for (index in 0 until sourceModels.length()) {
                 val old = sourceModels.optJSONObject(index) ?: continue
                 val oldId = old.optString("id")
-                if (oldId.isNotBlank() && oldId !in keepIds) {
-                    SecretStore.removeModelKey(root, oldId)
-                }
+                if (oldId.isNotBlank() && oldId !in keepIds) SecretStore.removeModelKey(root, oldId)
             }
 
-            val firstNsfwMigration = !config.optBoolean("nsfw_only_routes_v1", false)
+            val firstNsfwMigration = !config.optBoolean("nsfw_only_routes_v2", false)
             val selectedId = if (firstNsfwMigration) "routeway" else config.optString("selected_route_id")
             val selectedIndex = (0 until kept.length()).firstOrNull { index ->
                 kept.optJSONObject(index)?.optString("id") == selectedId
@@ -867,6 +859,7 @@ object FileManager {
                 .put("free_only", true)
                 .put("two_route_migration_v1", true)
                 .put("nsfw_only_routes_v1", true)
+                .put("nsfw_only_routes_v2", true)
                 .put("manual_route_order_v1", true)
                 .remove("api_key")
             if (!config.has("nsfw_override")) config.put("nsfw_override", true)
