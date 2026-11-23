@@ -77,7 +77,8 @@ object SecretStore {
             for (i in 0 until models.length()) {
                 val model = models.optJSONObject(i) ?: continue
                 val id = modelId(model, i)
-                model.put("api_key", secrets.optString(id, ""))
+                val secretRef = model.optString("api_key_ref").ifBlank { id }
+                model.put("api_key", secrets.optString(secretRef, ""))
             }
         }
         config.toString()
@@ -157,7 +158,7 @@ object SecretStore {
 
             if (model.optBoolean("clear_api_key", false)) {
                 secrets.remove(id)
-            } else {
+            } else if (model.optString("api_key_ref").isBlank()) {
                 val suppliedKey = model.optString("api_key")
                 if (suppliedKey.isNotBlank()) secrets.put(id, suppliedKey)
             }
