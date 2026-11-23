@@ -83,30 +83,8 @@ object EmotionEngine {
         val o = config(root).optJSONObject("channels") ?: JSONObject(); val m = LinkedHashMap<String, JSONObject>()
         for (k in o.keys()) m[k] = o.optJSONObject(k) ?: JSONObject(); return m
     }
-    private fun drift(root: File) = config(root).optJSONObject("drift") ?: JSONObject()
+    fun drift(root: File): JSONObject = config(root).optJSONObject("drift") ?: JSONObject()
 
-    // Compatibility for LifeScheduler: the new initiative gate is handled directly by
-    // initiativeGate(), while this snapshot still exposes the adaptive reflection interval.
-    fun thresholds(root: File): JSONObject {
-        val v = readValues(root)
-        val d = drift(root)
-        val channelConfig = config(root).optJSONObject("channels") ?: JSONObject()
-        fun n(key: String): Double {
-            val base = channelConfig.optJSONObject(key)?.optDouble("base", 0.0) ?: 0.0
-            return (v.optDouble(key, base) - base) / 100.0
-        }
-        val initiative = (d.optDouble("base_initiative_h", 3.5)
-            + (n("anger") + n("sadness")) * 2.0 + n("fatigue") * 2.0
-            - n("longing") * 1.5 - n("boredom") - n("affection")).coerceIn(0.5, 8.0)
-        val cooldown = (d.optDouble("base_cooldown_h", 3.0)
-            + n("fatigue") * 2.0 - n("boredom")).coerceIn(0.5, 6.0)
-        val reflection = (6.0 - n("interest") * 2.0 - n("boredom") * 2.0
-            + n("fatigue") * 2.0).coerceIn(1.0, 12.0)
-        return JSONObject()
-            .put("initiative_h", initiative)
-            .put("cooldown_h", cooldown)
-            .put("reflection_h", reflection)
-    }
     private fun readState(root: File) = runCatching { JSONObject(FileManager.read(root, STATE)) }.getOrElse { JSONObject() }
     fun readValues(root: File): JSONObject {
         val v = readState(root).optJSONObject("values"); if (v != null) return v
@@ -254,8 +232,6 @@ object EmotionEngine {
         else -> "собранная"
     }
 
-    fun drift(root: File): JSONObject = config(root).optJSONObject("drift") ?: JSONObject()
-
     fun pressure(root: File): Double {
         val v = readValues(root)
         return (v.optDouble("boredom", 0.0) + v.optDouble("longing", 0.0)) / 2.0
@@ -285,10 +261,10 @@ object EmotionEngine {
         val sb = StringBuilder("=== ТВОИ ЭМОЦИИ (0-100) ===\n")
         for (k in v.keys()) sb.append("• ").append(names.optString(k, k)).append(": ").append(v.optDouble(k).toInt()).append("\n")
         sb.append("Настроение: ").append(moodLabel(v)).append("\n")
-        sb.append("Шкала: 0=нет, 50=умеренно, 100=предел. Злость:0 спокойна/50 раздражена/100 в ярости. Грусть:0 лёгкая/50 печаль/100 тоска. Страх:0 уверена/50 тревожно/100 паника. Скука:0 занята/50 скучно/100 невыносимо. Тоска по командиру:0 не скучаю/50 скучаю/100 места не нахожу. Усталость:0 свежа/50 устала/100 вымотана. Желание:30 фон/60 томно/100 горит.\\n")
+        sb.append("Шкала: 0=нет, 50=умеренно, 100=предел. Злость:0 спокойна/50 раздражена/100 в ярости. Грусть:0 лёгкая/50 печаль/100 тоска. Страх:0 уверена/50 тревожно/100 паника. Скука:0 занята/50 скучно/100 невыносимо. Тоска по командиру:0 не скучаю/50 скучаю/100 места не нахожу. Усталость:0 свежа/50 устала/100 вымотана. Желание:30 фон/60 томно/100 горит.\n")
         val d = drift(root)
         sb.append("Давление скуки+тоски: ").append(pressure(root).toInt()).append("/100. Порог инициативы: ").append(d.optDouble("initiative_threshold", 40.0).toInt()).append(".\\n")
-        sb.append("Когда решаешь писать командиру или подумать, можешь добавить строку INITIATIVE_DECISION: write|think|veto: причина. veto = отложить по своей причине (автономия).\\n")
+        sb.append("Когда решаешь писать командиру или подумать, можешь добавить строку INITIATIVE_DECISION: write|think|veto: причина. veto = отложить по своей причине (автономия).\n")
         sb.append("Эмоции влияют на тон/длину/инициативу: злость+грусть→суше/короче; скука и тоска и нежность→чаще инициируй; интерес→исследуй; усталость→короче/реже.\n")
         sb.append("В конце ответа отдельной строкой можешь добавить EMOTION_DELTA: {\"joy\":-10,\"anger\":15} (знаковые целые, каналы выше). Строка не показывается командиру.\n")
         return sb.toString()
