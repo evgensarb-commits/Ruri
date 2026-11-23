@@ -46,16 +46,13 @@ object CommanderReplyQueue {
         readState(root).optJSONArray("pending")?.length() ?: 0
     }
 
-    fun nextDue(root: File, now: Long = System.currentTimeMillis()): JSONObject? = synchronized(lock) {
+    fun firstPending(root: File): JSONObject? = synchronized(lock) {
         val pending = readState(root).optJSONArray("pending") ?: return@synchronized null
-        for (i in 0 until pending.length()) {
-            val item = pending.optJSONObject(i) ?: continue
-            if (item.optLong("next_attempt_at", 0L) <= now) return@synchronized JSONObject(item.toString())
-            // Preserve FIFO: a later message cannot jump ahead of an earlier unanswered one.
-            return@synchronized null
-        }
-        null
+        pending.optJSONObject(0)?.let { JSONObject(it.toString()) }
     }
+
+    fun nextDue(root: File, now: Long = System.currentTimeMillis()): JSONObject? =
+        firstPending(root)?.takeIf { it.optLong("next_attempt_at", 0L) <= now }
 
     fun nextDelayMs(root: File, now: Long = System.currentTimeMillis()): Long? = synchronized(lock) {
         val first = readState(root).optJSONArray("pending")?.optJSONObject(0) ?: return@synchronized null
