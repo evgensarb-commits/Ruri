@@ -227,4 +227,19 @@ class VisionHonestUnavailableTest {
             root.deleteRecursively()
         }
     }
+    @Test fun urlReaderRejectsPrivateAndSpecialNetworkAddresses() {
+        val blocked = listOf(
+            "127.0.0.1", "10.0.0.2", "172.16.0.1", "192.168.1.1",
+            "169.254.1.1", "100.64.0.1", "0.0.0.0", "224.0.0.1",
+            "::1", "fc00::1", "fe80::1"
+        )
+        blocked.forEach { host ->
+            assertFalse(host, UrlReader.isPublicAddress(java.net.InetAddress.getByName(host)))
+        }
+        assertTrue(UrlReader.isPublicAddress(java.net.InetAddress.getByName("8.8.8.8")))
+        assertTrue(UrlReader.isPublicAddress(java.net.InetAddress.getByName("1.1.1.1")))
+        assertFalse(UrlReader.isPublicHost("localhost"))
+        assertFalse(UrlReader.isPublicHost("router.local"))
+    }
+
 }
