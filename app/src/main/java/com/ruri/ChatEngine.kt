@@ -546,13 +546,6 @@ object ChatEngine {
             ?: "(не смогла сформулировать ответ)"
     }
 
-    internal fun diaryMirrorSaid(config: JSONObject): Boolean =
-        config.optBoolean("diary_mirror_said", false)
-
-    internal fun diaryMirrorSaid(root: File): Boolean =
-        runCatching { diaryMirrorSaid(JSONObject(SecretStore.readRuntimeConfig(root))) }
-            .getOrDefault(false)
-
     internal fun parseAction(reply: String): JSONObject? {
         val trimmed = reply.trim()
         val fenced = Regex("(?is)^```(?:json)?\\s*(\\{.*\\})\\s*```$").find(trimmed)
@@ -861,7 +854,6 @@ object ChatEngine {
         }
         if (!commanderMessageId.isNullOrBlank()) event.put("reply_to", commanderMessageId)
         val saved = JSONObject(FileManager.appendEvent(root, event))
-        if (diaryMirrorSaid(root)) Diary.append(root, reply, "ответ_командиру", emotion, "said")
         val savedId = saved.optString("id").ifBlank { id }
         Receipts.delivered(root, savedId)
         lastFinalMessageId = savedId
