@@ -20,8 +20,8 @@ import androidx.core.app.NotificationCompat
 class RuriService : Service() {
     private val networkListener: () -> Unit = {
         LifeScheduler.enqueueEvent(applicationContext, "net_change")
-        if (NetState.online && OfflineQueue.hasPending(filesDir)) {
-            LifeScheduler.enqueueEvent(applicationContext, "offline_drain")
+        if (NetState.online && (OfflineQueue.hasPending(filesDir) || CommanderReplyQueue.hasPending(filesDir))) {
+            LifeScheduler.enqueueEvent(applicationContext, "commander_reply_network_available")
         }
     }
 
