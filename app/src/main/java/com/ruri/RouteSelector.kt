@@ -76,8 +76,10 @@ object RouteSelector {
                 .thenBy { it }
         )
         val config = runCatching {
-            JSONObject(FileManager.read(root, "core/config.json"))
-        }.getOrElse { JSONObject() }
+            JSONObject(SecretStore.readRuntimeConfig(root))
+        }.getOrElse {
+            runCatching { JSONObject(FileManager.read(root, "core/config.json")) }.getOrElse { JSONObject() }
+        }
         if (task == Task.VISION) {
             order = order.filter { models.optJSONObject(it)?.optBoolean("vision", false) == true }
         } else if (adult && config.optBoolean("nsfw_override", true)) {
@@ -85,7 +87,22 @@ object RouteSelector {
             val other = order.filter { models.optJSONObject(it)?.optBoolean("nsfw", false) != true }
             order = nsfw + other
         }
-        return order
+
+        val mode = config.optString("route_mode", "AUTO").uppercase()
+        val selectedId = config.optString("selected_route_id").ifBlank {
+            models.optJSONObject(current)?.optString("id").orEmpty()
+        }
+        val selectedIndex = (0 until models.length()).firstOrNull { index ->
+            models.optJSONObject(index)?.optString("id") == selectedId
+        }
+        return when (mode) {
+            "MANUAL" -> order.filter { it == selectedIndex }
+            "MANUAL_FALLBACK" -> {
+                val selected = order.filter { it == selectedIndex }
+                selected + order.filter { it != selectedIndex }
+            }
+            else -> order // AUTO: manual priority order, then fallback on actual request failure.
+        }
     }
 
     internal fun applyManualRouteOrder(config: JSONObject, payload: JSONObject) {
@@ -105,6 +122,16 @@ object RouteSelector {
             }
         }
         config.put("nsfw_override", payload.optBoolean("nsfw_override", true))
+        val mode = payload.optString("route_mode", config.optString("route_mode", "AUTO")).uppercase()
+        require(mode in setOf("AUTO", "MANUAL", "MANUAL_FALLBACK")) { "Unknown route mode" }
+        config.put("route_mode", mode)
+        val selectedId = payload.optString("selected_route_id", config.optString("selected_route_id"))
+        if (selectedId.isNotBlank() && (0 until models.length()).any {
+                models.optJSONObject(it)?.optString("id") == selectedId
+            }) {
+            config.put("selected_route_id", selectedId)
+            config.put("current", (0 until models.length()).first { models.optJSONObject(it)?.optString("id") == selectedId })
+        }
     }
 
     fun classify(code: Int?, error: Exception?, responseBody: String = ""): String {
