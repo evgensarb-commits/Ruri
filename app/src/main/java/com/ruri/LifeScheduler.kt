@@ -154,6 +154,7 @@ class RuriLifeWorker(
                     if (commanderId.isBlank()) break
                     if (Tombstone.isDeleted(root, commanderId)) {
                         CommanderReplyQueue.markDeleted(root, commanderId)
+                        CommanderReplyQueue.recoverUnanswered(root)
                         continue
                     }
                     try {
@@ -163,6 +164,7 @@ class RuriLifeWorker(
                         }
                         val replyId = ChatEngine.lastSavedReplyId()
                         if (reply != ChatEngine.OFFLINE_REPLY) Notifier.thought(appContext, reply, replyId)
+                        CommanderReplyQueue.recoverUnanswered(root)
                     } catch (drainError: Exception) {
                         val delay = CommanderReplyQueue.nextDelayMs(root) ?: 30_000L
                         LifeScheduler.scheduleCommanderReplyRetry(appContext, delay)
