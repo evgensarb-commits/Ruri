@@ -69,9 +69,7 @@ object RouteSelector {
     ): List<Int> {
         val eligible = (0 until models.length()).filter { index ->
             val model = models.optJSONObject(index) ?: return@filter false
-            model.optBoolean("free_tier", true) &&
-                model.optBoolean("enabled", true) &&
-                (model.optString("api_key").isNotBlank() || model.optBoolean("allow_anonymous", false))
+            model.optBoolean("free_tier", true) && model.optBoolean("enabled", true)
         }
         var order = eligible.sortedWith(
             compareBy<Int> { models.optJSONObject(it)?.optInt("priority", 99) ?: 99 }
