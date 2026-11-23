@@ -289,11 +289,11 @@ class MeroMeroNemotronRoutesTest {
     }
 
     @Test
-    fun nvidiaTokenIsRedactedFromWebRuntimeConfig() {
+    fun legacyProviderSecretIsRedactedFromWebRuntimeConfig() {
         val raw = JSONObject()
             .put("models", JSONArray().put(JSONObject()
                 .put("id", "nemotron")
-                .put("api_key", "nvapi_secret_token")
+                .put("api_key", "legacy_provider_secret_token")
             )).toString()
         val public = JSONObject(SecretStore.redactRuntimeConfigForWeb(raw))
         val nvidia = public.getJSONArray("models").getJSONObject(0)
