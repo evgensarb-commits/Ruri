@@ -52,6 +52,19 @@ class AutonomyPackageIntegrationTest {
     }
 
     @Test
+    fun chatHistoryUsesExpandedReadWindowWithoutMutatingAppendOnlyL0() {
+        val fileManager = source("src/main/java/com/ruri/FileManager.kt")
+        val html = source("src/main/assets/index.html")
+        val activity = source("src/main/java/com/ruri/MainActivity.kt")
+        assertTrue(fileManager.contains("limit: Int = 1000"))
+        assertTrue(fileManager.contains("limit.coerceIn(1, 1000)"))
+        assertTrue(fileManager.contains("maxLines = 5000"))
+        assertTrue(html.contains("Ruri.readLastEvents('message',1000)"))
+        assertTrue(activity.contains("maxLines = 1000"))
+        assertTrue(fileManager.contains("fun appendEvent"))
+    }
+
+    @Test
     fun runtimeMigrationKeepsOnlyMeroMeroAndHFFreePool() {
         val fileManager = source("src/main/java/com/ruri/FileManager.kt")
         val routeSelector = source("src/main/java/com/ruri/RouteSelector.kt")
