@@ -547,9 +547,10 @@ class MainActivity : AppCompatActivity() {
                     val trusted = verified.firstOrNull {
                         it.optString("model") == modelId && it.optString("provider") == provider
                     } ?: throw IllegalArgumentException("Модель отсутствует в проверенном каталоге HF")
-                    require(trusted.optBoolean("free") &&
-                        trusted.optDouble("price_input", -1.0) == 0.0 &&
-                        trusted.optDouble("price_output", -1.0) == 0.0) {
+                    val freePromo = trusted.optBoolean("is_free_promo")
+                    val zeroPriced = trusted.optDouble("price_input", -1.0) == 0.0 &&
+                        trusted.optDouble("price_output", -1.0) == 0.0
+                    require(trusted.optBoolean("free") && (freePromo || zeroPriced)) {
                         "Разрешены только подтверждённо бесплатные модели"
                     }
                     selected.add(trusted)
@@ -611,9 +612,15 @@ class MainActivity : AppCompatActivity() {
                         if (code !in 200..299) JSONObject().put("ok", false).put("error", "HF HTTP " + code)
                         else {
                             val body = connection.inputStream.bufferedReader().use { it.readText() }
-                            val candidates = HFModelCatalog.parse(body)
+                            val catalog = HFModelCatalog.parseDetailed(body)
+                            val candidates = catalog.models
                             verifiedHFCatalog = JSONArray(candidates.toString())
-                            JSONObject().put("ok", true).put("models", candidates)
+                            val stats = JSONObject()
+                                .put("models_seen", catalog.modelsSeen)
+                                .put("roleplay_matches", catalog.roleplayMatches)
+                                .put("live_providers", catalog.liveProviders)
+                                .put("free_providers", catalog.freeProviders)
+                            JSONObject().put("ok", true).put("models", candidates).put("stats", stats)
                         }
                     } catch (error: Exception) {
                         JSONObject().put("ok", false).put("error", error.message ?: "HF model list failed")
