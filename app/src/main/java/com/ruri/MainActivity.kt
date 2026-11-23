@@ -851,8 +851,8 @@ class MainActivity : AppCompatActivity() {
                     openRouter = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
                         .firstOrNull { it.optString("id") == "openrouter" }
                 }
-                openRouter ?: throw IllegalStateException("Не удалось восстановить маршрут OpenRouter")
-                require(openRouter.optString("api_key").isNotBlank()) {
+                val baseRoute = openRouter ?: throw IllegalStateException("Не удалось восстановить маршрут OpenRouter")
+                require(baseRoute.optString("api_key").isNotBlank()) {
                     "Ключ OpenRouter не найден в Android Keystore — сохрани его заново"
                 }
                 val verified = (0 until verifiedOpenRouterCatalog.length())
@@ -876,14 +876,14 @@ class MainActivity : AppCompatActivity() {
                 for (i in models.length() - 1 downTo 0) {
                     if (models.optJSONObject(i)?.optString("id").orEmpty().startsWith("or_pool_")) models.remove(i)
                 }
-                openRouter.put("model", "")
+                baseRoute.put("model", "")
                     .put("enabled", false)
                     .put("vision", false)
                     .put("base_url", "https://openrouter.ai/api/v1")
                 selected.forEachIndexed { index, candidate ->
                     val modelId = candidate.getString("model")
                     val stableId = "or_pool_" + Integer.toHexString(modelId.hashCode())
-                    val route = JSONObject(openRouter.toString())
+                    val route = JSONObject(baseRoute.toString())
                     route.put("id", stableId)
                         .put("name", "OpenRouter · " + candidate.optString("name", modelId))
                         .put("model", modelId)
