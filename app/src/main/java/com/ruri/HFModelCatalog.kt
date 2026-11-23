@@ -6,7 +6,7 @@ import org.json.JSONObject
 /** Strict free-only Hugging Face Inference Providers catalog. Unknown prices/status are excluded. */
 internal object HFModelCatalog {
     private val roleplay = Regex("(?i)(cydonia|rocinante|unslopnemo|magnum|roleplay|mythomax|stheno|noromaid|eva[-_ ]?llama|tiefighter|lumimaid|rpmax|anubis|dark[-_ ]?idol|fimbulvetr|sao10k|midnight[-_ ]?miqu|lewd|abliterat)")
-    private val nsfw = Regex("(?i)(nsfw|uncensored|abliterat|erp|lewd|adult|18\+|spicy|smut|erotic|not-safe-for-work|no-filter|uncensored[-_ ]?llama|dark[-_ ]?idol|lumimaid|noromaid|mythomax|sao10k)")
+    private val nsfw = Regex("(?i)(nsfw|uncensored|abliterat|erp|lewd|adult|18[+]|spicy|smut|erotic|not-safe-for-work|no-filter|uncensored[-_ ]?llama|dark[-_ ]?idol|lumimaid|noromaid|mythomax|sao10k)")
     private val forbiddenLegacy = Regex("(?i)dolphin")
 
     data class CatalogResult(
