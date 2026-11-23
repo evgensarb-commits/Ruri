@@ -252,13 +252,14 @@ object FactExtractor {
         model: String,
         now: Long
     ) {
-        state.put("last_fact_extraction_attempt_at", now)
-        state.put("last_fact_extraction_ts", latestCommander.optLong("timestamp", latestCommander.optLong("ts", now)))
-        state.put("last_fact_extraction_event_id", latestCommander.optString("id"))
-        state.put("last_fact_extraction_offset", scanOffset)
-        state.put("last_fact_extraction_batch_id", batchId)
-        state.put("last_fact_extraction_model", model)
-        FileManager.write(root, STATE_PATH, state.toString(2))
+        FileManager.updateL4State(root) { latest ->
+            latest.put("last_fact_extraction_attempt_at", now)
+                .put("last_fact_extraction_ts", latestCommander.optLong("timestamp", latestCommander.optLong("ts", now)))
+                .put("last_fact_extraction_event_id", latestCommander.optString("id"))
+                .put("last_fact_extraction_offset", scanOffset)
+                .put("last_fact_extraction_batch_id", batchId)
+                .put("last_fact_extraction_model", model)
+        }
 
         // The pending transcript is reset only after L1 and L4 checkpoints are committed.
         val reset = JSONObject()
@@ -273,8 +274,9 @@ object FactExtractor {
     }
 
     private fun recordAttempt(root: File, state: JSONObject, now: Long) {
-        state.put("last_fact_extraction_attempt_at", now)
-        FileManager.write(root, STATE_PATH, state.toString(2))
+        FileManager.updateL4State(root) { latest ->
+            latest.put("last_fact_extraction_attempt_at", now)
+        }
     }
 
     private fun readOrInitializePending(root: File, state: JSONObject): JSONObject {
