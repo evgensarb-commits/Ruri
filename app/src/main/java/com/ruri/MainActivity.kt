@@ -636,46 +636,62 @@ class MainActivity : AppCompatActivity() {
 
                         fun matches(model: JSONObject, mode: String): Boolean {
                             val id = model.optString("id")
-                            if (HFModelCatalog.isCandidateId(id, mode)) return true
+                            val name = model.optString("name")
+                            val description = model.optString("description")
+                            if (HFModelCatalog.isCandidateId(id, mode) ||
+                                HFModelCatalog.isCandidateId(name, mode) ||
+                                HFModelCatalog.isCandidateId(description, mode)) return true
                             val tags = model.optJSONArray("tags") ?: JSONArray()
                             return (0 until tags.length()).any { i ->
                                 HFModelCatalog.isCandidateId(tags.optString(i), mode)
                             }
                         }
 
+                        // Use the router's authoritative live model listing, which already includes
+                        // every provider/status/price record. The Hub catalog supplies discovery
+                        // names and tags; avoid hundreds of fragile per-model detail requests.
+                        val (routerCode, routerBody, _) = get("https://router.huggingface.co/v1/models")
+                        if (routerCode !in 200..299) {
+                            throw IllegalStateException("HF Inference Providers catalog HTTP " + routerCode)
+                        }
+                        val routerData = JSONObject(routerBody).optJSONArray("data") ?: JSONArray()
+                        val routerModels = linkedMapOf<String, JSONObject>()
+                        for (i in 0 until routerData.length()) {
+                            val model = routerData.optJSONObject(i) ?: continue
+                            val id = model.optString("id").trim()
+                            if (id.isNotBlank()) routerModels[id] = model
+                        }
+
                         fun inspect(mode: String): Pair<JSONArray, IntArray> {
-                            val ids = allHubModels.values.filter { matches(it, mode) }
-                                .map { it.optString("id") }.distinct()
-                            val found = java.util.Collections.synchronizedList(mutableListOf<JSONObject>())
-                            val liveAndFree = java.util.concurrent.atomic.AtomicIntegerArray(2)
-                            val pool = Executors.newFixedThreadPool(6)
-                            try {
-                                val tasks = ids.map { id ->
-                                    java.util.concurrent.Callable {
-                                        runCatching {
-                                            val safeId = id.replace(" ", "%20")
-                                            val (code, body, _) = get("https://router.huggingface.co/v1/models/" + safeId)
-                                            if (code in 200..299) {
-                                                val detail = JSONObject(body)
-                                                val hubMeta = allHubModels[id]
-                                                if (hubMeta != null && hubMeta.has("tags")) detail.put("tags", hubMeta.optJSONArray("tags") ?: JSONArray())
-                                                val wrapped = JSONObject().put("data", JSONArray().put(detail))
-                                                val parsed = HFModelCatalog.parseDetailed(wrapped.toString(), mode)
-                                                liveAndFree.addAndGet(0, parsed.liveProviders)
-                                                liveAndFree.addAndGet(1, parsed.freeProviders)
-                                                for (j in 0 until parsed.models.length()) {
-                                                    found.add(parsed.models.getJSONObject(j))
-                                                }
-                                            }
-                                        }.onFailure { android.util.Log.w("Ruri", "HF candidate check failed for " + id, it) }
-                                    }
+                            val hubCandidates = allHubModels.values.filter { matches(it, mode) }
+                            val candidateIds = hubCandidates.map { it.optString("id") }.toSet()
+                            val found = JSONArray()
+                            val matched = routerModels.values.filter { it.optString("id") in candidateIds }
+                            var liveCount = 0
+                            var freeCount = 0
+                            for (routerModel in matched) {
+                                val id = routerModel.optString("id")
+                                val hubMeta = allHubModels[id]
+                                val enriched = JSONObject(routerModel.toString())
+                                if (hubMeta != null) {
+                                    enriched.put("name", hubMeta.optString("name").ifBlank { id })
+                                    enriched.put("description", hubMeta.optString("description"))
+                                    enriched.put("tags", hubMeta.optJSONArray("tags") ?: JSONArray())
                                 }
-                                pool.invokeAll(tasks).forEach { it.get() }
-                            } finally { pool.shutdownNow() }
-                            val sorted = found.sortedByDescending { it.optDouble("score", 0.0) }
+                                val parsed = HFModelCatalog.parseDetailed(
+                                    JSONObject().put("data", JSONArray().put(enriched)).toString(), mode
+                                )
+                                liveCount += parsed.liveProviders
+                                freeCount += parsed.freeProviders
+                                for (j in 0 until parsed.models.length()) {
+                                    found.put(parsed.models.getJSONObject(j))
+                                }
+                            }
+                            val sorted = (0 until found.length()).mapNotNull { found.optJSONObject(it) }
+                                .sortedByDescending { it.optDouble("score", 0.0) }
                             val output = JSONArray()
                             sorted.take(30).forEach(output::put)
-                            return output to intArrayOf(ids.size, liveAndFree.get(0), liveAndFree.get(1))
+                            return output to intArrayOf(hubCandidates.size, liveCount, freeCount)
                         }
 
                         var mode = "rp"
@@ -688,7 +704,6 @@ class MainActivity : AppCompatActivity() {
                             candidates = fallback.first
                             stats = fallback.second
                         }
-                        verifiedHFCatalog = JSONArray(candidates.toString())
                         val statsJson = JSONObject()
                             .put("hub_models_seen", allHubModels.size)
                             .put("models_seen", allHubModels.size)
