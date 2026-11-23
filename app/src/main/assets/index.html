@@ -111,7 +111,7 @@ button.action.secondary{background:transparent;color:var(--gold)}
 <p style="margin:6px 0 10px;color:#9cafcb;font-size:13px">Сначала Serper (Google-результаты, ключ Serper). Если не ответил — твой SearXNG на ноуте. Оба молчат → честная ошибка. Для HTTP используй частный/LAN или Tailscale IP; публичный адрес — только через HTTPS.</p>
 <div class="field"><label>SERPER API KEY</label><input id="serperKey" type="password" autocomplete="off" placeholder="ключ с serper.dev"></div>
 <div class="field"><label>SEARXNG URL (ноут)</label><input id="searxngUrl" type="text" placeholder="http://100.x.y.z:8080"></div>
-<button class="action secondary" id="saveSearch">СОХРАНИТЬ ПОИСК</button>
+<div class="actions"><button class="action secondary" id="saveSearch">СОХРАНИТЬ ПОИСК</button><button class="action secondary" id="clearSearchKey">УДАЛИТЬ КЛЮЧ SERPER</button></div>
 <div class="small" id="searchStatus">Проверяю…</div>
 <div class="small" id="visionStatus">Vision: проверяю…</div><button class="action secondary" id="reprobeVision">ПЕРЕПРОБОВАТЬ VISION</button></div>
 <div class="actions"><button class="action secondary" id="showDiagnostics">ОТКРЫТЬ ДИАГНОСТИКУ</button></div><div class="card" style="margin-bottom:14px"><b>ДИАГНОСТИКА СОЕДИНЕНИЯ</b><p style="margin:6px 0 10px;color:#9cafcb;font-size:13px">Локальная проверка DNS, TLS-соединения, времени ожидания и HTTP-ответа. Ключи и переписка в журнал не записываются.</p><button class="action secondary" id="refreshNetworkDiagnostics">ПОСЛЕДНЯЯ ПОПЫТКА</button><pre id="networkDiagnostics" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere;margin-top:10px">Попыток соединения пока нет.</pre></div><div class="card" style="margin:12px 0"><b>АВТОМАТИЧЕСКИЕ КОПИИ НА ТЕЛЕФОНЕ</b><p style="margin:6px 0 10px;color:#9cafcb;font-size:13px">Рури хранит до 14 последних ежедневных снимков памяти. Архивы проверяются по SHA-256; API-ключи и Android Keystore в них не входят.</p><div id="backupStatus" class="small">Проверяю локальные копии…</div><div id="backupVisibility" class="small" style="margin-top:8px">Журнал и снимки…</div><div class="actions"><button class="action secondary" id="refreshBackups">ОБНОВИТЬ</button><button class="action secondary" id="createBackup">СОЗДАТЬ КОПИЮ СЕЙЧАС</button></div><div class="field"><label>КОПИЯ ДЛЯ ПРОВЕРКИ ИЛИ ВОССТАНОВЛЕНИЯ</label><select id="backupSelect"></select></div><div class="actions"><button class="action secondary" id="verifyBackup">ПРОВЕРИТЬ</button><button class="action secondary" id="restoreBackup">ВОССТАНОВИТЬ</button></div></div><div class="field"><label>ПРОВАЙДЕР ДЛЯ СОХРАНЕНИЯ КЛЮЧА</label><select id="model"></select></div>
@@ -485,6 +485,11 @@ $('#serperKey').placeholder=s.has_serper_key?'Ключ сохранён; вве�
 $('#searxngUrl').value=s.searxng_url||'';
 $('#searchStatus').textContent=(s.has_serper_key?'Serper: ключ зашифрован и сохранён. ':'Serper: ключа нет. ')+(s.searxng_url?'Ноут: '+s.searxng_url:'Ноут: не задан.');
 }catch(e){$('#searchStatus').textContent='Ошибка чтения search.json';}}
+$('#clearSearchKey').addEventListener('click',function(){try{
+var s=JSON.parse(Ruri.readPublicSearchConfig()||'{}');s.clear_serper_key=true;
+var saved=Ruri.saveSearchConfig(JSON.stringify(s));if(saved!=='OK')throw new Error(saved);
+loadSearch();status('Ключ Serper удалён из зашифрованного хранилища.');
+}catch(e){status('Ошибка удаления ключа: '+e.message);}});
 $('#saveSearch').addEventListener('click',function(){try{
 var s=JSON.parse(Ruri.readPublicSearchConfig()||'{}');
 s.serper_key=$('#serperKey').value.trim();
