@@ -98,7 +98,7 @@ object ChatEngine {
                 selected.optString("api_key").isBlank() -> "Маршрут $name: API-ключ не задан"
                 else -> "Маршрут $name: Android сообщает, что сетевого подключения нет"
             }
-            return reason
+            throw ModelRequestFailure(reason, 60_000L, "no_route")
         }
         if (models.length() == 0) {
             OfflineQueue.markPending(root)
