@@ -183,7 +183,7 @@ return d;
 }
 function loadChat(){
 var box=$('#chat');box.innerHTML='';var badges=routeBadges();
-var events=JSON.parse(Ruri.readLastEvents('message',100)||'[]').map(function(item){return item.event;}).reverse().filter(function(e){return e&&e.who&&!Ruri.isMessageDeleted(e.id||'');});
+var events=JSON.parse(Ruri.readLastEvents('message',1000)||'[]').map(function(item){return item.event;}).reverse().filter(function(e){return e&&e.who&&!Ruri.isMessageDeleted(e.id||'');});
 events.forEach(function(e){if(e.who==='ruri'&&e.id)Ruri.markReadByCommander(e.id);});
 refreshMessageReceipts();
 events.forEach(function(e){var b=badges[String(e.ts)];box.appendChild(messageNode(e.who,e.text,e.ts,e,e.route||(b&&b.route)));});
