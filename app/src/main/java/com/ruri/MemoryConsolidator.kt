@@ -281,7 +281,6 @@ object MemoryConsolidator {
     }
 
     private fun requestBestModel(root: java.io.File, prompt: String): Pair<JSONObject, String>? {
-        if (!NetState.online) return null
         val config = try { JSONObject(SecretStore.readRuntimeConfig(root)) } catch (_: Exception) { return null }
         val models = config.optJSONArray("models") ?: return null
         if (models.length() == 0) return null
