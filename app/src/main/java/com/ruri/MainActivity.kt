@@ -478,10 +478,13 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) { "ERROR: " + (e.message ?: "onboarding update failed") }
         }
 
+        // The full decrypted config is native-only; JavaScript receives key-presence flags.
+        fun readRuntimeConfig(): String = SecretStore.readRuntimeConfig(filesDir)
+
         @JavascriptInterface
-        fun readRuntimeConfig(): String {
-            return try { SecretStore.readRuntimeConfig(filesDir) }
-            catch (e: Exception) { android.util.Log.e("Ruri", "Cannot read runtime config", e); "{}" }
+        fun readPublicRuntimeConfig(): String {
+            return try { SecretStore.readPublicRuntimeConfig(filesDir) }
+            catch (e: Exception) { android.util.Log.e("Ruri", "Cannot read public runtime config", e); "{}" }
         }
 
         @JavascriptInterface
