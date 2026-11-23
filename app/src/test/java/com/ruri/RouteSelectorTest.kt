@@ -135,6 +135,11 @@ class VisionGemmaOnlyTest {
             FileManager.init(root)
             RouteMeta.setCapability(root, "routeway-minimax", "vision", true)
             RouteMeta.setCapability(root, "routeway", "vision", false)
+            val config = JSONObject(FileManager.read(root, "core/config.json"))
+            val configured = config.getJSONArray("models")
+            configured.getJSONObject(0).put("vision", false)
+            configured.getJSONObject(1).put("vision", false)
+            FileManager.write(root, "core/config.json", config.toString(2))
             assertEquals(null, Vision.cachedVisionRoute(root))
         } finally {
             root.deleteRecursively()
