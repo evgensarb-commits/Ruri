@@ -110,4 +110,18 @@ class HFModelCatalogTest {
         assertEquals("community/Generic-Chat-8B", result.models.getJSONObject(0).getString("model"))
     }
 
+    @Test
+    fun nsfwFallbackRecognizesModelNameAndDescriptionFromRouterCatalog() {
+        val raw = JSONObject().put("data", org.json.JSONArray()
+            .put(JSONObject().put("id", "publisher/model-7b")
+                .put("name", "Uncensored Roleplay 7B")
+                .put("description", "Abliterated conversational model")
+                .put("providers", org.json.JSONArray()
+                    .put(JSONObject().put("provider", "free-provider").put("status", "live")
+                        .put("is_free", true)))))
+        val result = HFModelCatalog.parseDetailed(raw.toString(), "nsfw")
+        assertEquals(1, result.models.length())
+        assertEquals("publisher/model-7b", result.models.getJSONObject(0).getString("model"))
+    }
+
 }
