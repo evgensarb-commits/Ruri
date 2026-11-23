@@ -22,6 +22,11 @@ object UrlReader {
             val second = bytes[1].toInt() and 0xff
             if ((first and 0xfe) == 0xfc) return false // IPv6 unique-local fc00::/7
             if (first == 0xfe && (second and 0xc0) == 0x80) return false // fe80::/10
+            val mappedV4 = bytes.take(10).all { it.toInt() == 0 } &&
+                (bytes[10].toInt() and 0xff) == 0xff && (bytes[11].toInt() and 0xff) == 0xff
+            if (mappedV4) {
+                return isPublicAddress(InetAddress.getByAddress(bytes.copyOfRange(12, 16)))
+            }
             return true
         }
         if (bytes.size != 4) return false
@@ -45,8 +50,8 @@ object UrlReader {
         if (normalized.isBlank() || normalized == "localhost" || normalized.endsWith(".localhost") ||
             normalized.endsWith(".local") || normalized.endsWith(".internal") || normalized.endsWith(".home.arpa")) return false
         return runCatching {
-            InetAddress.getAllByName(normalized).isNotEmpty() &&
-                InetAddress.getAllByName(normalized).all(::isPublicAddress)
+            val addresses = InetAddress.getAllByName(normalized)
+            addresses.isNotEmpty() && addresses.all(::isPublicAddress)
         }.getOrDefault(false)
     }
 
