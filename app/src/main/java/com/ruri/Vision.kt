@@ -25,7 +25,7 @@ object Vision {
         )
     }
 
-    /** Returns a previously verified route without issuing a network request from the UI thread. */
+    /** Returns the first enabled free route with a manually declared vision capability. */
     fun cachedVisionRoute(root: File): JSONObject? {
         val config = runCatching { JSONObject(SecretStore.readRuntimeConfig(root)) }.getOrElse { JSONObject() }
         val models = config.optJSONArray("models") ?: JSONArray()
