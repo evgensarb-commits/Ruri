@@ -101,8 +101,6 @@ object FactExtractor {
             )
         }
 
-        if (!NetState.online) return 0
-
         val config = try {
             JSONObject(SecretStore.readRuntimeConfig(root))
         } catch (e: Exception) {
