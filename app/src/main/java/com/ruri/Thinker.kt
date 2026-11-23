@@ -393,6 +393,7 @@ object Thinker {
                 .put("seed", (System.currentTimeMillis() % 100000L).toInt())
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
+            RouteMeta.recordHttpStatus(root, routeId, code)
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
             val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             if (code !in 200..299) {
