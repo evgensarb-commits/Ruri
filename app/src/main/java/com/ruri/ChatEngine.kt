@@ -343,6 +343,7 @@ object ChatEngine {
                 diagnostic.put("stage", stage)
                 val responseStart = SystemClock.elapsedRealtime()
                 val code = connection.responseCode
+                RouteMeta.recordHttpStatus(root, routeId, code)
                 diagnostic.put("response_wait_ms", SystemClock.elapsedRealtime() - responseStart)
                 diagnostic.put("http_status", code)
                 val stream = if (code in 200..299) connection.inputStream else connection.errorStream
@@ -758,6 +759,7 @@ object ChatEngine {
                 .put("seed", (System.currentTimeMillis() % 100000L).toInt())
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
+            if (root != null && routeId.isNotBlank()) RouteMeta.recordHttpStatus(root, routeId, code)
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
             val raw = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
             val response = runCatching { JSONObject(raw) }.getOrNull() ?: JSONObject()
