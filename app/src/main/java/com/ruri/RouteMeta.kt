@@ -78,6 +78,24 @@ object RouteMeta {
         }
     }
 
+    /** Remove telemetry for providers that are no longer present in runtime config. */
+    @Synchronized
+    fun pruneToConfiguredRoutes(root: File) {
+        val config = runCatching { JSONObject(FileManager.read(root, "core/config.json")) }.getOrNull() ?: return
+        val models = config.optJSONArray("models") ?: return
+        val configuredIds = (0 until models.length()).mapNotNull { index ->
+            val model = models.optJSONObject(index) ?: return@mapNotNull null
+            model.optString("id").ifBlank { model.optString("name").ifBlank { "route_$index" } }
+                .takeIf { it.isNotBlank() }
+        }.toSet()
+        val all = load(root)
+        val staleIds = all.keys().asSequence().filter { it !in configuredIds }.toList()
+        if (staleIds.isNotEmpty()) {
+            staleIds.forEach { all.remove(it) }
+            save(root, all)
+        }
+    }
+
     @Synchronized
     fun save(root: File, value: JSONObject) {
         val sanitized = JSONObject(value.toString())
@@ -208,12 +226,32 @@ object RouteMeta {
         if (it.optString("day_key") != today) {
             it.put("day_key", today)
             it.put("day_count", 0)
+            it.put("successes_today", 0)
+            it.put("failures_today", 0)
+            it.put("rate_limits_today", 0)
+            it.put("network_errors_today", 0)
+            it.put("region_restrictions_today", 0)
+            it.put("timeouts_today", 0)
+            it.put("http_responses_today", 0)
+            it.put("http_4xx_today", 0)
+            it.put("http_5xx_today", 0)
+            it.put("last_http_status", JSONObject.NULL)
         }
         it.put("day_count", it.optInt("day_count", 0) + 1)
+        it.put("lifetime_requests", it.optLong("lifetime_requests", 0L) + 1L)
         it.put("last_attempt", System.currentTimeMillis())
     }
 
+    fun recordHttpStatus(root: File, id: String, status: Int) = update(root, id) {
+        it.put("last_http_status", status)
+            .put("http_responses_today", it.optInt("http_responses_today", 0) + 1)
+        if (status == 429) it.put("rate_limits_today", it.optInt("rate_limits_today", 0) + 1)
+        if (status in 400..499) it.put("http_4xx_today", it.optInt("http_4xx_today", 0) + 1)
+        if (status in 500..599) it.put("http_5xx_today", it.optInt("http_5xx_today", 0) + 1)
+    }
+
     fun recordSuccess(root: File, id: String, task: Task? = null) = update(root, id) {
+        it.put("successes_today", it.optInt("successes_today", 0) + 1)
         it.put("fail_streak", 0)
         val streak = it.optInt("success_streak", 0) + 1
         it.put("success_streak", streak)
@@ -222,6 +260,13 @@ object RouteMeta {
     }
 
     fun recordFailure(root: File, id: String, kind: String, task: Task? = null) = update(root, id) {
+        it.put("failures_today", it.optInt("failures_today", 0) + 1)
+        it.put("last_failure_kind", kind.take(40))
+        when (kind) {
+            "network" -> it.put("network_errors_today", it.optInt("network_errors_today", 0) + 1)
+            "region" -> it.put("region_restrictions_today", it.optInt("region_restrictions_today", 0) + 1)
+            "timeout" -> it.put("timeouts_today", it.optInt("timeouts_today", 0) + 1)
+        }
         it.put("success_streak", 0)
         updateTaskScore(it, task, false)
         when (kind) {

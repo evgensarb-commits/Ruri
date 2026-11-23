@@ -83,7 +83,7 @@ class ToolLoopExecutesAndReasksTest : BodyHandsTestBase() {
 }
 
 class ToolHopLimitTest : BodyHandsTestBase() {
-    @Test fun permitsThreeActionsAndOneFinalRequest() {
+    @Test fun permitsSequentialActionsForLongDocument() {
         val messages = JSONArray()
         var reasks = 0
         val repeated = """{"action":"list_shelf"}"""
@@ -91,9 +91,9 @@ class ToolHopLimitTest : BodyHandsTestBase() {
             reasks++
             repeated
         }
-        assertEquals(3, reasks)
-        assertEquals(3, events("tool_call").size)
-        assertEquals(repeated, reply)
+        assertEquals(64, reasks)
+        assertEquals(64, events("tool_call").size)
+        assertTrue(reply.contains("Файл прочитан не полностью"))
         assertTrue((0 until messages.length()).any {
             messages.getJSONObject(it).optString("content").contains("Лимит инструментов исчерпан")
         })
@@ -122,8 +122,14 @@ class KiloRemovedTest : BodyHandsTestBase() {
         FileManager.write(root, "core/config.json", JSONObject()
             .put("models", JSONArray()).put("current", 0).put("free_only", true).toString())
         FileManager.write(root, "memory/L4_state.json", JSONObject().toString())
-        val outcome = runCatching { ChatEngine.respond(root) }
-        assertTrue(outcome.isSuccess || outcome.exceptionOrNull()?.message.orEmpty().contains("маршрутов"))
+        val messageId = "empty-route-commander-message"
+        FileManager.appendEvent(root, JSONObject().put("id", messageId)
+            .put("type", "message").put("who", "commander").put("text", "Ответь мне")
+            .put("ts", System.currentTimeMillis()))
+        CommanderReplyQueue.enqueue(root, messageId)
+        val outcome = runCatching { ChatEngine.respond(root, messageId) }
+        assertTrue(outcome.isFailure)
+        assertTrue(CommanderReplyQueue.hasPending(root))
         assertTrue(OfflineQueue.hasPending(root))
     }
 }

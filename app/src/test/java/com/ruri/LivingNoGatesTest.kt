@@ -26,11 +26,13 @@ class LivingNoGatesTest {
         assertEquals(listOf("Мне спокойно"), diary); assertTrue(tools.isEmpty())
     }
 
-    @Test fun DiaryMirrorTest() {
+    @Test fun DiaryRemainsThoughtsOnlyTest() {
         val root = root()
-        ChatEngine.appendFinalReply(root, "Сказанная фраза", null, null, "route-a")
+        Diary.append(root, "Внутренняя мысль", "test", null, "thought")
+        Diary.append(root, "Сказанная фраза", "ответ_командиру", null, "said")
         val entries = JSONObject(FileManager.read(root, "memory/L2_diary.json")).getJSONArray("entries")
-        assertEquals("said", entries.getJSONObject(entries.length() - 1).optString("kind"))
+        assertEquals(1, entries.length())
+        assertEquals("thought", entries.getJSONObject(0).optString("kind"))
     }
 
     @Test fun DiaryKindDedupTest() {
@@ -39,7 +41,8 @@ class LivingNoGatesTest {
         Diary.append(root, "Одинаковая фраза", "test", null, "said")
         Diary.append(root, "Одинаковая фраза", "test", null, "said")
         val entries = JSONObject(FileManager.read(root, "memory/L2_diary.json")).getJSONArray("entries")
-        assertEquals(2, entries.length())
+        assertEquals(1, entries.length())
+        assertEquals("thought", entries.getJSONObject(0).optString("kind"))
     }
 
     @Test fun DiaryDedupStrongTest() {
@@ -109,17 +112,18 @@ class LivingNoGatesTest {
         assertEquals("rate_limit", RouteSelector.classify(429, null, "too many requests"))
     }
 
-    @Test fun DesirePromptPreservesFlirtDeltaGuidanceTest() {
+    @Test fun DesirePromptDescribesNewEmotionDeltaChannelsTest() {
         val root = root()
-        assertTrue(EmotionEngine.promptSection(root).contains("до +20 уместно"))
+        val prompt = EmotionEngine.promptSection(root)
+        assertTrue(prompt.contains("желание"))
+        assertTrue(prompt.contains("EMOTION_DELTA"))
+        assertTrue(prompt.contains("\"anger\":15"))
     }
 
-    @Test fun DesireTriggersTest() {
+    @Test fun DesireLexiconAddsConfiguredFlirtDeltaTest() {
         val root = root()
-        FileManager.appendEvent(root, JSONObject().put("type", "message").put("who", "commander")
-            .put("text", "целую тебя").put("ts", System.currentTimeMillis()))
         val before = EmotionEngine.readValues(root).optDouble("desire")
         EmotionEngine.onCommanderMessage(root, "целую тебя")
-        assertEquals(before + 20.0, EmotionEngine.readValues(root).optDouble("desire"), 0.001)
+        assertEquals(before + 12.0, EmotionEngine.readValues(root).optDouble("desire"), 0.001)
     }
 }

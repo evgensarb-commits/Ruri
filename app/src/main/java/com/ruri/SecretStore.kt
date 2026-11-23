@@ -29,6 +29,43 @@ object SecretStore {
 
     private val lock = Any()
 
+    /** Safe WebView view: model keys are replaced by presence flags and never cross the bridge. */
+    fun readPublicRuntimeConfig(root: File): String = synchronized(lock) {
+        redactRuntimeConfigForWeb(readRuntimeConfig(root))
+    }
+
+    internal fun configForBackup(rawConfig: String): String {
+        val config = JSONObject(rawConfig.ifBlank { "{}" })
+        config.remove("api_key")
+        val models = config.optJSONArray("models") ?: JSONArray()
+        for (index in 0 until models.length()) {
+            val model = models.optJSONObject(index) ?: continue
+            model.put("api_key", "")
+            model.remove("has_key")
+            model.remove("clear_api_key")
+        }
+        return config.toString(2)
+    }
+
+    internal fun searchConfigForBackup(rawConfig: String): String {
+        val config = JSONObject(rawConfig.ifBlank { "{}" })
+        config.put("serper_key", "")
+        config.remove("has_serper_key")
+        config.remove("clear_serper_key")
+        return config.toString(2)
+    }
+
+    internal fun redactRuntimeConfigForWeb(rawConfig: String): String {
+        val config = JSONObject(rawConfig)
+        val models = config.optJSONArray("models") ?: JSONArray()
+        for (index in 0 until models.length()) {
+            val model = models.optJSONObject(index) ?: continue
+            model.put("has_key", model.optString("api_key").isNotBlank())
+            model.put("api_key", "")
+        }
+        return config.toString()
+    }
+
     fun readRuntimeConfig(root: File): String = synchronized(lock) {
         val config = JSONObject(FileManager.read(root, CONFIG_FILE).ifBlank { "{}" })
         if (stripLegacyNsfwFields(config)) {
@@ -44,6 +81,66 @@ object SecretStore {
             }
         }
         config.toString()
+    }
+
+    private const val SEARCH_CONFIG_FILE = "core/search.json"
+    private const val SEARCH_SECRET_ID = "__search_serper_key__"
+
+    fun readSearchConfig(root: File): JSONObject = synchronized(lock) {
+        val config = JSONObject(FileManager.read(root, SEARCH_CONFIG_FILE).ifBlank { "{}" })
+        val key = runCatching { readSecrets(root).optString(SEARCH_SECRET_ID) }.getOrDefault("")
+        config.put("serper_key", key)
+        config.remove("has_serper_key")
+        config
+    }
+
+    fun readPublicSearchConfig(root: File): String = synchronized(lock) {
+        val hasKey = runCatching { readSecrets(root).optString(SEARCH_SECRET_ID).isNotBlank() }.getOrDefault(false)
+        searchConfigForWeb(FileManager.read(root, SEARCH_CONFIG_FILE), hasKey)
+    }
+
+    internal fun searchConfigForWeb(rawConfig: String, hasKey: Boolean): String {
+        val config = JSONObject(rawConfig.ifBlank { "{}" })
+        config.put("serper_key", "")
+            .put("has_serper_key", hasKey)
+        return config.toString()
+    }
+
+    fun saveSearchConfig(root: File, rawConfig: String) = synchronized(lock) {
+        val config = JSONObject(rawConfig)
+        val secrets = readSecrets(root)
+        val suppliedKey = config.optString("serper_key")
+        if (config.optBoolean("clear_serper_key", false)) {
+            secrets.remove(SEARCH_SECRET_ID)
+        } else if (suppliedKey.isNotBlank()) {
+            secrets.put(SEARCH_SECRET_ID, suppliedKey)
+        }
+        config.put("serper_key", "")
+        config.remove("has_serper_key")
+        config.remove("clear_serper_key")
+        writeSecrets(root, secrets)
+        FileManager.write(root, SEARCH_CONFIG_FILE, config.toString(2))
+    }
+
+    fun migrateLegacySearchKey(root: File) = synchronized(lock) {
+        val raw = FileManager.read(root, SEARCH_CONFIG_FILE)
+        if (raw.isBlank()) return@synchronized
+        try {
+            val config = JSONObject(raw)
+            val legacyKey = config.optString("serper_key")
+            if (legacyKey.isBlank()) return@synchronized
+            val secrets = readSecrets(root)
+            if (secrets.optString(SEARCH_SECRET_ID).isBlank()) {
+                secrets.put(SEARCH_SECRET_ID, legacyKey)
+                writeSecrets(root, secrets)
+            }
+            config.put("serper_key", "")
+            config.remove("has_serper_key")
+            FileManager.write(root, SEARCH_CONFIG_FILE, config.toString(2))
+            Log.i(TAG, "Migrated Serper key into encrypted secret storage")
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not migrate Serper key; original search config was preserved", e)
+        }
     }
 
     fun saveRuntimeConfig(root: File, rawConfig: String) = synchronized(lock) {
@@ -65,8 +162,9 @@ object SecretStore {
                 if (suppliedKey.isNotBlank()) secrets.put(id, suppliedKey)
             }
 
-            // Never persist provider secrets in core/config.json.
+            // Never persist provider secrets or UI-only key metadata in core/config.json.
             model.put("api_key", "")
+            model.remove("has_key")
             model.remove("clear_api_key")
         }
 
@@ -140,6 +238,26 @@ object SecretStore {
             if (changed) FileManager.write(root, CONFIG_FILE, config.toString(2))
         } catch (e: Exception) {
             Log.e(TAG, "Could not migrate legacy provider configuration; original file was preserved", e)
+        }
+    }
+
+    /**
+     * Reuses the existing Routeway credential for the MiniMax Routeway endpoint.
+     * The key remains encrypted in Android Keystore and is never copied into config.json.
+     */
+    fun migrateRoutewayFallbackKey(root: File, primaryRouteId: String, fallbackRouteId: String) = synchronized(lock) {
+        if (primaryRouteId.isBlank() || fallbackRouteId.isBlank() || primaryRouteId == fallbackRouteId) {
+            return@synchronized
+        }
+        try {
+            val secrets = readSecrets(root)
+            val primaryKey = secrets.optString(primaryRouteId)
+            if (primaryKey.isNotBlank() && secrets.optString(fallbackRouteId).isBlank()) {
+                secrets.put(fallbackRouteId, primaryKey)
+                writeSecrets(root, secrets)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Routeway fallback key migration skipped; encrypted secrets were preserved", e)
         }
     }
 

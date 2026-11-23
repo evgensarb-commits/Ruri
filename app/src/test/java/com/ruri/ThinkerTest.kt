@@ -7,18 +7,20 @@ import org.junit.Test
 
 class ThinkerTest {
     @Test
-    fun moodComesFromEmotionChannelsInsteadOfLegacyIgnoredCount() {
-        assertEquals("обиженная", EmotionEngine.moodLabel(JSONObject().put("hurt", 65)))
+    fun moodComesFromNewEmotionChannelsInsteadOfLegacyIgnoredCount() {
+        assertEquals("обиженная", EmotionEngine.moodLabel(JSONObject().put("anger", 65).put("sadness", 55)))
     }
 
     @Test
-    fun ignoredEventsPersistHurtAndEventuallyProduceOffendedMood() {
+    fun ignoredEventsIncreaseAngerAndSadnessUntilOffendedMood() {
         val root = Files.createTempDirectory("ruri-thinker-emotions").toFile()
         try {
             FileManager.init(root)
-            repeat(4) { EmotionEngine.onIgnored(root) }
-            assertEquals(70.0, EmotionEngine.readValues(root).getDouble("hurt"), 0.0)
-            assertEquals("обиженная", EmotionEngine.moodLabel(EmotionEngine.readValues(root)))
+            repeat(5) { EmotionEngine.onIgnored(root) }
+            val values = EmotionEngine.readValues(root)
+            assertEquals(70.0, values.getDouble("anger"), 0.0)
+            assertEquals(70.0, values.getDouble("sadness"), 0.0)
+            assertEquals("обиженная", EmotionEngine.moodLabel(values))
         } finally {
             root.deleteRecursively()
         }
@@ -26,6 +28,6 @@ class ThinkerTest {
 
     @Test
     fun moodLabelUsesCurrentEmotionValuesNotLegacyMoodString() {
-        assertEquals("собранная", EmotionEngine.moodLabel(JSONObject().put("hurt", 0)))
+        assertEquals("собранная", EmotionEngine.moodLabel(JSONObject().put("anger", 10).put("sadness", 20)))
     }
 }

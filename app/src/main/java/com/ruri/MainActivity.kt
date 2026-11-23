@@ -21,6 +21,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.Executors
@@ -49,9 +50,33 @@ class MainActivity : AppCompatActivity() {
         web.settings.domStorageEnabled = true
         web.settings.allowFileAccess = true
         web.settings.allowContentAccess = true
+        web.settings.allowFileAccessFromFileURLs = false
         web.settings.allowUniversalAccessFromFileURLs = false
+        web.settings.javaScriptCanOpenWindowsAutomatically = false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) web.settings.safeBrowsingEnabled = true
         web.webViewClient = object : WebViewClient() {
+            private fun isTrustedLocalAsset(url: String?): Boolean =
+                url == "file:///android_asset/index.html"
+
+            override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean {
+                val target = request?.url?.toString()
+                if (isTrustedLocalAsset(target)) return false
+                if (target != null && (target.startsWith("https://") || target.startsWith("http://"))) {
+                    runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(target))) }
+                }
+                return true
+            }
+
+            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                if (!isTrustedLocalAsset(url)) {
+                    view?.stopLoading()
+                    return
+                }
+                super.onPageStarted(view, url, favicon)
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
+                if (!isTrustedLocalAsset(url)) return
                 super.onPageFinished(view, url)
                 web.evaluateJavascript("window.startOnboarding && window.startOnboarding()", null)
                 openPendingMessageIfReady()
@@ -143,8 +168,8 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         activityResumed = true
         NetState.refresh(this)
-        if (OfflineQueue.hasPending(filesDir) && NetState.online) {
-            LifeScheduler.enqueueEvent(this, "offline_drain")
+        if (OfflineQueue.hasPending(filesDir) || CommanderReplyQueue.hasPending(filesDir)) {
+            LifeScheduler.enqueueEvent(this, "commander_reply_resume")
         }
         if (::web.isInitialized) {
             try { Bridge().markCommanderSeen() } catch (_: Exception) {}
@@ -255,11 +280,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
-        fun completeChat(callbackId: String): String {
+        fun completeChat(callbackId: String, commanderMessageId: String): String {
             if (!callbackId.matches(Regex("[A-Za-z0-9_-]{1,80}"))) return "ERROR: invalid callback"
+            if (!commanderMessageId.matches(Regex("[A-Za-z0-9_-]{1,200}"))) return "ERROR: invalid message id"
+            if (!ChatEngine.isCommanderMessage(filesDir, commanderMessageId)) return "ERROR: Commander message not found in L0"
             chatExecutor.execute {
                 try {
-                    val reply = ChatEngine.respond(filesDir)
+                    CommanderReplyQueue.enqueue(filesDir, commanderMessageId)
+                    val reply = ChatEngine.respond(filesDir, commanderMessageId)
+                    if (!CommanderReplyQueue.isAnswered(filesDir, commanderMessageId)) {
+                        throw IllegalStateException("Ответ не сохранён; сообщение осталось в очереди")
+                    }
                     val messageId = ChatEngine.lastSavedReplyId()
                     mainHandler.post {
                         if (!activityResumed && !messageId.isNullOrBlank()) {
@@ -272,6 +303,13 @@ class MainActivity : AppCompatActivity() {
                     }
                 } catch (e: Exception) {
                     val error = e.message ?: "Ошибка ответа модели"
+                    runCatching { CommanderReplyQueue.enqueue(filesDir, commanderMessageId) }
+                    runCatching {
+                        LifeScheduler.scheduleCommanderReplyRetry(
+                            this@MainActivity,
+                            CommanderReplyQueue.nextDelayMs(filesDir) ?: 30_000L
+                        )
+                    }
                     mainHandler.post {
                         if (::web.isInitialized) web.evaluateJavascript(
                             "window.onNativeChatResult(" + JSONObject.quote(callbackId) + ",null," +
@@ -284,11 +322,34 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
-        fun read(path: String): String = FileManager.read(filesDir, path)
+        fun read(path: String): String = when (path.replace('\\', '/').trimStart('/')) {
+            "core/config.json" -> readPublicRuntimeConfig()
+            "core/search.json" -> readPublicSearchConfig()
+            "core/secrets.enc.json" -> ""
+            else -> FileManager.read(filesDir, path)
+        }
 
         @JavascriptInterface
         fun readLastEvents(filter: String, limit: Int): String =
             FileManager.readLastEvents(filesDir, filter, limit).toString()
+
+        @JavascriptInterface
+        fun readLastLines(path: String, limit: Int): String =
+            JSONArray(FileManager.readLastLines(filesDir, path, maxLines = limit.coerceIn(1, 1000))).toString()
+
+        @JavascriptInterface
+        fun readMemoryLayer(layer: String): String = when (layer) {
+            "L0" -> JSONArray(FileManager.readLastLines(filesDir, "memory/L0_raw.jsonl", maxLines = 100).map {
+                runCatching { JSONObject(it) }.getOrNull() ?: JSONObject()
+            }).toString()
+            "L1" -> FileManager.read(filesDir, "memory/L1_facts.json")
+            "L2" -> FileManager.read(filesDir, "memory/L2_diary.json")
+            "L3" -> FileManager.read(filesDir, "memory/L3_summary.json")
+            "L4" -> FileManager.read(filesDir, "memory/L4_state.json")
+            "EMO" -> FileManager.read(filesDir, "memory/emotions.json")
+            "SELF" -> FileManager.read(filesDir, "memory/self_model.json")
+            else -> "{}"
+        }
 
         @JavascriptInterface
         fun readReceipts(): String = Receipts.export(filesDir)
@@ -340,6 +401,45 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
+        fun reprobeVision(): String {
+            routeExecutor.execute {
+                runCatching {
+                    val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
+                    val models = config.optJSONArray("models") ?: org.json.JSONArray()
+                    for (index in 0 until models.length()) {
+                        val model = models.optJSONObject(index) ?: continue
+                        val id = model.optString("id").ifBlank { model.optString("name") }
+                        if (id.isBlank()) continue
+                        RouteMeta.update(filesDir, id) { route ->
+                            val caps = route.optJSONObject("caps") ?: JSONObject()
+                            caps.remove("vision")
+                            route.put("caps", caps)
+                            route.remove("vision_probe_at")
+                        }
+                    }
+                    NetState.refresh(applicationContext)
+                    val selected = Vision.visionRoute(filesDir)
+                    val status = selected?.optString("name")?.ifBlank { selected.optString("id") }
+                        ?: if (NetState.online) "none" else "нет сети"
+                    mainHandler.post {
+                        if (::web.isInitialized) web.evaluateJavascript(
+                            "window.setVisionStatus && window.setVisionStatus(" + JSONObject.quote(status) + ")", null
+                        )
+                    }
+                }.onFailure { error ->
+                    android.util.Log.w("Ruri", "Manual vision probe failed", error)
+                    mainHandler.post {
+                        if (::web.isInitialized) web.evaluateJavascript(
+                            "window.setVisionStatus && window.setVisionStatus(" +
+                                JSONObject.quote("ошибка: " + (error.message ?: "vision probe")) + ")", null
+                        )
+                    }
+                }
+            }
+            return "OK"
+        }
+
+        @JavascriptInterface
         fun readNetworkDiagnostics(): String = NetworkDiagnostics.latest(filesDir)
 
         @JavascriptInterface
@@ -369,16 +469,38 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun write(path: String, content: String): String {
             return try {
-                if (path == "core/config.json") SecretStore.saveRuntimeConfig(filesDir, content)
-                else FileManager.write(filesDir, path, content)
+                require(path == "core/character.json") {
+                    "Only character settings may be written through the generic WebView bridge"
+                }
+                FileManager.write(filesDir, path, content)
                 "OK"
             } catch (e: Exception) { "ERROR: " + (e.message ?: "write failed") }
         }
 
         @JavascriptInterface
-        fun readRuntimeConfig(): String {
-            return try { SecretStore.readRuntimeConfig(filesDir) }
-            catch (e: Exception) { android.util.Log.e("Ruri", "Cannot read runtime config", e); "{}" }
+        fun markOnboardingDone(): String {
+            return try {
+                FileManager.updateL4State(filesDir) { it.put("onboarding_done", true) }
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "onboarding update failed") }
+        }
+
+        @JavascriptInterface
+        fun readPublicRuntimeConfig(): String {
+            return try { SecretStore.readPublicRuntimeConfig(filesDir) }
+            catch (e: Exception) { android.util.Log.e("Ruri", "Cannot read public runtime config", e); "{}" }
+        }
+
+        @JavascriptInterface
+        fun readPublicSearchConfig(): String {
+            return try { SecretStore.readPublicSearchConfig(filesDir) }
+            catch (e: Exception) { android.util.Log.e("Ruri", "Cannot read public search config", e); "{}" }
+        }
+
+        @JavascriptInterface
+        fun saveSearchConfig(raw: String): String {
+            return try { SecretStore.saveSearchConfig(filesDir, raw); "OK" }
+            catch (e: Exception) { "ERROR: " + (e.message ?: "search config save failed") }
         }
 
         @JavascriptInterface
@@ -388,13 +510,36 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
+        fun saveRouteOrder(json: String): String {
+            return try {
+                val payload = JSONObject(json)
+                val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
+                RouteSelector.applyManualRouteOrder(config, payload)
+                SecretStore.saveRuntimeConfig(filesDir, config.toString(2))
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "route order save failed") }
+        }
+
+        @JavascriptInterface
         fun appendEvent(eventJson: String): String {
             return try {
                 val event = JSONObject(eventJson)
+                require(event.optString("type") == "message" && event.optString("who") == "commander") {
+                    "The WebView may append Commander messages only"
+                }
+                require(event.optString("text").isNotBlank()) { "Message text is empty" }
+                require(event.optString("id").matches(Regex("[A-Za-z0-9_-]{1,200}"))) {
+                    "Invalid Commander message id"
+                }
                 val saved = JSONObject(FileManager.appendEvent(filesDir, event))
                 if (event.optString("type") == "message" && event.optString("who") == "commander") {
-                    Receipts.delivered(filesDir, saved.optString("id"))
-                    LifeScheduler.enqueueEvent(this@MainActivity, "commander_message")
+                    val messageId = saved.optString("id")
+                    runCatching { CommanderReplyQueue.enqueue(filesDir, messageId) }
+                    runCatching { Receipts.delivered(filesDir, messageId) }
+                    runCatching { OfflineQueue.markPending(filesDir, messageId) }
+                    runCatching {
+                        LifeScheduler.enqueueEvent(this@MainActivity, "commander_messages_pending")
+                    }
                 }
                 "OK"
             } catch (e: Exception) { "ERROR: " + (e.message ?: "event append failed") }
@@ -409,12 +554,15 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun markCommanderSeen(): String {
             return try {
-                val state = JSONObject(FileManager.read(filesDir, "memory/L4_state.json"))
-                state.put("waiting_for_reply", false)
-                state.put("ignored_count", 0)
-                FileManager.write(filesDir, "memory/L4_state.json", state.toString(2))
+                val latestReply = FileManager.readLastLines(
+                    filesDir, "memory/L0_raw.jsonl", maxLines = 500
+                ).asReversed().asSequence()
+                    .mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+                    .firstOrNull { it.optString("type") == "message" && it.optString("who") == "ruri" }
+                val id = latestReply?.optString("id").orEmpty()
+                if (id.isNotBlank()) Receipts.readByCommander(filesDir, id)
                 "OK"
-            } catch (e: Exception) { "ERROR: " + e.message }
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "receipt update failed") }
         }
 
         @JavascriptInterface

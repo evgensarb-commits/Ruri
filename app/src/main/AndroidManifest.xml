@@ -2,38 +2,24 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Интернет -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-
-    <!-- Фоновая служба -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-
-    <!-- Автозапуск при загрузке -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-
-    <!-- Usage Access: доступ включается пользователем отдельно в настройках Android -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
-
-    <!-- Батарея -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-
-    <!-- Уведомления (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
-    <!-- Фоновая работа -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:label="RU-R1"
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.AppCompat.NoActionBar">
 
-        <!-- Главный экран -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -44,7 +30,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Фоновая служба -->
         <service
             android:name=".RuriService"
             android:exported="false"
@@ -65,7 +50,6 @@
             </intent-filter>
         </service>
 
-        <!-- Автозапуск при загрузке телефона -->
         <receiver
             android:name=".BootReceiver"
             android:exported="true"
@@ -75,7 +59,6 @@
             </intent-filter>
         </receiver>
 
-        <!-- FileProvider для экспорта архива -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -87,5 +70,4 @@
         </provider>
 
     </application>
-
 </manifest>

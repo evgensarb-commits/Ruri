@@ -19,6 +19,8 @@ object BackupPolicy {
     const val STATE_MS = 15L * 60L * 1000L
     const val KEEP = 5
     const val META = "backup/rolling_meta.json"
+    private const val MAX_ROLLING_BYTES = 16L * 1024L * 1024L
+    private const val MIN_FORCED_INTERVAL_MS = 10L * 60L * 1000L
 
     private fun meta(root: File): JSONObject = try {
         val raw = FileManager.read(root, META)
@@ -55,6 +57,7 @@ object BackupPolicy {
     }
 
     /** Saves a separate last-known-good L4 checkpoint at most every 15 minutes. */
+    @Synchronized
     fun checkpointState(root: File) {
         val now = System.currentTimeMillis()
         val metadata = meta(root)
@@ -74,25 +77,38 @@ object BackupPolicy {
     private fun idle(context: Context): Boolean =
         (context.getSystemService(Context.POWER_SERVICE) as PowerManager).isDeviceIdleMode
 
+    @Synchronized
     fun maybeRolling(context: Context, trigger: String) {
         val root = context.filesDir
         val now = System.currentTimeMillis()
         val metadata = meta(root)
         val last = metadata.optLong("last_rolling", 0L)
-        val due = now - last >= ROLLING_MS ||
-            trigger == "pause" ||
-            trigger == "significant" ||
-            (charging(context) && idle(context))
+        val forced = trigger == "pause" || trigger == "significant"
+        val minimumInterval = if (forced) MIN_FORCED_INTERVAL_MS else ROLLING_MS
+        val due = now - last >= minimumInterval ||
+            (charging(context) && idle(context) && now - last >= MIN_FORCED_INTERVAL_MS)
         if (!due) return
 
         val snapshot = JSONObject()
+        var totalBytes = 0L
         for (directory in listOf("core", "memory")) {
             val names = JSONArray(FileManager.list(root, directory))
             for (index in 0 until names.length()) {
                 val name = names.optString(index)
                 val relative = "$directory/$name"
                 if (relative == "core/secrets.enc.json") continue
-                val content = FileManager.read(root, relative)
+                val source = File(root, relative)
+                if (!source.isFile) continue
+                totalBytes += source.length()
+                if (totalBytes > MAX_ROLLING_BYTES) {
+                    android.util.Log.w("RuriBackup", "Rolling snapshot skipped: data exceeds 16 MiB")
+                    return
+                }
+                val content = when (relative) {
+                    "core/config.json" -> SecretStore.configForBackup(FileManager.read(root, relative))
+                    "core/search.json" -> SecretStore.searchConfigForBackup(FileManager.read(root, relative))
+                    else -> FileManager.read(root, relative)
+                }
                 if (content.isNotBlank()) snapshot.put(relative, content)
             }
         }

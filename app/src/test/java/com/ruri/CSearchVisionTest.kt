@@ -145,7 +145,7 @@ class VisionProbeTest {
             .put("api_key", "configured").put("base_url", "http://api.example.org/v1")))
     }
 
-    @Test fun routeProbeUsesOnlyEligibleFreeModelsAndCachesVisionCapability() {
+    @Test fun manualVisionFlagSelectsOnlyDeclaredFreeRouteWithoutProbe() {
         val root = Files.createTempDirectory("ruri-vision-route-probe").toFile()
         try {
             FileManager.init(root)
@@ -156,7 +156,7 @@ class VisionProbeTest {
                     .put("api_key", "disabled-key").put("base_url", "https://disabled.example.org/v1"))
                 .put(JSONObject().put("id", "routeway").put("free_tier", true).put("enabled", true)
                     .put("api_key", "free-key").put("base_url", "https://free.example.org/v1")
-                    .put("model", "free-model").put("rpd", 100))
+                    .put("model", "free-model").put("rpd", 100).put("vision", true))
 
             val probed = mutableListOf<String>()
             val selected = Vision.findVisionRoute(
@@ -165,9 +165,9 @@ class VisionProbeTest {
             )
 
             assertEquals("routeway", selected?.optString("id"))
-            assertEquals(listOf("routeway"), probed)
-            assertTrue(RouteMeta.route(root, "routeway").optJSONObject("caps")?.optBoolean("vision") == true)
-            assertEquals(1, RouteMeta.route(root, "routeway").optInt("day_count"))
+            assertTrue(probed.isEmpty())
+            assertFalse(RouteMeta.route(root, "routeway").optJSONObject("caps")?.optBoolean("vision") == true)
+            assertEquals(0, RouteMeta.route(root, "routeway").optInt("day_count"))
         } finally {
             root.deleteRecursively()
         }
@@ -227,4 +227,19 @@ class VisionHonestUnavailableTest {
             root.deleteRecursively()
         }
     }
+    @Test fun urlReaderRejectsPrivateAndSpecialNetworkAddresses() {
+        val blocked = listOf(
+            "127.0.0.1", "10.0.0.2", "172.16.0.1", "192.168.1.1",
+            "169.254.1.1", "100.64.0.1", "0.0.0.0", "224.0.0.1",
+            "::1", "fc00::1", "fe80::1"
+        )
+        blocked.forEach { host ->
+            assertFalse(host, UrlReader.isPublicAddress(java.net.InetAddress.getByName(host)))
+        }
+        assertTrue(UrlReader.isPublicAddress(java.net.InetAddress.getByName("8.8.8.8")))
+        assertTrue(UrlReader.isPublicAddress(java.net.InetAddress.getByName("1.1.1.1")))
+        assertFalse(UrlReader.isPublicHost("localhost"))
+        assertFalse(UrlReader.isPublicHost("router.local"))
+    }
+
 }

@@ -58,11 +58,28 @@ button.action.secondary{background:transparent;color:var(--gold)}
 .l0-detail.open{display:block}
 .message-focus .bub{outline:1px solid var(--cyan);box-shadow:0 0 0 2px #36d7e933}
 
+
+.memory-tabs{display:flex;gap:6px;overflow:auto;padding:0 0 12px;position:sticky;top:0;z-index:2;background:var(--bg)}
+.memory-tab{flex:0 0 auto;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--muted);padding:8px 12px;font:700 10px ui-monospace,monospace}
+.memory-tab.on{border-color:var(--gold);color:var(--gold);background:#171b24}
+.memory-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 12px}
+.memory-toolbar h3{margin:0;font-size:15px;color:var(--text)}
+.memory-card{margin-bottom:9px;padding:11px}
+.memory-card-title{font-weight:650;overflow-wrap:anywhere}
+.memory-meta{color:var(--muted);font:10px/1.5 ui-monospace,monospace;margin:5px 0}
+.memory-text{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.6;margin-top:7px}
+.memory-json{white-space:pre-wrap;overflow-wrap:anywhere;max-height:420px;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;font:10px/1.5 ui-monospace,monospace;color:var(--muted);margin:8px 0 0}
+.memory-empty{padding:16px;text-align:center;color:var(--muted);border:1px dashed var(--border);border-radius:6px;font-size:12px}
+.memory-emotion{display:grid;grid-template-columns:minmax(94px,1fr) 2fr 34px;gap:9px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);font-size:12px}
+.memory-meter{height:8px;background:#1a263b;border-radius:99px;overflow:hidden}
+.memory-meter>span{display:block;height:100%;background:var(--gold);border-radius:99px}
+.memory-mood{font-size:15px;color:var(--gold);font-weight:700}
+
 </style>
 </head>
 <body>
 <header><strong>RU-R1 · Рури</strong><span id="status">● ЗАГРУЗКА</span><button id="settingsToggle" class="gear" aria-label="Настройки">⚙</button></header>
-<nav><button class="on" data-pane="chat">ЧАТ</button><button data-pane="diary">ДНЕВНИК</button><button data-pane="l0">L0</button></nav>
+<nav><button class="on" data-pane="chat">ЧАТ</button><button data-pane="diary">ДНЕВНИК</button><button data-pane="l0">L0</button><button data-pane="memory">ПАМЯТЬ</button></nav>
 <main>
 <section class="pane on" id="pane-chat">
 <div id="chat"></div>
@@ -74,22 +91,35 @@ button.action.secondary{background:transparent;color:var(--gold)}
 <div class="actions" id="l0filters"></div>
 <button class="action secondary" id="l0refresh">ОБНОВИТЬ</button>
 <div id="l0list"></div></div></section>
+<section class="pane" id="pane-memory"><div class="scroll">
+<div class="overlay-head"><h2 class="section">ПАМЯТЬ <span>все слои</span></h2><span class="small" id="memoryStatus">локальные данные</span></div>
+<div class="memory-tabs" id="memoryTabs">
+<button class="memory-tab on" data-memory-layer="L0">L0</button>
+<button class="memory-tab" data-memory-layer="L1">L1</button>
+<button class="memory-tab" data-memory-layer="L2">L2</button>
+<button class="memory-tab" data-memory-layer="L3">L3</button>
+<button class="memory-tab" data-memory-layer="L4">L4</button>
+<button class="memory-tab" data-memory-layer="EMO">ЭМОЦИИ</button>
+<button class="memory-tab" data-memory-layer="SELF">SELF</button>
+</div>
+<div id="memoryLayerView"></div>
+</div></section>
 <section class="pane overlay-pane" id="pane-brain"><div class="scroll"><div class="overlay-head"><h2 class="section">МОЗГ <span>и личность</span></h2><button id="closeSettings">✕</button></div>
-<div class="card"><b>БЕСПЛАТНЫЕ МАРШРУТЫ — БЕЗ ПЛАТНЫХ ЗАПРОСОВ</b><p>Основной: Routeway · Gemma 4 MeroMero Free. Резерв: Requesty · Google Gemma 4 Free. Вызываются только явно бесплатные маршруты; free-tier guard не отключается. Gemini и Groq — legacy neutral_fallback: выключены и не участвуют в автоматическом выборе. Взрослая тема отправляется на выбранные бесплатные маршруты без предварительного capability-зонда; при явном отказе Рури записывает nsfw_refusal и пробует следующий маршрут.</p><p>Добавь ключи Routeway и Requesty ниже. Ключи хранятся в Android Keystore.</p><p><a href="#" onclick="Ruri.openUrl('https://routeway.ai/');return false">Routeway — получить ключ</a> · <a href="#" onclick="Ruri.openUrl('https://www.requesty.ai/model/google/gemma-4-31b-it');return false">Requesty — получить ключ</a></p></div>
-<div class="card"><b>МАРШРУТЫ</b><p>Первый маршрут выбирается по приоритету и скорингу. При ошибке Рури автоматически пробует остальные бесплатные маршруты.</p><div id="routeList" class="small">Загружаю маршруты…</div><div id="routeMode" class="small">Режим: первый маршрут + автоматический резерв</div></div>
+<div class="card"><b>ДВА БЕСПЛАТНЫХ МАРШРУТА</b><p>Основной: Routeway · Gemma MeroMero Free. Резерв: MiniMax M3.1 Flash Free. Приоритет задаётся режимом маршрутизации и ручными приоритетами; счётчики запросов служат только диагностикой и не блокируют и не переставляют маршруты. Vision работает только через MeroMero. При явном отказе на взрослую тему Рури записывает nsfw_refusal и пробует второй маршрут; выдуманного успешного ответа нет.</p><p>Один Routeway API-ключ используется обоими маршрутами и хранится в Android Keystore.</p><p><a href="#" onclick="Ruri.openUrl('https://routeway.ai/');return false">Routeway — получить ключ</a> · <a href="#" onclick="Ruri.openUrl('https://routeway.ai/models/minimax-m3.1-flash%3Afree');return false">MiniMax M3.1 Flash Free — карточка модели</a></p></div>
+<div class="card"><b>МАРШРУТЫ</b><p>Выбери, как Рури отправляет запросы к нейросетям. Переключение режима применяется после сохранения.</p><div class="field"><label for="routeModeSelect">РЕЖИМ МАРШРУТИЗАЦИИ</label><select id="routeModeSelect"><option value="AUTO">AUTO — автоматический порядок</option><option value="MANUAL">MANUAL — только выбранная модель</option><option value="MANUAL_FALLBACK">MANUAL + FALLBACK — выбранная первой</option></select></div><div id="routeModeHelp" class="small">AUTO: пробует маршруты по приоритету; следующий используется только после фактической ошибки запроса.</div><label style="display:flex;gap:8px;align-items:center;margin:8px 0"><input id="nsfwOverride" type="checkbox" style="width:auto"> NSFW-override: NSFW-маршруты первыми для взрослых тем (в AUTO)</label><div id="routeList" class="small">Загружаю маршруты…</div><button class="action secondary" id="saveRouteOrder">СОХРАНИТЬ ПОРЯДОК</button><div id="routeMode" class="small">MiniMax → MeroMero · NSFW/Vision: MeroMero</div></div>
 <div class="card" style="margin:12px 0"><b>ПОИСК: SERPER → НОУТ</b>
 <p style="margin:6px 0 10px;color:#9cafcb;font-size:13px">Сначала Serper (Google-результаты, ключ Serper). Если не ответил — твой SearXNG на ноуте. Оба молчат → честная ошибка. Для HTTP используй частный/LAN или Tailscale IP; публичный адрес — только через HTTPS.</p>
 <div class="field"><label>SERPER API KEY</label><input id="serperKey" type="password" autocomplete="off" placeholder="ключ с serper.dev"></div>
 <div class="field"><label>SEARXNG URL (ноут)</label><input id="searxngUrl" type="text" placeholder="http://100.x.y.z:8080"></div>
-<button class="action secondary" id="saveSearch">СОХРАНИТЬ ПОИСК</button>
+<div class="actions"><button class="action secondary" id="saveSearch">СОХРАНИТЬ ПОИСК</button><button class="action secondary" id="clearSearchKey">УДАЛИТЬ КЛЮЧ SERPER</button></div>
 <div class="small" id="searchStatus">Проверяю…</div>
-<div class="small" id="visionStatus">Vision: проверяю…</div></div>
-<div class="actions"><button class="action secondary" id="showDiagnostics">ОТКРЫТЬ ДИАГНОСТИКУ</button></div><div class="card" style="margin-bottom:14px"><b>ДИАГНОСТИКА СОЕДИНЕНИЯ</b><p style="margin:6px 0 10px;color:#9cafcb;font-size:13px">Локальная проверка DNS, TLS-соединения, времени ожидания и HTTP-ответа. Ключи и переписка в журнал не записываются.</p><button class="action secondary" id="refreshNetworkDiagnostics">ПОСЛЕДНЯЯ ПОПЫТКА</button><pre id="networkDiagnostics" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere;margin-top:10px">Попыток соединения пока нет.</pre></div><div class="card" style="margin:12px 0"><b>АВТОМАТИЧЕСКИЕ КОПИИ НА ТЕЛЕФОНЕ</b><p style="margin:6px 0 10px;color:#9cafcb;font-size:13px">Рури хранит до 14 последних ежедневных снимков памяти. Архивы проверяются по SHA-256; API-ключи и Android Keystore в них не входят.</p><div id="backupStatus" class="small">Проверяю локальные копии…</div><div id="backupVisibility" class="small" style="margin-top:8px">Журнал и снимки…</div><div class="actions"><button class="action secondary" id="refreshBackups">ОБНОВИТЬ</button><button class="action secondary" id="createBackup">СОЗДАТЬ КОПИЮ СЕЙЧАС</button></div><div class="field"><label>КОПИЯ ДЛЯ ПРОВЕРКИ ИЛИ ВОССТАНОВЛЕНИЯ</label><select id="backupSelect"></select></div><div class="actions"><button class="action secondary" id="verifyBackup">ПРОВЕРИТЬ</button><button class="action secondary" id="restoreBackup">ВОССТАНОВИТЬ</button></div></div><div class="field"><label>ПРОВАЙДЕР ДЛЯ СОХРАНЕНИЯ КЛЮЧА</label><select id="model"><option value="routeway">Routeway · основной</option><option value="requesty">Requesty · третий резерв</option></select></div>
+<div class="small" id="visionStatus">Vision: проверяю…</div><button class="action secondary" id="reprobeVision">ПЕРЕПРОБОВАТЬ VISION</button></div>
+<div class="actions"><button class="action secondary" id="showDiagnostics">ОТКРЫТЬ ДИАГНОСТИКУ</button></div><div class="card" style="margin-bottom:14px"><b>ДИАГНОСТИКА СОЕДИНЕНИЯ</b><p style="margin:6px 0 10px;color:#9cafcb;font-size:13px">Локальная проверка DNS, TLS-соединения, времени ожидания и HTTP-ответа. Ключи и переписка в журнал не записываются.</p><button class="action secondary" id="refreshNetworkDiagnostics">ПОСЛЕДНЯЯ ПОПЫТКА</button><pre id="networkDiagnostics" class="small" style="white-space:pre-wrap;overflow-wrap:anywhere;margin-top:10px">Попыток соединения пока нет.</pre></div><div class="card" style="margin:12px 0"><b>АВТОМАТИЧЕСКИЕ КОПИИ НА ТЕЛЕФОНЕ</b><p style="margin:6px 0 10px;color:#9cafcb;font-size:13px">Рури хранит до 14 последних ежедневных снимков памяти. Архивы проверяются по SHA-256; API-ключи и Android Keystore в них не входят.</p><div id="backupStatus" class="small">Проверяю локальные копии…</div><div id="backupVisibility" class="small" style="margin-top:8px">Журнал и снимки…</div><div class="actions"><button class="action secondary" id="refreshBackups">ОБНОВИТЬ</button><button class="action secondary" id="createBackup">СОЗДАТЬ КОПИЮ СЕЙЧАС</button></div><div class="field"><label>КОПИЯ ДЛЯ ПРОВЕРКИ ИЛИ ВОССТАНОВЛЕНИЯ</label><select id="backupSelect"></select></div><div class="actions"><button class="action secondary" id="verifyBackup">ПРОВЕРИТЬ</button><button class="action secondary" id="restoreBackup">ВОССТАНОВИТЬ</button></div></div><div class="field"><label>ПРОВАЙДЕР ДЛЯ СОХРАНЕНИЯ КЛЮЧА</label><select id="model"></select></div>
 <div class="field"><label>API KEY</label><input id="key" type="password" autocomplete="off" placeholder="Вставь ключ модели"></div>
 <button class="action" id="saveKey">СОХРАНИТЬ КЛЮЧ</button>
 <div class="field"><label>ИМЯ И ХАРАКТЕР</label><input id="charName" placeholder="Имя"></div>
 <div class="field"><label>МАНЕРА РЕЧИ</label><textarea id="charStyle" rows="3" placeholder="Описание характера и речи"></textarea></div>
-<button class="action secondary" id="saveCharacter">СОХРАНИТЬ ХАРАКТЕР</button><div class="card" style="margin-top:14px"><p>Мониторинг уведомлений телефона работает только после твоего разрешения Android. Полное содержимое сохраняется в локальный L0 и может включаться в запросы выбранной модели, без автоматического скрытия паролей и других строк.</p><button class="action secondary" id="notificationAccess" style="margin-top:10px">НАСТРОИТЬ ДОСТУП К УВЕДОМЛЕНИЯМ</button></div><div class="card" style="margin-top:10px"><p>Доступ к статистике использования приложений позволяет Рури локально определять название активного приложения. Текст экрана и вводимые данные этим разрешением не читаются.</p><div class="small" id="usageAccessStatus">Доступ к статистике приложений не проверен.</div><button class="action secondary" id="usageAccess" style="margin-top:10px">НАСТРОИТЬ ДОСТУП К ПРИЛОЖЕНИЯМ</button></div>
+<button class="action secondary" id="saveCharacter">СОХРАНИТЬ ХАРАКТЕР</button><div class="card" style="margin-top:14px"><p>Мониторинг уведомлений телефона работает только после твоего разрешения Android. Содержимое уведомлений сохраняется в L0; секреты автоматически скрываются перед отправкой модели.</p><button class="action secondary" id="notificationAccess" style="margin-top:10px">НАСТРОИТЬ ДОСТУП К УВЕДОМЛЕНИЯМ</button></div><div class="card" style="margin-top:10px"><p>Доступ к статистике использования приложений позволяет Рури локально определять название активного приложения. Текст экрана и вводимые данные этим разрешением не читаются.</p><div class="small" id="usageAccessStatus">Доступ к статистике приложений не проверен.</div><button class="action secondary" id="usageAccess" style="margin-top:10px">НАСТРОИТЬ ДОСТУП К ПРИЛОЖЕНИЯМ</button></div>
 <div class="small" id="l1FactCount">Фактов в L1: 0. Извлекаются автоматически; Рури может добавить свой инструментом remember_fact.</div><div class="actions"><button class="action secondary" id="exp">ЭКСПОРТ ПАМЯТИ</button><button class="action secondary" id="imp">ИМПОРТ ПАМЯТИ</button><input id="file" type="file" accept=".json,application/json" hidden></div>
 </div></section>
 
@@ -119,7 +149,7 @@ function status(s){var summary='';try{summary=Ruri.quotaSummary()||('Vision: '+(
 function read(p){return Ruri.read(p)||'';}
 function write(p,v){var r=Ruri.write(p,v);if(typeof r==='string'&&r.indexOf('ERROR:')===0)throw new Error(r);return r;}
 function appendLog(obj){var result=Ruri.appendEvent(JSON.stringify(obj));if(typeof result==='string'&&result.indexOf('ERROR:')===0)throw new Error(result);}
-function routeBadges(){var map={};try{read('memory/route_badges.jsonl').split('\n').forEach(function(line){if(!line.trim())return;var b=JSON.parse(line);map[String(b.ts)]=b;});}catch(_){}return map;}
+function routeBadges(){var map={};try{JSON.parse(Ruri.readLastLines('memory/route_badges.jsonl',500)||'[]').forEach(function(line){if(!line.trim())return;var b=JSON.parse(line);map[String(b.ts)]=b;});}catch(_){}return map;}
 var messageReceipts={};
 function refreshMessageReceipts(){try{messageReceipts=JSON.parse(Ruri.readReceipts()||'{}');}catch(_){messageReceipts={};}}
 function messageNode(who,text,ts,extra,route){
@@ -152,24 +182,26 @@ return d;
 }
 function loadChat(){
 var box=$('#chat');box.innerHTML='';var badges=routeBadges();
-var events=read('memory/L0_raw.jsonl').split('\n').map(function(line){try{return JSON.parse(line);}catch(_){return null;}}).filter(function(e){return e&&e.type==='message'&&e.who&&!Ruri.isMessageDeleted(e.id||'');});
+var events=JSON.parse(Ruri.readLastEvents('message',100)||'[]').map(function(item){return item.event;}).reverse().filter(function(e){return e&&e.who&&!Ruri.isMessageDeleted(e.id||'');});
 events.forEach(function(e){if(e.who==='ruri'&&e.id)Ruri.markReadByCommander(e.id);});
 refreshMessageReceipts();
 events.forEach(function(e){var b=badges[String(e.ts)];box.appendChild(messageNode(e.who,e.text,e.ts,e,e.route||(b&&b.route)));});
 box.scrollTop=box.scrollHeight;
 }
 function loadDiary(){
-try{var entries=JSON.parse(read('memory/L2_diary.json')||'{"entries":[]}').entries||[];
+try{
+var entries=JSON.parse(read('memory/L2_diary.json')||'{"entries":[]}').entries||[];
 var box=$('#diary');box.innerHTML='';
-entries.filter(function(e){return (!e.id||!Ruri.isMessageDeleted(e.id));}).slice(-100).reverse().forEach(function(e){if(e.id)Ruri.markReadByCommander(e.id);});
-refreshMessageReceipts();
-entries.filter(function(e){return (!e.id||!Ruri.isMessageDeleted(e.id));}).slice(-100).reverse().forEach(function(e){var d=messageNode('ruri',e.text,e.ts,e);var kind=e.kind==='said'?'СКАЗАЛА':'МЫСЛЬ';d.querySelector('.meta').firstChild.textContent=kind+' · '+new Date(e.ts||Date.now()).toLocaleString('ru-RU');box.appendChild(d);});
+var visible=entries.filter(function(e){
+return (!e.id||!Ruri.isMessageDeleted(e.id))&&(e.kind||'thought')==='thought';
+}).slice(-100).reverse();
+visible.forEach(function(e){var d=messageNode('ruri',e.text,e.ts,e);var kind=e.kind==='said'?'СКАЗАЛА':'МЫСЛЬ';d.querySelector('.meta').firstChild.textContent=kind+' · '+new Date(e.ts||Date.now()).toLocaleString('ru-RU');box.appendChild(d);});
 }catch(e){$('#diary').textContent='Ошибка чтения дневника: '+e.message;}
 }
 
 function historyForModel(){
 var items=[];
-read('memory/L0_raw.jsonl').split('\n').slice(-80).forEach(function(line){try{var e=JSON.parse(line);if(e.type==='message'&&e.who&&e.text)items.push({role:e.who==='ruri'?'assistant':'user',content:e.text});}catch(_){}});
+JSON.parse(Ruri.readLastEvents('message',80)||'[]').map(function(item){return item.event;}).reverse().forEach(function(e){if(e&&e.who&&e.text)items.push({role:e.who==='ruri'?'assistant':'user',content:e.text});});
 return items.slice(-14);
 }
 var nativeChatCallbacks={};
@@ -177,11 +209,11 @@ window.onNativeChatResult=function(id,reply,error){
 var callback=nativeChatCallbacks[id];if(!callback)return;delete nativeChatCallbacks[id];
 if(error)callback.reject(new Error(error));else callback.resolve(reply);
 };
-function callModel(text){
+function callModel(text,messageId){
 return new Promise(function(resolve,reject){
 var id='chat_'+Date.now()+'_'+Math.random().toString(36).slice(2,9);
 nativeChatCallbacks[id]={resolve:resolve,reject:reject};
-try{var result=Ruri.completeChat(id);if(String(result).indexOf('ERROR:')===0){delete nativeChatCallbacks[id];reject(new Error(result));}}
+try{var result=Ruri.completeChat(id,messageId);if(String(result).indexOf('ERROR:')===0){delete nativeChatCallbacks[id];reject(new Error(result));}}
 catch(e){delete nativeChatCallbacks[id];reject(e);}
 });
 }
@@ -191,11 +223,11 @@ var user={id:'c-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),ts:Date.n
 try{appendLog(user);Ruri.markCommanderSeen();loadChat();}
 catch(e){busy=false;$('#send').disabled=false;status('ОШИБКА ПАМЯТИ');alert(e.message);return;}
 var typing=document.createElement('div');typing.className='msg her';typing.id='typing';typing.innerHTML='<div class="typing">Рури обдумывает ответ…</div>';$('#chat').appendChild(typing);$('#chat').scrollTop=$('#chat').scrollHeight;
-callModel(text).then(function(reply){
+callModel(text,user.id).then(function(reply){
 var t=$('#typing');if(t)t.remove();
 var badges=routeBadges(),keys=Object.keys(badges),last=keys.length?badges[keys[keys.length-1]]:null;
 loadChat();status('НА СВЯЗИ'+(last?' · '+last.route+' · ПОЛНАЯ ПАМЯТЬ':'') );
-}).catch(function(e){var t=$('#typing');if(t)t.remove();var d=document.createElement('div');d.className='msg her';d.innerHTML='<div class="bub error">Ответ не получен: '+esc(e.message)+'. Сообщение сохранено в памяти.</div>';$('#chat').appendChild(d);status('ОШИБКА: '+e.message);})
+}).catch(function(e){var t=$('#typing');if(t)t.remove();var d=document.createElement('div');d.className='msg her';d.innerHTML='<div class="bub error">Ответ пока не получен: '+esc(e.message)+'. Сообщение сохранено в очереди; Рури повторит попытку автоматически.</div>';$('#chat').appendChild(d);status('ОШИБКА: '+e.message);})
 .then(function(){busy=false;$('#send').disabled=false;$('#chat').scrollTop=$('#chat').scrollHeight;});
 }
 function isTouchDevice(){
@@ -214,6 +246,7 @@ document.querySelectorAll('nav button').forEach(function(x){x.classList.remove('
 document.querySelectorAll('.pane').forEach(function(p){p.classList.remove('on');});$('#pane-'+b.dataset.pane).classList.add('on');
 if(b.dataset.pane==='diary')loadDiary();
 if(b.dataset.pane==='l0')loadL0Pane();
+if(b.dataset.pane==='memory')loadMemoryLayer(activeMemoryLayer);
 });});
 var l0FilterTypes=[
 {value:'all',label:'все'},{value:'message',label:'message'},{value:'tool_call',label:'tool_call'},
@@ -242,6 +275,160 @@ box.appendChild(row);
 if(!events.length)box.textContent='Записей нет.';
 }catch(e){box.textContent='Ошибка чтения L0: '+e.message;}
 }
+
+var activeMemoryLayer='L0';
+var memoryLayerTitles={L0:'События L0',L1:'Факты L1',L2:'Дневник L2',L3:'Автобиографическая сводка L3',L4:'Текущее состояние L4',EMO:'Эмоциональные каналы',SELF:'Модель себя'};
+var memoryEmotionNames={joy:'радость',affection:'нежность',anger:'злость',sadness:'грусть',anxiety:'тревога',interest:'интерес',boredom:'скука',desire:'желание',fatigue:'усталость',longing:'тоска по Командиру'};
+function memoryNode(tag,cls,value){
+var el=document.createElement(tag);if(cls)el.className=cls;if(value!==undefined&&value!==null)el.textContent=String(value);return el;
+}
+function memoryPretty(value){try{return JSON.stringify(value,null,2);}catch(_){return String(value);}}
+function memoryDate(value){
+var n=Number(value||0);if(!isFinite(n)||n<=0)return '—';
+try{return new Date(n).toLocaleString('ru-RU');}catch(_){return '—';}
+}
+function memoryEmpty(parent,message){parent.appendChild(memoryNode('div','memory-empty',message));}
+function memoryPre(parent,value){parent.appendChild(memoryNode('pre','memory-json',typeof value==='string'?value:memoryPretty(value)));}
+function memoryCard(parent,title,meta,body){
+var card=memoryNode('div','card memory-card');
+card.appendChild(memoryNode('div','memory-card-title',title||'Без названия'));
+if(meta)card.appendChild(memoryNode('div','memory-meta',meta));
+if(body!==undefined&&body!==null&&String(body)!=='')card.appendChild(memoryNode('div','memory-text',body));
+parent.appendChild(card);return card;
+}
+function memoryMood(v){
+return Number(v.anger||0)>60&&Number(v.sadness||0)>50?'обиженная':
+Number(v.anger||0)>60?'раздражённая':
+Number(v.sadness||0)>60?'грустная':
+Number(v.longing||0)>60?'тоскующая':
+Number(v.anxiety||0)>60?'тревожная':
+Number(v.joy||0)>60&&Number(v.affection||0)>60?'ласковая':
+Number(v.interest||0)>60?'увлечённая':
+Number(v.boredom||0)>60?'скучающая':
+Number(v.desire||0)>60?'томная':
+Number(v.fatigue||0)>70?'уставшая':'собранная';
+}
+function renderMemoryL0(parent,events){
+if(!Array.isArray(events)||!events.length){memoryEmpty(parent,'Событий пока нет.');return;}
+events.slice().reverse().forEach(function(item){
+item=item&&typeof item==='object'?item:{};
+var row=memoryNode('div','l0-row');
+var type=item.type||'событие';
+var summary=memoryNode('div','l0-summary',memoryDate(item.ts||item.timestamp)+' · '+type+
+(item.who?' · '+item.who:'')+(item.source?' · '+item.source:'')+
+(item.text?' — '+String(item.text).slice(0,180):''));
+var detail=memoryNode('pre','l0-detail',memoryPretty(item));
+row.appendChild(summary);row.appendChild(detail);
+row.addEventListener('click',function(){detail.classList.toggle('open');});
+parent.appendChild(row);
+});
+}
+function renderMemoryL1(parent,data){
+var facts=Array.isArray(data)?data:(data.facts||[]);
+if(!facts.length){memoryEmpty(parent,'Фактов в L1 пока нет.');return;}
+facts.slice().reverse().forEach(function(fact){
+fact=fact&&typeof fact==='object'?fact:{};
+var meta=[fact.category||'без категории',fact.confidence!=null?'уверенность '+Math.round(Number(fact.confidence)*100)+'%':null,
+fact.explicit?'явно сказано':null,fact.origin||null,'создано '+memoryDate(fact.created_at)].filter(Boolean).join(' · ');
+var card=memoryCard(parent,fact.text||fact.value||fact.id||'Факт',meta);
+var detail=memoryNode('details','memory-details');
+var summary=memoryNode('summary','small','ПОДРОБНОСТИ ФАКТА');
+detail.appendChild(summary);detail.appendChild(memoryNode('pre','memory-json',memoryPretty(fact)));card.appendChild(detail);
+});
+}
+function renderMemoryL2(parent,data){
+var entries=Array.isArray(data)?data:(data.entries||[]);
+if(!entries.length){memoryEmpty(parent,'Записей дневника пока нет.');return;}
+entries.slice().reverse().forEach(function(entry){
+entry=entry&&typeof entry==='object'?entry:{};
+var said=entry.kind==='said';
+var meta=(said?'СКАЗАЛА':'МЫСЛЬ')+' · '+memoryDate(entry.ts||entry.timestamp)+
+(entry.sequence!=null?' · запись №'+entry.sequence:'');
+var card=memoryCard(parent,said?'Сказанное':'Внутренняя мысль',meta,entry.text||entry.content||'');
+var details=memoryNode('details','memory-details');details.appendChild(memoryNode('summary','small','ДАННЫЕ ЗАПИСИ'));
+details.appendChild(memoryNode('pre','memory-json',memoryPretty(entry)));card.appendChild(details);
+});
+}
+function renderMemoryL3(parent,data){
+var summary=typeof data==='string'?data:(data.summary||'');
+if(summary)memoryCard(parent,'Сводка',data.updated_at?'обновлено '+memoryDate(data.updated_at):'',summary);
+else memoryEmpty(parent,'Текст сводки пока не создан.');
+if(data&&typeof data==='object'){
+var sections=data.sections;
+if(sections&&typeof sections==='object'){
+var card=memoryNode('div','card memory-card');card.appendChild(memoryNode('div','memory-card-title','Разделы автобиографии'));
+Object.keys(sections).forEach(function(key){
+var value=sections[key];var line=memoryNode('div','memory-text');
+line.appendChild(memoryNode('b','',key.replace(/_/g,' ')+': '));
+line.appendChild(document.createTextNode(Array.isArray(value)?value.join(' · '):typeof value==='string'?value:memoryPretty(value)));
+card.appendChild(line);
+});
+parent.appendChild(card);
+}
+var details=memoryNode('details','memory-card card');details.appendChild(memoryNode('summary','small','ПОЛНАЯ СТРУКТУРА L3'));
+details.appendChild(memoryNode('pre','memory-json',memoryPretty(data)));parent.appendChild(details);
+}
+}
+function renderMemoryL4(parent,data){
+if(!data||typeof data!=='object'||!Object.keys(data).length){memoryEmpty(parent,'Состояние L4 пока пусто.');return;}
+Object.keys(data).sort().forEach(function(key){
+var value=data[key];var card=memoryNode('div','card memory-card');
+card.appendChild(memoryNode('div','memory-card-title',key));
+if(value&&typeof value==='object')memoryPre(card,value);
+else card.appendChild(memoryNode('div','memory-text',String(value)));
+parent.appendChild(card);
+});
+}
+function renderMemoryEmotions(parent,data){
+var values=data.values||{};
+var mood=memoryMood(values);
+var top=memoryNode('div','card memory-card');
+top.appendChild(memoryNode('div','memory-meta','ТЕКУЩЕЕ НАСТРОЕНИЕ'));
+top.appendChild(memoryNode('div','memory-mood',mood));
+top.appendChild(memoryNode('div','memory-meta','Обновлено: '+memoryDate(data.updated_at)));
+parent.appendChild(top);
+var keys=Object.keys(memoryEmotionNames);
+keys.forEach(function(key){
+var n=Number(values[key]||0);if(!isFinite(n))n=0;n=Math.max(0,Math.min(100,n));
+var row=memoryNode('div','memory-emotion');
+row.appendChild(memoryNode('div','',memoryEmotionNames[key]));
+var meter=memoryNode('div','memory-meter');var fill=memoryNode('span','');fill.style.width=n+'%';meter.appendChild(fill);row.appendChild(meter);
+row.appendChild(memoryNode('div','memory-meta',Math.round(n)+'/100'));
+parent.appendChild(row);
+});
+}
+function renderMemorySelf(parent,data,raw){
+if(data&&typeof data==='object'&&Object.keys(data).length)memoryPre(parent,data);
+else if(raw&&raw.trim())memoryPre(parent,raw);
+else memoryEmpty(parent,'Модель SELF пока не сохранена.');
+}
+function loadMemoryLayer(layer){
+activeMemoryLayer=layer||activeMemoryLayer;
+document.querySelectorAll('[data-memory-layer]').forEach(function(button){button.classList.toggle('on',button.dataset.memoryLayer===activeMemoryLayer);});
+var view=$('#memoryLayerView');if(!view)return;view.innerHTML='';
+var toolbar=memoryNode('div','memory-toolbar');toolbar.appendChild(memoryNode('h3','',memoryLayerTitles[activeMemoryLayer]||activeMemoryLayer));
+var refresh=memoryNode('button','action secondary','ОБНОВИТЬ');refresh.type='button';refresh.addEventListener('click',function(){loadMemoryLayer(activeMemoryLayer);});toolbar.appendChild(refresh);view.appendChild(toolbar);
+try{
+var raw=Ruri.readMemoryLayer(activeMemoryLayer)||'';
+var data=activeMemoryLayer==='L0'?JSON.parse(raw||'[]'):JSON.parse(raw||'{}');
+var body=memoryNode('div','memory-body');view.appendChild(body);
+if(activeMemoryLayer==='L0')renderMemoryL0(body,data);
+else if(activeMemoryLayer==='L1')renderMemoryL1(body,data);
+else if(activeMemoryLayer==='L2')renderMemoryL2(body,data);
+else if(activeMemoryLayer==='L3')renderMemoryL3(body,data);
+else if(activeMemoryLayer==='L4')renderMemoryL4(body,data);
+else if(activeMemoryLayer==='EMO')renderMemoryEmotions(body,data);
+else if(activeMemoryLayer==='SELF')renderMemorySelf(body,data,raw);
+$('#memoryStatus').textContent='Обновлено '+new Date().toLocaleTimeString('ru-RU');
+}catch(error){
+var message=memoryNode('div','memory-empty error','Не удалось прочитать '+activeMemoryLayer+': '+error.message);view.appendChild(message);
+$('#memoryStatus').textContent='ошибка чтения';
+}
+}
+document.querySelectorAll('[data-memory-layer]').forEach(function(button){
+button.addEventListener('click',function(){loadMemoryLayer(button.dataset.memoryLayer);});
+});
+
 window.openMessageById=function(id){
 if(!id)return;loadChat();loadDiary();
 var nodes=Array.prototype.slice.call(document.querySelectorAll('[data-message-id]'));
@@ -270,8 +457,8 @@ $('#run-diag').addEventListener('click',function(){
     out.textContent=JSON.stringify(data,null,2);
   }catch(e){out.textContent='Ошибка диагностики: '+e.message;}
 });
-$('#saveKey').addEventListener('click',function(){try{var c=JSON.parse(Ruri.readRuntimeConfig()||'{}'),id=$('#model').value,k=$('#key').value.trim(),model=(c.models||[]).find(function(item){return item.id===id;});if(!k)throw new Error('Вставь API-ключ');if(!model)throw new Error('Провайдер не найден. Перезапусти приложение для миграции конфигурации.');model.api_key=k;var saved=Ruri.saveRuntimeConfig(JSON.stringify(c));if(String(saved).indexOf('ERROR:')===0)throw new Error(saved);$('#key').value='';alert('Ключ '+model.name+' сохранён в Android Keystore.');}catch(e){alert(e.message);}});
-function loadNetworkDiagnostics(){try{var d=JSON.parse(Ruri.readNetworkDiagnostics()||'{}');if(!d.available){$('#networkDiagnostics').textContent=d.message||'Нет данных';return;}var rows=['Провайдер: '+(d.provider||'—'),'Модель: '+(d.model||'—'),'Сервер: '+(d.base_url||'—'),'DNS: '+(d.dns_status||'—')+' · '+(d.dns_addresses||0)+' адресов · '+(d.dns_ms==null?'—':d.dns_ms+' мс'),'TLS/подключение: '+(d.connect_tls_ms==null?'—':d.connect_tls_ms+' мс'),'Отправка: '+(d.write_ms==null?'—':d.write_ms+' мс'),'Ожидание HTTP: '+(d.response_wait_ms==null?'—':d.response_wait_ms+' мс'),'Чтение ответа: '+(d.response_body_ms==null?'—':d.response_body_ms+' мс'),'HTTP: '+(d.http_status==null?'—':d.http_status),'Этап: '+(d.stage||'—'),'Результат: '+(d.result||'—'),'Последний провайдер: '+(d.provider||'—')];if(d.timeout_stage)rows.push('Тайм-аут: '+d.timeout_stage);if(d.error_type)rows.push('Тип ошибки: '+d.error_type);if(d.failure_message)rows.push('Причина: '+d.failure_message);$('#networkDiagnostics').textContent=rows.join('\\n');}catch(e){$('#networkDiagnostics').textContent='Ошибка чтения диагностики: '+e.message;}}
+$('#saveKey').addEventListener('click',function(){try{var c=JSON.parse(Ruri.readPublicRuntimeConfig()||'{}'),id=$('#model').value,k=$('#key').value.trim(),model=(c.models||[]).find(function(item){return item.id===id;});if(!k)throw new Error('Вставь API-ключ');if(!model)throw new Error('Провайдер не найден. Перезапусти приложение для миграции конфигурации.');model.api_key=k;var saved=Ruri.saveRuntimeConfig(JSON.stringify(c));if(String(saved).indexOf('ERROR:')===0)throw new Error(saved);$('#key').value='';alert('Ключ '+model.name+' сохранён в Android Keystore.');}catch(e){alert(e.message);}});
+function loadNetworkDiagnostics(){try{var d=JSON.parse(Ruri.readNetworkDiagnostics()||'{}');if(!d.available){$('#networkDiagnostics').textContent=d.message||'Нет данных';return;}var rows=['Провайдер: '+(d.provider||'—'),'Модель: '+(d.model||'—'),'Сервер: '+(d.base_url||'—'),'DNS: '+(d.dns_status||'—')+' · '+(d.dns_addresses||0)+' адресов · '+(d.dns_ms==null?'—':d.dns_ms+' мс'),'TLS/подключение: '+(d.connect_tls_ms==null?'—':d.connect_tls_ms+' мс'),'Отправка: '+(d.write_ms==null?'—':d.write_ms+' мс'),'Ожидание HTTP: '+(d.response_wait_ms==null?'—':d.response_wait_ms+' мс'),'Чтение ответа: '+(d.response_body_ms==null?'—':d.response_body_ms+' мс'),'HTTP: '+(d.http_status==null?'—':d.http_status),'Этап: '+(d.stage||'—'),'Результат: '+(d.result||'—'),'Последний провайдер: '+(d.provider||'—')];var totals=JSON.parse(Ruri.getDiagnostics()||'{}').model_requests||{};rows.unshift('Нейросети: сегодня '+(totals.today_total||0)+' · всего '+(totals.lifetime_total||0)+' · 429 '+(totals.rate_limits_429_today||0)+' · сетевые ошибки '+(totals.network_errors_today||0)+' · региональные ограничения '+(totals.region_restrictions_today||0)+' · тайм-ауты '+(totals.timeouts_today||0));if(d.timeout_stage)rows.push('Тайм-аут: '+d.timeout_stage);if(d.error_type)rows.push('Тип ошибки: '+d.error_type);if(d.failure_message)rows.push('Причина: '+d.failure_message);$('#networkDiagnostics').textContent=rows.join('\\n');}catch(e){$('#networkDiagnostics').textContent='Ошибка чтения диагностики: '+e.message;}}
 $('#refreshNetworkDiagnostics').addEventListener('click',loadNetworkDiagnostics);
 $('#forceRefreshRoutes').addEventListener('click',function(){status('ПЕРЕПРОВЕРКА МАРШРУТОВ');var r=Ruri.forceRefreshRoutes();if(String(r).indexOf('ERROR:')===0)alert(r);});
  function loadAutomaticBackups(){try{var d=JSON.parse(Ruri.readAutomaticBackupStatus()||'{}'),sel=$('#backupSelect');sel.innerHTML='';var items=d.backups||[];items.forEach(function(item){var o=document.createElement('option');o.value=item.name;o.textContent=item.name+' · '+Math.round(item.size_bytes/1024)+' КБ';sel.appendChild(o);});$('#backupStatus').textContent='Сохранено копий: '+(d.count||0)+' из '+(d.maximum||14)+'. Последняя: '+(d.latest_file||'ещё не создана')+'.';if(!items.length){var o=document.createElement('option');o.value='';o.textContent='Копий пока нет';sel.appendChild(o);}}catch(e){$('#backupStatus').textContent='Ошибка чтения резервных копий: '+e.message;}}
@@ -280,30 +467,46 @@ $('#forceRefreshRoutes').addEventListener('click',function(){status('ПЕРЕП�
  $('#verifyBackup').addEventListener('click',function(){try{var name=$('#backupSelect').value;if(!name)throw new Error('Нет выбранной копии');var r=JSON.parse(Ruri.verifyAutomaticBackup(name));alert(r.valid?'Копия исправна. Файлов: '+r.files+'.':'Проверка не пройдена: '+r.error);}catch(e){alert('Проверка копии: '+e.message);}});
  $('#restoreBackup').addEventListener('click',function(){try{var name=$('#backupSelect').value;if(!name)throw new Error('Нет выбранной копии');if(!confirm('Восстановить память из '+name+'? Текущие данные будут заменены, а файлы, созданные после этой копии, удалены. Перед восстановлением Рури создаст страховочную копию текущего состояния.'))return;var r=Ruri.restoreAutomaticBackup(name);if(String(r).indexOf('ERROR:')===0)throw new Error(r);var d=JSON.parse(r);alert('Восстановлено файлов: '+d.files+'. Приложение перезапустит интерфейс.');location.reload();}catch(e){alert('Восстановление: '+e.message);}});
 
-function loadRoutes(){try{var c=JSON.parse(Ruri.readRuntimeConfig()||'{}'),d=JSON.parse(Ruri.getDiagnostics()||'{}'),routes=d.routes||{},box=$('#routeList');box.innerHTML='';(c.models||[]).forEach(function(m,i){if(!m.free_tier)return;var id=m.id||String(i),s=routes[id]||{},row=document.createElement('div');row.style.cssText='padding:9px 0;border-bottom:1px solid #273653';var statusText=(s.reachable?'доступен':'недоступен')+(s.in_cooldown?' · cooldown':'')+' · квота '+(s.requests_today||0)+'/'+(s.requests_per_day||200)+' · VPN '+(s.needs_vpn?'нужен':'не обязателен')+' · '+(s.has_key?'ключ сохранён':'ключ не задан');row.innerHTML='<label style="display:flex;gap:8px;align-items:flex-start"><input type="radio" name="activeRoute" value="'+i+'" style="width:auto;margin-top:4px" '+(Number(c.current)===i?'checked':'')+'><span><b>'+esc(m.name||id)+'</b><br><span>'+esc(m.model||'')+'</span><br><span>'+esc(statusText)+'</span></span></label>';box.appendChild(row);});$('#routeMode').textContent='Режим: первый маршрут + автоматический резерв';box.querySelectorAll('input[name="activeRoute"]').forEach(function(r){r.addEventListener('change',function(){c.current=Number(r.value);var saved=Ruri.saveRuntimeConfig(JSON.stringify(c));if(String(saved).indexOf('ERROR:')===0)alert(saved);});});}catch(e){$('#routeList').textContent='Не удалось прочитать маршруты: '+e.message;}}
+function routeModeHelp(mode){var help={AUTO:'AUTO: пробует маршруты по числовому приоритету; переходит дальше только после фактической ошибки запроса. Никаких предварительных проверок провайдера.',MANUAL:'MANUAL: весь трафик идёт только через выбранную модель. При ошибке запрос завершается ошибкой — другая нейросеть не вызывается.',MANUAL_FALLBACK:'MANUAL + FALLBACK: сначала выбранная модель; если сам запрос завершился ошибкой, пробует остальные по ручному приоритету.'};$('#routeModeHelp').textContent=help[mode]||help.AUTO;}
+function loadRoutes(){try{var c=JSON.parse(Ruri.readPublicRuntimeConfig()||'{}'),d=JSON.parse(Ruri.getDiagnostics()||'{}'),routes=d.routes||{},box=$('#routeList');box.innerHTML='';var totals=d.model_requests||{},summary=document.createElement('div');summary.className='small';summary.style.cssText='padding:8px 0 12px;border-bottom:1px solid #273653;margin-bottom:8px';summary.textContent='ВСЕ НЕЙРОСЕТЕВЫЕ ЗАПРОСЫ · сегодня: '+(totals.today_total||0)+' · за всё время: '+(totals.lifetime_total||0)+' · HTTP 429 сегодня: '+(totals.rate_limits_429_today||0)+' · успешные: '+(totals.successes_today||0)+' · ошибки: '+(totals.failures_today||0)+' · сеть: '+(totals.network_errors_today||0)+' · тайм-ауты: '+(totals.timeouts_today||0);box.appendChild(summary);var modelSelect=$('#model');if(modelSelect){modelSelect.innerHTML='';(c.models||[]).forEach(function(m,i){if(!m.free_tier)return;var option=document.createElement('option');option.value=m.id||String(i);option.textContent=m.name||option.value;modelSelect.appendChild(option);});}$('#nsfwOverride').checked=c.nsfw_override!==false;var mode=c.route_mode||'AUTO';$('#routeModeSelect').value=mode;routeModeHelp(mode);var selectedId=c.selected_route_id||((c.models||[])[Number(c.current)||0]||{}).id||'';(c.models||[]).forEach(function(m,i){if(!m.free_tier)return;var id=m.id||String(i),s=routes[id]||{},row=document.createElement('div');row.style.cssText='padding:9px 0;border-bottom:1px solid #273653';var statusText=(s.reachable?'доступен':'недоступен')+(s.in_cooldown?' · cooldown':'')+' · запросы сегодня '+(s.requests_today||0)+' · всего '+(s.requests_lifetime||0)+' · 429 '+(s.rate_limits_today||0)+' · HTTP 4xx/5xx '+(s.http_4xx_today||0)+'/'+(s.http_5xx_today||0)+' · сетевые ошибки '+(s.network_errors_today||0)+' · региональные 403 '+(s.region_restrictions_today||0)+' · тайм-ауты '+(s.timeouts_today||0)+' · последний HTTP '+(s.last_http_status||'—')+' · VPN '+(s.needs_vpn?'нужен':'не обязателен')+' · '+(s.has_key?'ключ сохранён':'ключ не задан');row.innerHTML='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label style="display:flex;gap:8px;align-items:center"><input type="radio" name="activeRoute" value="'+esc(id)+'" style="width:auto" '+(selectedId===id?'checked':'')+'> <b>'+esc(m.name||id)+'</b></label><span class="small">'+esc(m.model||'')+'</span></div><div class="small">'+esc(statusText)+'</div><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:6px"><label>Приоритет <input type="number" min="1" step="1" class="prio" data-id="'+esc(id)+'" value="'+Math.max(1,Number(m.priority)||99)+'" style="width:64px"></label><label><input type="checkbox" class="nsfw" data-id="'+esc(id)+'" style="width:auto" '+(m.nsfw?'checked':'')+'> NSFW</label><label><input type="checkbox" class="vision" data-id="'+esc(id)+'" style="width:auto" '+(m.vision?'checked':'')+'> vision</label></div>';box.appendChild(row);});$('#routeMode').textContent='AUTO следует приоритетам; MANUAL закрепляет выбранную модель; MANUAL + FALLBACK начинает с неё и затем идёт по списку. Vision остаётся ограничен вручную отмеченными vision-маршрутами.';}catch(e){$('#routeList').textContent='Не удалось прочитать маршруты: '+e.message;}}
+$('#routeModeSelect').addEventListener('change',function(){routeModeHelp(this.value);});
+$('#saveRouteOrder').addEventListener('click',function(){try{var selected=$('#routeList').querySelector('input[name="activeRoute"]:checked');if(!selected)throw new Error('Выбери модель для ручного режима');var payload={route_mode:$('#routeModeSelect').value,selected_route_id:selected.value,nsfw_override:$('#nsfwOverride').checked,routes:[]};$('#routeList').querySelectorAll('.prio').forEach(function(p){var id=p.dataset.id,nsfw=false,vision=false;$('#routeList').querySelectorAll('.nsfw').forEach(function(x){if(x.dataset.id===id)nsfw=x.checked;});$('#routeList').querySelectorAll('.vision').forEach(function(x){if(x.dataset.id===id)vision=x.checked;});payload.routes.push({id:id,priority:Math.max(1,parseInt(p.value,10)||99),nsfw:nsfw,vision:vision});});var result=Ruri.saveRouteOrder(JSON.stringify(payload));if(String(result).indexOf('ERROR:')===0)throw new Error(result);loadRoutes();status('РЕЖИМ И ПОРЯДОК МАРШРУТОВ СОХРАНЕНЫ');}catch(e){alert('Не удалось сохранить маршруты: '+e.message);}});
+
 function refreshRouteCards(){loadRoutes();loadNetworkDiagnostics();status('МАРШРУТЫ ОБНОВЛЕНЫ');}
 function loadBackupVisibility(){try{var d=JSON.parse(Ruri.getDiagnostics()||'{}'),m=d.memory||{},b=d.backups||{};var fmt=function(t){return t?new Date(t).toLocaleString('ru-RU'):'ещё не было'};$('#backupVisibility').textContent='Журнал: последнее сохранение '+fmt(m.l0_last_append_at)+'. Копия: '+fmt(b.latest_copy_at)+'. Журнал пишется на каждое сообщение; копии — снимки.';$('#l1FactCount').textContent='Фактов в L1: '+(m.l1_facts_count||0)+'. Извлекаются автоматически; Рури может добавить свой инструментом remember_fact.';}catch(e){$('#backupVisibility').textContent='Не удалось прочитать состояние сохранения.';}}
-function refreshOnboarding(){try{var s=JSON.parse(read('memory/L4_state.json')||'{}');if(s.onboarding_done){$('#onboardingCard').style.display='none';return;}var step=(!Ruri.hasPostNotificationsPermission())?'POST_NOTIFICATIONS':(!Ruri.hasNotificationAccess()?'NOTIFICATION_ACCESS':(!Ruri.hasUsageAccess()?'USAGE_ACCESS':'COMPLETE'));if(step==='COMPLETE'){s.onboarding_done=true;write('memory/L4_state.json',JSON.stringify(s,null,2));$('#onboardingCard').style.display='none';return;}$('#onboardingCard').style.display='block';if(step==='POST_NOTIFICATIONS'){$('#onboardingText').textContent='Разреши уведомления Рури. Android покажет системный запрос.';$('#onboardingAction').textContent='ЗАПРОСИТЬ УВЕДОМЛЕНИЯ';$('#onboardingAction').onclick=function(){Ruri.requestPostNotificationsPermission();setTimeout(refreshOnboarding,700);};}else if(step==='NOTIFICATION_ACCESS'){$('#onboardingText').textContent='Для чтения уведомлений открой системные настройки и включи Рури вручную. Android требует ручной тумблер.';$('#onboardingAction').textContent='ОТКРЫТЬ ДОСТУП К УВЕДОМЛЕНИЯМ';$('#onboardingAction').onclick=function(){Ruri.openNotificationAccessSettings();};}else{$('#onboardingText').textContent='Для локального определения активного приложения открой статистику использования и включи Рури вручную. Android требует ручной тумблер.';$('#onboardingAction').textContent='ОТКРЫТЬ ДОСТУП К ПРИЛОЖЕНИЯМ';$('#onboardingAction').onclick=function(){Ruri.openUsageAccessSettings();};}}catch(e){$('#onboardingCard').style.display='none';}}
+function refreshOnboarding(){try{var s=JSON.parse(read('memory/L4_state.json')||'{}');if(s.onboarding_done){$('#onboardingCard').style.display='none';return;}var step=(!Ruri.hasPostNotificationsPermission())?'POST_NOTIFICATIONS':(!Ruri.hasNotificationAccess()?'NOTIFICATION_ACCESS':(!Ruri.hasUsageAccess()?'USAGE_ACCESS':'COMPLETE'));if(step==='COMPLETE'){Ruri.markOnboardingDone();$('#onboardingCard').style.display='none';return;}$('#onboardingCard').style.display='block';if(step==='POST_NOTIFICATIONS'){$('#onboardingText').textContent='Разреши уведомления Рури. Android покажет системный запрос.';$('#onboardingAction').textContent='ЗАПРОСИТЬ УВЕДОМЛЕНИЯ';$('#onboardingAction').onclick=function(){Ruri.requestPostNotificationsPermission();setTimeout(refreshOnboarding,700);};}else if(step==='NOTIFICATION_ACCESS'){$('#onboardingText').textContent='Для чтения уведомлений открой системные настройки и включи Рури вручную. Android требует ручной тумблер.';$('#onboardingAction').textContent='ОТКРЫТЬ ДОСТУП К УВЕДОМЛЕНИЯМ';$('#onboardingAction').onclick=function(){Ruri.openNotificationAccessSettings();};}else{$('#onboardingText').textContent='Для локального определения активного приложения открой статистику использования и включи Рури вручную. Android требует ручной тумблер.';$('#onboardingAction').textContent='ОТКРЫТЬ ДОСТУП К ПРИЛОЖЕНИЯМ';$('#onboardingAction').onclick=function(){Ruri.openUsageAccessSettings();};}}catch(e){$('#onboardingCard').style.display='none';}}
 function startOnboarding(){refreshOnboarding();}
 window.startOnboarding=startOnboarding;window.refreshOnboarding=refreshOnboarding;window.refreshRouteCards=refreshRouteCards;
 $('#onboardingLater').addEventListener('click',function(){$('#onboardingCard').style.display='none';});
 function loadSearch(){try{
-var s=JSON.parse(read('core/search.json')||'{}');
-$('#serperKey').value=s.serper_key||'';
+var s=JSON.parse(Ruri.readPublicSearchConfig()||'{}');
+$('#serperKey').value='';
+$('#serperKey').placeholder=s.has_serper_key?'Ключ сохранён; введи новый для замены':'Вставь Serper API key';
 $('#searxngUrl').value=s.searxng_url||'';
-$('#searchStatus').textContent=(s.serper_key?'Serper: ключ есть. ':'Serper: ключа нет. ')+(s.searxng_url?'Ноут: '+s.searxng_url:'Ноут: не задан.');
+$('#searchStatus').textContent=(s.has_serper_key?'Serper: ключ зашифрован и сохранён. ':'Serper: ключа нет. ')+(s.searxng_url?'Ноут: '+s.searxng_url:'Ноут: не задан.');
 }catch(e){$('#searchStatus').textContent='Ошибка чтения search.json';}}
+$('#clearSearchKey').addEventListener('click',function(){try{
+var s=JSON.parse(Ruri.readPublicSearchConfig()||'{}');s.clear_serper_key=true;
+var saved=Ruri.saveSearchConfig(JSON.stringify(s));if(saved!=='OK')throw new Error(saved);
+loadSearch();status('Ключ Serper удалён из зашифрованного хранилища.');
+}catch(e){status('Ошибка удаления ключа: '+e.message);}});
 $('#saveSearch').addEventListener('click',function(){try{
-var s=JSON.parse(read('core/search.json')||'{}');
+var s=JSON.parse(Ruri.readPublicSearchConfig()||'{}');
 s.serper_key=$('#serperKey').value.trim();
 s.searxng_url=$('#searxngUrl').value.trim();
 ['brave_key','yandex_user','yandex_key','cse_key','cse_cx'].forEach(function(k){delete s[k];});
-write('core/search.json',JSON.stringify(s,null,2));
+var saved=Ruri.saveSearchConfig(JSON.stringify(s));
+if(saved!=='OK')throw new Error(saved);
+$('#serperKey').value='';
 loadSearch();
 alert('Настройки поиска сохранены.');
 }catch(e){alert(e.message);}});
 window.setVisionStatus=function(value){var node=$('#visionStatus');if(node)node.textContent='Vision: '+(value||'none');};
 function loadVisionStatus(){try{$('#visionStatus').textContent='Vision: '+(Ruri.visionStatus()||'проверяю…');}catch(_){$('#visionStatus').textContent='Vision: none';}}
+$('#reprobeVision').addEventListener('click',function(){
+try{status('ПОВТОРНАЯ ПРОВЕРКА VISION');var result=Ruri.reprobeVision();if(String(result).indexOf('ERROR:')===0)throw new Error(result);}
+catch(e){$('#visionStatus').textContent='Vision: ошибка — '+e.message;}
+});
 function loadCharacter(){try{var c=JSON.parse(read('core/character.json')||'{}');$('#charName').value=c.name||'';$('#charStyle').value=c.speech_style||'';}catch(_){}status('');loadVisionStatus();refreshUsageAccess();loadNetworkDiagnostics();loadAutomaticBackups();loadRoutes();loadSearch();loadBackupVisibility();}
 $('#saveCharacter').addEventListener('click',function(){try{var c=JSON.parse(read('core/character.json')||'{}');c.name=$('#charName').value.trim()||'Рури';c.speech_style=$('#charStyle').value.trim();write('core/character.json',JSON.stringify(c,null,2));alert('Характер сохранён.');}catch(e){alert(e.message);}});
 $('#notificationAccess').addEventListener('click',function(){var r=Ruri.openNotificationAccessSettings();if(String(r).indexOf('ERROR:')===0)alert(r);});

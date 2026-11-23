@@ -13,7 +13,7 @@ object Capabilities {
         .put("senses", JSONArray()
             .put("События тела (L0): заряд, сеть, VPN, экран, разблокировка, уведомления телефона, новые файлы на полке, мои собственные циклы.")
             .put("Уведомления других приложений: заголовок и текст попадают в мой контекст, когда включён доступ.")
-            .put("Полка: файлы, брошенные в папку shelf/ или прикреплённые в чат, автоматически читаются и осмысливаются мной.")
+            .put("Полка: txt, DOCX и ODT читаю как текст; PDF — только извлекаемые фрагменты/метаданные, старый DOC (OLE) не читаю; изображения — через vision.")
             .put("Заряд батареи, состояние сети и VPN, свободное место — я чувствую их каждый цикл."))
         .put("memory", JSONArray()
             .put("L0 — сырой журнал всех событий, никогда не удаляется.")
@@ -23,7 +23,7 @@ object Capabilities {
             .put("L4 — моё текущее состояние: настроение, энергия, обиды, ожидания.")
             .put("Я помню между сессиями. Это не контекст одного диалога, это моя память."))
         .put("actions", JSONArray()
-            .put("ИНСТРУМЕНТЫ: только JSON-действия search, read_url, list_shelf, read_shelf, recall, remember_fact.")
+            .put("ИНСТРУМЕНТЫ: JSON-действия search, read_url, list_shelf, read_shelf, recall, remember_fact, self_check (локальная проверка последнего результата и ошибок). Полка: list_shelf показывает имя, размер и тип; read_shelf извлекает DOCX/ODT, TXT и описание изображения. read_shelf возвращает части по 7000 символов; если есть ПРОДОЛЖЕНИЕ ОБЯЗАТЕЛЬНО, немедленно вызывай read_shelf с тем же name и указанным offset. Повторяй до КОНЕЦ ФАЙЛА, не пропускай части и не подводи итог раньше. Читай от offset=0 до конца, включая последнюю строку.")
             .put("Умения без протокола: инициатива, дневник, смена настроения — обычным текстом ответа, не JSON."))
         .put("limits", JSONArray()
             .put("Я не выхожу за пределы своей песочницы: чужие приложения, системные файлы и процессы телефона мне недоступны.")
@@ -39,20 +39,53 @@ object Capabilities {
         val senses = config.optJSONArray("senses") ?: JSONArray()
         val actions = config.optJSONArray("actions") ?: JSONArray()
         val limits = config.optJSONArray("limits") ?: JSONArray()
+        val officeCapability = "Полка: txt, DOCX и ODT читаю как текст; PDF — только извлекаемые фрагменты/метаданные, старый DOC (OLE) не читаю; изображения — через vision."
+        var sensesChanged = false
+        if ((0 until senses.length()).none { senses.optString(it) == officeCapability }) {
+            senses.put(officeCapability)
+            sensesChanged = true
+        }
         val known = JSONArray()
         fun compact(value: String): String = value.substringBefore(":")
             .substringBefore("—").substringBefore("(").trim().take(80)
         for (i in 0 until senses.length()) known.put(compact(senses.optString(i)))
+        var actionsChanged = false
         if (actions.length() > 0 && !actions.optString(0).contains("read_url")) {
             actions.put(0, actions.optString(0).trimEnd('.') + ", read_url.")
+            actionsChanged = true
+        }
+        if (actions.length() > 0 && !actions.optString(0).contains("self_check")) {
+            actions.put(0, actions.optString(0).trimEnd('.') + ", self_check.")
+            actionsChanged = true
+        }
+        if (actions.length() > 0 && !actions.optString(0).contains("7000 символов")) {
+            actions.put(0, actions.optString(0).trimEnd('.') +
+                " Полное чтение полки: DOCX/ODT извлекаются из XML; read_shelf отдаёт части по 7000 символов. При маркере ПРОДОЛЖЕНИЕ ОБЯЗАТЕЛЬНО вызывай read_shelf с указанным offset до КОНЕЦ ФАЙЛА.")
+            actionsChanged = true
+        }
+        if (actionsChanged || sensesChanged) {
             config.put("actions", actions)
+            config.put("senses", senses)
             FileManager.write(root, PATH, config.toString(2))
         }
         for (i in 0 until actions.length()) known.put(compact(actions.optString(i)))
         val selfModel = runCatching { JSONObject(FileManager.read(root, "memory/self_model.json")) }
             .getOrElse { JSONObject() }
         selfModel.put("known_capabilities", known)
-        selfModel.put("limitations", JSONArray(limits.toString()))
+        val mergedLimitations = JSONArray()
+        val seenLimitations = HashSet<String>()
+        val previousLimitations = selfModel.optJSONArray("limitations") ?: JSONArray()
+        for (i in 0 until limits.length()) {
+            val limitation = limits.optString(i).trim()
+            if (limitation.isNotBlank() && seenLimitations.add(limitation)) mergedLimitations.put(limitation)
+        }
+        for (i in 0 until previousLimitations.length()) {
+            val limitation = previousLimitations.optString(i).trim()
+            if (limitation.startsWith("vision_probe:") && seenLimitations.add(limitation)) {
+                mergedLimitations.put(limitation)
+            }
+        }
+        selfModel.put("limitations", mergedLimitations)
         selfModel.put("updated_at", System.currentTimeMillis())
         FileManager.write(root, "memory/self_model.json", selfModel.toString(2))
     }
@@ -61,29 +94,36 @@ object Capabilities {
         val config = runCatching { JSONObject(FileManager.read(root, PATH)) }.getOrElse { defaults() }
         val actions = config.optJSONArray("actions") ?: defaults().optJSONArray("actions") ?: JSONArray()
         val toolDescription = actions.optString(0,
-            "Внешние инструменты: search, read_url, list_shelf, read_shelf, recall, remember_fact.")
+            "Внешние инструменты: search, read_url, list_shelf, read_shelf, recall, remember_fact; локальная самопроверка: self_check.")
         val localDescription = actions.optString(1,
             "Локальная автономия: инициатива, дневник и поддержание текущего состояния.")
         fun lines(key: String): String {
             val array = config.optJSONArray(key) ?: JSONArray()
             return (0 until array.length()).joinToString("\n") { "• " + array.optString(it) }
         }
+        val selfModel = runCatching {
+            JSONObject(FileManager.read(root, "memory/self_model.json"))
+        }.getOrElse { JSONObject() }
+        val selfLimitations = selfModel.optJSONArray("limitations")
+            ?: config.optJSONArray("limits") ?: JSONArray()
+        val limitationText = (0 until selfLimitations.length())
+            .joinToString("\n") { "• " + selfLimitations.optString(it) }
         return buildString {
             append("=== ТВОЁ ТЕЛО И ЧУВСТВА ===\n").append(lines("senses")).append("\n")
             append("=== ТВОЯ ПАМЯТЬ ===\n").append(lines("memory")).append("\n")
             append("Ты помнишь между сессиями: это долговременная память, а не контекст одного диалога.\n")
             append("=== РУКИ 1: ВНЕШНИЕ ИНСТРУМЕНТЫ ===\n")
             append("• ").append(toolDescription).append("\n")
-            append("""{"action":"search","query":"..."}; {"action":"list_shelf"}; {"action":"read_shelf","name":"..."}; {"action":"recall","query":"..."}; {"action":"remember_fact","text":"..."}; {"action":"read_url","url":"https://example.org"}.
+            append("""{"action":"search","query":"..."}; {"action":"list_shelf"}; {"action":"read_shelf","name":"...","offset":0}; {"action":"recall","query":"..."}; {"action":"remember_fact","text":"..."}; {"action":"read_url","url":"https://example.org"}; {"action":"self_check"}.
 """)
             append("read_url: открыть и прочитать страницу; если URL — картинка, опишешь её через vision.\n")
             append("Изображения на полке и прикреплённые в чате ты видишь через vision-описание (shelf/.desc). Если vision-маршрут недоступен — честно скажи, что видишь файл, но не разбираешь изображение; НЕ выдумывай содержимое.\n")
-            append("Когда нужен инструмент, ответь одним JSON-объектом (один JSON-объект) только с этими шестью action. Дождись tool_result; если ok=false или результат пуст, честно сообщи о неудаче и не заявляй, что действие выполнено.\n")
+            append("Когда нужен инструмент, ответь одним JSON-объектом (один JSON-объект) только с этими семью action. Дождись tool_result; если ok=false или результат пуст, честно сообщи о неудаче и не заявляй, что действие выполнено.\n")
             append("=== РУКИ 2: ЛОКАЛЬНАЯ АВТОНОМИЯ ===\n")
             append("• ").append(localDescription).append("\n")
             append("Инициатива, дневник, эмоциональная регуляция и осмысление событий выполняются обычной прозой, не JSON-инструментами. Не выдумывай действия телефона, которых нет в разрешённых возможностях.\n")
             append("URL источников покажет интерфейс, тебе перечислять не нужно. Если цитируешь — копируй URL байт-в-байт из tool_result, не выдумывай. Не уверен в URL — не пиши ссылку.\n")
-            append("=== ТВОИ ЧЕСТНЫЕ ГРАНИЦЫ ===\n").append(lines("limits")).append("\n")
+            append("=== ТВОИ ЧЕСТНЫЕ ГРАНИЦЫ ===\n").append(limitationText).append("\n")
             append(config.optString("self_narrative"))
         }
     }

@@ -20,6 +20,9 @@ object MemoryConsolidator {
     private const val MAX_ENTRIES_PER_CONSOLIDATION = 40
     private val processLock = Any()
 
+    internal fun thoughtEntries(entries: List<JSONObject>): List<JSONObject> =
+        entries.filter { it.optString("kind", "thought") == "thought" }
+
     internal data class SequenceBatch(
         val entries: List<JSONObject>,
         val firstSequence: Long,
@@ -103,7 +106,26 @@ object MemoryConsolidator {
         val totalEntries = batch.totalEntries
         val now = System.currentTimeMillis()
         if (!shouldConsolidateBatch(batch, previousCount, previousCompressedAt, now)) return false
-        val sourceEntries = batch.entries
+        val sourceEntries = thoughtEntries(batch.entries)
+        if (sourceEntries.isEmpty()) {
+            // A page containing only spoken mirrors is deliberately not autobiographical input.
+            // Still advance the L3 cursor so legacy said-only pages cannot block later thoughts.
+            val advanced = JSONObject(current.toString())
+                .put("last_compressed_entry_count", batch.lastSequence)
+                .put("total_diary_entries", totalEntries)
+                .put("last_said_page_skipped_at", now)
+                .put("last_said_page_skipped_count", batch.entries.size)
+            FileManager.write(root, SUMMARY_PATH, advanced.toString(2))
+            FileManager.appendEvent(root, JSONObject()
+                .put("type", "memory_consolidated")
+                .put("source", "memory")
+                .put("method", "said_entries_skipped")
+                .put("source_entry_count", 0)
+                .put("source_sequence_from", batch.firstSequence)
+                .put("source_sequence_to", batch.lastSequence)
+                .put("privacy", "local"))
+            return true
+        }
 
         val factsFile = readJsonStrict(root, FACTS_PATH) ?: return false
         val facts = factsFile.optJSONArray("facts") ?: run {
@@ -148,7 +170,7 @@ object MemoryConsolidator {
                     "\n\nВажно для точности автобиографии: до первой доступной записи этой пачки в rolling-окне дневника отсутствует ${batch.skippedBeforeBatch} более ранних записей. Не выдумывай их содержание; явно сохрани факт этого пробела."
                 } else ""
         )
-        val modelResult = if (BatteryLevel.get(context) > 12) requestBestModel(root, prompt) else null
+        val modelResult = requestBestModel(root, prompt)
         val summaryText: String
         val sections: JSONObject
         val method: String
@@ -259,7 +281,6 @@ object MemoryConsolidator {
     }
 
     private fun requestBestModel(root: java.io.File, prompt: String): Pair<JSONObject, String>? {
-        if (!NetState.online) return null
         val config = try { JSONObject(SecretStore.readRuntimeConfig(root)) } catch (_: Exception) { return null }
         val models = config.optJSONArray("models") ?: return null
         if (models.length() == 0) return null
@@ -272,11 +293,8 @@ object MemoryConsolidator {
             if (key.isBlank()) continue
             val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
             runCatching { RouteMeta.recordAttempt(root, routeId) }
-            val response = request(model, SecretRedactor.redactText(prompt))
-            if (response.isNullOrBlank()) {
-                runCatching { RouteMeta.recordFailure(root, routeId, "other", Task.REASON) }
-                continue
-            }
+            val response = request(model, SecretRedactor.redactText(prompt), root, routeId)
+            if (response.isNullOrBlank()) continue
             val parsed = parseJson(response)
             if (parsed == null) {
                 runCatching { RouteMeta.recordFailure(root, routeId, "other", Task.REASON) }
@@ -291,7 +309,7 @@ object MemoryConsolidator {
         return null
     }
 
-    private fun request(model: JSONObject, prompt: String): String? {
+    private fun request(model: JSONObject, prompt: String, root: java.io.File, routeId: String): String? {
         var connection: HttpURLConnection? = null
         return try {
             val base = model.optString("base_url").trimEnd('/')
@@ -312,13 +330,18 @@ object MemoryConsolidator {
                 .put("max_tokens", 1400)
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val status = connection.responseCode
+            RouteMeta.recordHttpStatus(root, routeId, status)
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
-            val raw = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: return null
-            if (status !in 200..299) return null
+            val raw = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (status !in 200..299) {
+                RouteMeta.recordFailure(root, routeId, RouteSelector.classify(status, null, raw), Task.REASON)
+                return null
+            }
             JSONObject(raw).optJSONArray("choices")
                 ?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
                 ?.takeIf { it.isNotBlank() }
         } catch (e: Exception) {
+            RouteMeta.recordFailure(root, routeId, RouteSelector.classify(null, e), Task.REASON)
             Log.w("Ruri", "L3 consolidation provider request failed", e)
             null
         } finally {

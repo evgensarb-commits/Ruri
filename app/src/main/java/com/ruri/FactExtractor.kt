@@ -101,8 +101,6 @@ object FactExtractor {
             )
         }
 
-        if (!NetState.online) return 0
-
         val config = try {
             JSONObject(SecretStore.readRuntimeConfig(root))
         } catch (e: Exception) {
@@ -124,11 +122,8 @@ object FactExtractor {
             if (key.isBlank()) continue
             val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
             runCatching { RouteMeta.recordAttempt(root, routeId) }
-            val response = request(model, prompt)
-            if (response.isNullOrBlank()) {
-                runCatching { RouteMeta.recordFailure(root, routeId, "other", Task.REASON) }
-                continue
-            }
+            val response = request(model, prompt, root, routeId)
+            if (response.isNullOrBlank()) continue
             parsed = parseJson(response)
             if (parsed != null) {
                 runCatching { RouteMeta.recordSuccess(root, routeId, Task.REASON) }
@@ -252,13 +247,14 @@ object FactExtractor {
         model: String,
         now: Long
     ) {
-        state.put("last_fact_extraction_attempt_at", now)
-        state.put("last_fact_extraction_ts", latestCommander.optLong("timestamp", latestCommander.optLong("ts", now)))
-        state.put("last_fact_extraction_event_id", latestCommander.optString("id"))
-        state.put("last_fact_extraction_offset", scanOffset)
-        state.put("last_fact_extraction_batch_id", batchId)
-        state.put("last_fact_extraction_model", model)
-        FileManager.write(root, STATE_PATH, state.toString(2))
+        FileManager.updateL4State(root) { latest ->
+            latest.put("last_fact_extraction_attempt_at", now)
+                .put("last_fact_extraction_ts", latestCommander.optLong("timestamp", latestCommander.optLong("ts", now)))
+                .put("last_fact_extraction_event_id", latestCommander.optString("id"))
+                .put("last_fact_extraction_offset", scanOffset)
+                .put("last_fact_extraction_batch_id", batchId)
+                .put("last_fact_extraction_model", model)
+        }
 
         // The pending transcript is reset only after L1 and L4 checkpoints are committed.
         val reset = JSONObject()
@@ -273,8 +269,9 @@ object FactExtractor {
     }
 
     private fun recordAttempt(root: File, state: JSONObject, now: Long) {
-        state.put("last_fact_extraction_attempt_at", now)
-        FileManager.write(root, STATE_PATH, state.toString(2))
+        FileManager.updateL4State(root) { latest ->
+            latest.put("last_fact_extraction_attempt_at", now)
+        }
     }
 
     private fun readOrInitializePending(root: File, state: JSONObject): JSONObject {
@@ -334,7 +331,7 @@ object FactExtractor {
         $transcript
     """.trimIndent()
 
-    private fun request(model: JSONObject, prompt: String): String? {
+    private fun request(model: JSONObject, prompt: String, root: File, routeId: String): String? {
         var connection: HttpURLConnection? = null
         return try {
             val baseUrl = model.optString("base_url").trimEnd('/')
@@ -355,13 +352,18 @@ object FactExtractor {
                 .put("max_tokens", 1200)
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val status = connection.responseCode
+            RouteMeta.recordHttpStatus(root, routeId, status)
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
-            val raw = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: return null
-            if (status !in 200..299) return null
+            val raw = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (status !in 200..299) {
+                RouteMeta.recordFailure(root, routeId, RouteSelector.classify(status, null, raw), Task.REASON)
+                return null
+            }
             JSONObject(raw).optJSONArray("choices")
                 ?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
                 ?.takeIf { it.isNotBlank() }
         } catch (e: Exception) {
+            RouteMeta.recordFailure(root, routeId, RouteSelector.classify(null, e), Task.REASON)
             Log.w("Ruri", "Fact extraction provider request failed", e)
             null
         } finally {

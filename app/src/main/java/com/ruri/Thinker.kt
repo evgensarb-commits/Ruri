@@ -50,6 +50,7 @@ object Thinker {
     private fun runCycle(ctx: Context, originalReason: String) {
         val root = ctx.filesDir
         val state = readStateStrict(root)
+        val baselineState = JSONObject(state.toString())
         val inFlight = readJson(root, "memory/L4_state.json").optBoolean("turn_in_flight", false)
         val now = System.currentTimeMillis()
         EmotionEngine.tick(root, now, state.optLong("last_seen_commander", 0L),
@@ -77,29 +78,16 @@ object Thinker {
             initiative = true
         }
 
+        if (originalReason.contains("drive_check") && !initiative) {
+            state.put("last_thought", now)
+            persistStatePreservingTurnInFlight(root, state, baselineState)
+            return
+        }
+
         appendEvent(root, "wake", JSONObject()
             .put("reason", reason)
             .put("battery", BatteryLevel.get(ctx))
             .put("hours_since_commander", hoursQuiet))
-
-        if (!NetState.online) {
-            // Local state and memory maintenance already ran in RuriLifeWorker.
-            state.put("last_thought", now)
-            persistStatePreservingTurnInFlight(root, state)
-            return
-        }
-
-        if (originalReason == "online_after_offline" && OfflineQueue.hasPending(root)) {
-            val latestMessages = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 300)
-                .asReversed().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
-                .filter { it.optString("type") == "message" && !Tombstone.isDeleted(root, it.optString("id")) }
-            val latest = latestMessages.firstOrNull()
-            if (latest?.optString("who") == "commander") {
-                val answer = runCatching { ChatEngine.respond(root) }.getOrNull()
-                if (!answer.isNullOrBlank()) Notifier.thought(ctx, answer, ChatEngine.lastSavedReplyId().orEmpty())
-                return
-            }
-        }
 
         val config = try { JSONObject(SecretStore.readRuntimeConfig(root)) } catch (e: Exception) {
             Log.e("Ruri", "Could not load model configuration", e)
@@ -108,27 +96,39 @@ object Thinker {
         val models = config.optJSONArray("models") ?: JSONArray()
         if (models.length() == 0) {
             state.put("last_thought", now)
-            persistStatePreservingTurnInFlight(root, state)
+            persistStatePreservingTurnInFlight(root, state, baselineState)
             return
         }
 
         val prompt = buildPrompt(ctx, root, state, reason, initiative)
         val current = config.optInt("current", 0)
         val task = if (initiative) Task.WARMTH else Task.REASON
-        val order = FreeModelRouter.orderedIndices(root, models, current, task)
+        val adult = RouteSelector.isAdultTopic(RouteSelector.latestCommanderText(root)) || RouteSelector.nsfwWindow(root)
+        val order = RouteSelector.orderedIndices(root, models, current, task, adult = adult)
         if (order.isEmpty()) {
             state.put("last_thought", now)
-            persistStatePreservingTurnInFlight(root, state)
+            persistStatePreservingTurnInFlight(root, state, baselineState)
             return
         }
         var reply: String? = null
         var successfulIndex = -1
         var successfulRouteId = ""
+        var followupRequests = 0
         for (index in order) {
             val model = models.optJSONObject(index) ?: continue
             // All cognition routes must carry the full memory context.
             if (model.optString("api_key").isBlank()) continue
             val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
+            val requestNext: (JSONArray) -> String? = { nextMessages ->
+                if (followupRequests >= 8) {
+                    appendEvent(root, "model_request_budget_exhausted", JSONObject()
+                        .put("route", routeId).put("limit", 8).put("cycle", "autonomous"))
+                    null
+                } else {
+                    followupRequests++
+                    ChatEngine.requestToolFollowup(model, nextMessages, root, routeId, task)
+                }
+            }
             runCatching { RouteMeta.recordAttempt(root, routeId) }
             val messages = JSONArray()
                 .put(JSONObject().put("role", "system").put("content", prompt))
@@ -137,7 +137,28 @@ object Thinker {
             var requestFailureClassified = false
             val initial = requestModel(model, messages, root, routeId, task) { requestFailureClassified = true }
             reply = if (initial.isNullOrBlank()) null else ToolLoop.unwrapDiaryReply(root, initial, messages) { next ->
-                ChatEngine.requestToolFollowup(model, next, root, routeId, task)
+                requestNext(next)
+            }
+            if (reply.isNullOrBlank() && !requestFailureClassified) {
+                messages.put(JSONObject().put("role", "system")
+                    .put("content", "Предыдущий ответ был действительно пустым. Ответь обычной русской прозой или верни write_diary с непустым полем text."))
+                val retry = requestNext(messages)
+                reply = if (retry.isNullOrBlank()) null else ToolLoop.unwrapDiaryReply(root, retry, messages) { next ->
+                    requestNext(next)
+                }
+                if (reply.isNullOrBlank()) {
+                    appendEvent(root, "thought_lost", JSONObject()
+                        .put("route", routeId)
+                        .put("reason", "truly_empty_after_retry"))
+                    runCatching { RouteMeta.recordFailure(root, routeId, "other", task) }
+                    continue
+                }
+            }
+            if (reply.isNullOrBlank() && requestFailureClassified) {
+                appendEvent(root, "model_error", JSONObject()
+                    .put("model", model.optString("name", "unknown"))
+                    .put("reason", "request_failed_no_immediate_retry"))
+                continue
             }
             if (!reply.isNullOrBlank() && initiative &&
                 RouteSelector.looksLikeRefusalOrDisclaimer(reply)) {
@@ -167,34 +188,59 @@ object Thinker {
 
         if (reply.isNullOrBlank()) {
             state.put("last_thought", now)
-            persistStatePreservingTurnInFlight(root, state)
+            persistStatePreservingTurnInFlight(root, state, baselineState)
             return
         }
         if (successfulIndex >= 0 && successfulIndex != current) {
             config.put("current", successfulIndex)
             SecretStore.saveRuntimeConfig(root, config.toString(2))
         }
-        val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(reply)
+        val (replyWithoutDecision, decision) = EmotionEngine.parseInitiativeDecision(reply)
+        val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(replyWithoutDecision)
         val emotion = if (emotionDelta != null) EmotionEngine.applyDelta(root, emotionDelta, "thought") else null
         val (cleanThought, diaryTexts, _) = ToolLoop.stripActions(cleanedReply)
-        val diaryText = cleanThought.ifBlank { diaryTexts.firstOrNull().orEmpty() }
+        val diaryText = cleanThought.ifBlank {
+            diaryTexts.firstOrNull() ?: ToolLoop.diaryActionText(cleanedReply).orEmpty()
+        }
         val safeReply = SecretRedactor.redactText(diaryText.trim())
-        if (safeReply.isBlank() || ToolLoop.isActionJson(safeReply)) {
+        if (safeReply.isBlank()) {
+            appendEvent(root, "thought_lost", JSONObject()
+                .put("reason", "truly_empty")
+                .put("route", successfulRouteId))
             state.put("last_thought", now)
-            persistStatePreservingTurnInFlight(root, state)
+            persistStatePreservingTurnInFlight(root, state, baselineState)
             return
         }
 
+        val drift = EmotionEngine.drift(root)
+        val mode = drift.optString("initiative_mode", "drive_chance")
+        val effective = when {
+            decision.startsWith("veto") && drift.optBoolean("veto_allowed", true) && mode != "strict_guarantee" -> "veto"
+            decision.startsWith("think") -> "think"
+            decision.startsWith("write") -> "write"
+            mode == "pure_autonomy" -> "think"
+            else -> "write"
+        }
+        if (initiative && effective != "write") {
+            val body = safeReply.ifBlank { cleanedReply }
+            Diary.append(root, body, reason, emotion, "thought")
+            if (effective == "veto") appendEvent(root, "initiative_vetoed",
+                JSONObject().put("reason", decision.ifBlank { "veto_without_reason" }))
+            state.put("last_thought", now)
+            persistStatePreservingTurnInFlight(root, state, baselineState)
+            return
+        }
+
+        OutcomeDigest.verifyClaims(root, safeReply)
         val notificationMessageId = if (initiative) {
             val messageId = appendChatMessage(root, "ruri", safeReply, now, ChatEngine.sourceUrlsSnapshot(), successfulRouteId)
-            Diary.append(root, safeReply, "инициатива", emotion, "said")
             messageId
         } else {
             if (Diary.isDuplicate(root, safeReply, "thought")) {
                 state.put("last_thought", now)
                 state.put("mood", EmotionEngine.moodLabel(EmotionEngine.readValues(root)))
                 state.put("energy", energyFor())
-                persistStatePreservingTurnInFlight(root, state)
+                persistStatePreservingTurnInFlight(root, state, baselineState)
                 return
             }
             Diary.append(root, safeReply, reason, emotion, "thought")
@@ -212,9 +258,23 @@ object Thinker {
         state.put("last_thought", now)
         state.put("mood", EmotionEngine.moodLabel(EmotionEngine.readValues(root)))
         state.put("energy", energyFor())
-        persistStatePreservingTurnInFlight(root, state)
+        persistStatePreservingTurnInFlight(root, state, baselineState)
         val stillInFlight = readJson(root, "memory/L4_state.json").optBoolean("turn_in_flight", false)
         if (!inFlight && !stillInFlight) Notifier.thought(ctx, safeReply, notificationMessageId)
+    }
+
+    internal fun shelfContextText(root: File, name: String): String {
+        val safe = ShelfWatcher.safeName(name) ?: return ""
+        val file = File(root, "shelf/" + safe)
+        if (!file.isFile) return ""
+        val bytes = runCatching { file.readBytes() }.getOrNull() ?: return ""
+        return if (Vision.mimeOf(bytes) != null) {
+            FileManager.read(root, "shelf/.desc/" + safe + ".txt")
+                .takeIf { it.isNotBlank() }?.take(900)
+                ?: "[изображение без описания: vision недоступен]"
+        } else {
+            FileManager.read(root, "shelf/" + safe).take(900)
+        }
     }
 
     private fun buildPrompt(ctx: Context, root: File, state: JSONObject, reason: String, initiative: Boolean): String {
@@ -252,7 +312,7 @@ object Thinker {
             val name = shelfNames.optString(i)
             if (name.isNotBlank()) {
                 shelfText.append("\n--- ").append(name).append(" ---\n")
-                    .append(FileManager.read(root, "shelf/" + name).take(900))
+                    .append(shelfContextText(root, name))
             }
         }
         // Commander explicitly enabled full notification context for Ruri's cognition.
@@ -290,6 +350,8 @@ object Thinker {
             }.take(4).asReversed().joinToString("\\n\\n")
         val summary = readJson(root, "memory/L3_summary.json").optString("summary")
         val quiet = hoursSince(state.optLong("last_seen_commander"), System.currentTimeMillis())
+        val outcomeDigest = OutcomeDigest.build(root)
+        OutcomeDigest.clearPresentedCorrection(root)
         val common = "Имя: " + character.optString("name") +
             ". Обозначение: " + character.optString("designation") + ". Личность: " + character.optString("persona") +
             ". Правила речи: " + character.optString("speech_rules") +
@@ -297,9 +359,12 @@ object Thinker {
             ". Длина ответа: " + character.optString("length_policy") +
             ". Эмоции: " + character.optString("emotions") +
             ". Регуляторы: " + (character.optJSONArray("regulators")?.toString() ?: "[]") +
+            ". Примеры разнообразного входа (варианты, не шаблоны): " + (character.optJSONArray("opening_exemplars")?.toString() ?: "[]") +
+            ". " + StyleGuard.repetitiveOpeningNote(root) +
             ". Запрещённые фразы: " + (character.optJSONArray("banned_phrases")?.toString() ?: "[]") + ".\n" +
             Capabilities.bodySection(root) + "\n" +
             EmotionEngine.promptSection(root) + "\n" +
+            outcomeDigest + "\n" +
             "Первый приоритет: " + priorities.optString("priority_1", "Жить") +
             ". Второй: " + priorities.optString("priority_2", "Любить Командира") + ".\n" +
             "Конституция: " + (constitution.optJSONArray("primary_needs")?.toString() ?: "[]") + ". Обе главные потребности равнозначны и неизменны.\n" +
@@ -338,9 +403,13 @@ object Thinker {
             val body = JSONObject()
                 .put("model", model.optString("model"))
                 .put("messages", messages)
-                .put("temperature", 0.85)
+                .put("temperature", 0.9)
+                .put("presence_penalty", 0.6)
+                .put("frequency_penalty", 0.4)
+                .put("seed", (System.currentTimeMillis() % 100000L).toInt())
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
+            RouteMeta.recordHttpStatus(root, routeId, code)
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
             val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             if (code !in 200..299) {
@@ -392,10 +461,40 @@ object Thinker {
         return true
     }
 
-    private fun persistStatePreservingTurnInFlight(root: File, state: JSONObject) {
-        state.put("turn_in_flight", readJson(root, "memory/L4_state.json")
-            .optBoolean("turn_in_flight", false))
-        FileManager.write(root, "memory/L4_state.json", state.toString(2))
+    private fun persistStatePreservingTurnInFlight(root: File, state: JSONObject, baseline: JSONObject) {
+        val desired = JSONObject(state.toString())
+        val before = JSONObject(baseline.toString())
+        val merged = FileManager.updateL4State(root) { current ->
+            val keys = LinkedHashSet<String>()
+            before.keys().forEach { keys.add(it) }
+            desired.keys().forEach { keys.add(it) }
+            keys.forEach { key ->
+                val beforeHas = before.has(key)
+                val desiredHas = desired.has(key)
+                val changed = beforeHas != desiredHas ||
+                    (beforeHas && jsonValueSignature(before.opt(key)) != jsonValueSignature(desired.opt(key)))
+                if (changed) {
+                    if (desiredHas) current.put(key, desired.opt(key)) else current.remove(key)
+                }
+            }
+        }
+        replaceJsonObject(state, merged)
+        replaceJsonObject(baseline, merged)
+    }
+
+    private fun jsonValueSignature(value: Any?): String = when (value) {
+        null, JSONObject.NULL -> "null"
+        is JSONObject, is JSONArray -> value.toString()
+        else -> value.toString()
+    }
+
+    private fun replaceJsonObject(target: JSONObject, source: JSONObject) {
+        target.keys().asSequence().toList().forEach { target.remove(it) }
+        val keys = source.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            target.put(key, source.opt(key))
+        }
     }
 
     private fun readJson(root: File, path: String): JSONObject =

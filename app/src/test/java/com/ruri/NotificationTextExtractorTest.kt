@@ -39,4 +39,22 @@ class NotificationTextExtractorTest {
         assertTrue(text.contains("Служба доставки"))
         assertTrue(text.contains("Заказ прибудет завтра"))
     }
+    @Test fun traversalStopsAfterBoundedNumberOfNotificationValues() {
+        var visited = 0
+        val huge = Iterable<Any?> {
+            object : Iterator<Any?> {
+                private var index = 0
+                override fun hasNext(): Boolean = index < 100_000
+                override fun next(): Any? {
+                    index++
+                    visited++
+                    return "notification-line-$index"
+                }
+            }
+        }
+        val result = NotificationTextExtractor.extractFromValues(mapOf("messages" to huge))
+        assertTrue(visited <= 100)
+        assertTrue(result.length <= 20_000)
+    }
+
 }

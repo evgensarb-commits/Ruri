@@ -193,4 +193,63 @@ class CapabilitiesHandsTest {
             assertTrue(prompt.contains("один JSON-объект"))
         } finally { root.deleteRecursively() }
     }
+class L4AtomicUpdateTest {
+    @Test fun concurrentFieldUpdatesAreNotLost() {
+        val root = bTestRoot("ruri-l4-atomic")
+        try {
+            FileManager.init(root)
+            val pool = java.util.concurrent.Executors.newFixedThreadPool(8)
+            val tasks = (0 until 8).map {
+                pool.submit {
+                    repeat(100) {
+                        FileManager.updateL4State(root) { state ->
+                            state.put("atomic_counter", state.optInt("atomic_counter", 0) + 1)
+                        }
+                    }
+                }
+            }
+            tasks.forEach { it.get() }
+            pool.shutdown()
+            assertEquals(800, JSONObject(FileManager.read(root, "memory/L4_state.json")).optInt("atomic_counter"))
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun malformedL4IsPreservedWhenAnAtomicUpdateIsAttempted() {
+        val root = bTestRoot("ruri-l4-corrupt")
+        try {
+            FileManager.init(root)
+            val file = File(root, "memory/L4_state.json")
+            file.writeText("{broken", Charsets.UTF_8)
+            val result = runCatching { FileManager.updateL4State(root) { it.put("onboarding_done", true) } }
+            assertTrue(result.isFailure)
+            assertEquals("{broken", file.readText(Charsets.UTF_8))
+        } finally { root.deleteRecursively() }
+    }
+}
+
+class PerMessageReplyAssociationTest {
+    @Test fun onlyTheTargetCommanderMessageIsMarkedAnswered() {
+        val root = bTestRoot("ruri-reply-association")
+        try {
+            FileManager.init(root)
+            FileManager.appendEvent(root, JSONObject().put("id", "commander-a")
+                .put("type", "message").put("who", "commander").put("text", "Первое").put("ts", 100L))
+            FileManager.appendEvent(root, JSONObject().put("id", "commander-b")
+                .put("type", "message").put("who", "commander").put("text", "Второе").put("ts", 200L))
+            assertTrue(ChatEngine.isCommanderMessage(root, "commander-a"))
+            assertTrue(ChatEngine.isCommanderMessage(root, "commander-b"))
+            assertFalse(ChatEngine.isCommanderMessage(root, "not-in-l0"))
+            CommanderReplyQueue.enqueue(root, "commander-a")
+            CommanderReplyQueue.enqueue(root, "commander-b")
+            val replyId = ChatEngine.appendFinalReply(root, "Ответ на первое", commanderMessageId = "commander-a")
+            val reply = FileManager.readLastLines(root, "memory/L0_raw.jsonl", 10)
+                .map { JSONObject(it) }.first { it.optString("id") == replyId }
+            assertEquals("commander-a", reply.optString("reply_to"))
+            assertTrue(CommanderReplyQueue.isAnswered(root, "commander-a"))
+            assertFalse(CommanderReplyQueue.isAnswered(root, "commander-b"))
+            assertEquals(1, CommanderReplyQueue.pendingCount(root))
+        } finally { root.deleteRecursively() }
+    }
+}
+
 }

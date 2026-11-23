@@ -49,7 +49,8 @@ object Diagnostics {
             val id = model.optString("id")
                 .ifBlank { model.optString("name").ifBlank { "route_$index" } }
             val meta = routeMetadata.optJSONObject(id) ?: JSONObject()
-            val dayCount = if (meta.optString("day_key") == utcDay) meta.optInt("day_count", 0) else 0
+            val sameDay = meta.optString("day_key") == utcDay
+            val dayCount = if (sameDay) meta.optInt("day_count", 0) else 0
             val route = JSONObject()
                 .put("name", model.optString("name", id))
                 .put("model", model.optString("model"))
@@ -62,6 +63,18 @@ object Diagnostics {
                 .put("in_cooldown", meta.optLong("cooldown_until", 0L) > now)
                 .put("cooldown_until", meta.optLong("cooldown_until", 0L))
                 .put("requests_today", dayCount)
+                .put("requests_lifetime", meta.optLong("lifetime_requests", dayCount.toLong()))
+                .put("successes_today", if (sameDay) meta.optInt("successes_today", 0) else 0)
+                .put("failures_today", if (sameDay) meta.optInt("failures_today", 0) else 0)
+                .put("rate_limits_today", if (sameDay) meta.optInt("rate_limits_today", 0) else 0)
+                .put("network_errors_today", if (sameDay) meta.optInt("network_errors_today", 0) else 0)
+                .put("region_restrictions_today", if (sameDay) meta.optInt("region_restrictions_today", 0) else 0)
+                .put("timeouts_today", if (sameDay) meta.optInt("timeouts_today", 0) else 0)
+                .put("http_responses_today", if (sameDay) meta.optInt("http_responses_today", 0) else 0)
+                .put("http_4xx_today", if (sameDay) meta.optInt("http_4xx_today", 0) else 0)
+                .put("http_5xx_today", if (sameDay) meta.optInt("http_5xx_today", 0) else 0)
+                .put("last_http_status", if (meta.has("last_http_status")) meta.opt("last_http_status") else JSONObject.NULL)
+                .put("last_failure_kind", meta.optString("last_failure_kind"))
                 .put("requests_per_day", model.optInt("rpd", 200))
                 .put("quota_remaining", (model.optInt("rpd", 200) - dayCount).coerceAtLeast(0))
                 .put("last_reachability_at", meta.optLong("last_reachability_at", 0L))
@@ -70,6 +83,41 @@ object Diagnostics {
                 .put("last_success", meta.optLong("last_ok", 0L))
             routes.put(id, route)
         }
+        var requestsTodayTotal = 0
+        var requestsLifetimeTotal = 0L
+        var successesTodayTotal = 0
+        var failuresTodayTotal = 0
+        var rateLimitsTodayTotal = 0
+        var networkErrorsTodayTotal = 0
+        var regionRestrictionsTodayTotal = 0
+        var timeoutsTodayTotal = 0
+        var http4xxTodayTotal = 0
+        var http5xxTodayTotal = 0
+        val routeIds = routes.keys()
+        while (routeIds.hasNext()) {
+            val route = routes.optJSONObject(routeIds.next()) ?: continue
+            requestsTodayTotal += route.optInt("requests_today", 0)
+            requestsLifetimeTotal += route.optLong("requests_lifetime", 0L)
+            successesTodayTotal += route.optInt("successes_today", 0)
+            failuresTodayTotal += route.optInt("failures_today", 0)
+            rateLimitsTodayTotal += route.optInt("rate_limits_today", 0)
+            networkErrorsTodayTotal += route.optInt("network_errors_today", 0)
+            regionRestrictionsTodayTotal += route.optInt("region_restrictions_today", 0)
+            timeoutsTodayTotal += route.optInt("timeouts_today", 0)
+            http4xxTodayTotal += route.optInt("http_4xx_today", 0)
+            http5xxTodayTotal += route.optInt("http_5xx_today", 0)
+        }
+        result.put("model_requests", JSONObject()
+            .put("today_total", requestsTodayTotal)
+            .put("lifetime_total", requestsLifetimeTotal)
+            .put("successes_today", successesTodayTotal)
+            .put("failures_today", failuresTodayTotal)
+            .put("rate_limits_429_today", rateLimitsTodayTotal)
+            .put("network_errors_today", networkErrorsTodayTotal)
+            .put("region_restrictions_today", regionRestrictionsTodayTotal)
+            .put("timeouts_today", timeoutsTodayTotal)
+            .put("http_4xx_today", http4xxTodayTotal)
+            .put("http_5xx_today", http5xxTodayTotal))
         result.put("routes", routes)
         result.put("current_route", config.optInt("current", -1))
         result.put("exclusive_route", config.optBoolean("exclusive_route", false))

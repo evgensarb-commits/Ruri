@@ -23,6 +23,9 @@ object Notifier {
         }
     }
 
+    internal fun notificationIdFor(messageId: String?): Int =
+        messageId?.takeIf { it.isNotBlank() }?.hashCode() ?: System.currentTimeMillis().hashCode()
+
     fun thought(ctx: Context, text: String, messageId: String? = null) {
         try {
             if (Build.VERSION.SDK_INT >= 33 &&
@@ -45,7 +48,7 @@ object Notifier {
                 .setAutoCancel(true)
                 .build()
             (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
-                .notify(THOUGHT_NOTIFICATION_ID, notification)
+                .notify(notificationIdFor(messageId), notification)
         } catch (e: SecurityException) {
             android.util.Log.w("Ruri", "Notification permission denied", e)
         } catch (e: Exception) {

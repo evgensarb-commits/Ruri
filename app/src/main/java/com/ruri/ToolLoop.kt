@@ -6,19 +6,59 @@ import java.io.File
 
 /** Shared action protocol and prose guard for interactive and autonomous model turns. */
 object ToolLoop {
-    private val allowed = setOf("search", "list_shelf", "read_shelf", "recall", "remember_fact", "read_url")
+    private val allowed = setOf("search", "list_shelf", "read_shelf", "recall", "remember_fact", "read_url", "self_check")
 
-    private val actionBlock = Regex("\\{[^{}]*?\\\"action\\\"\\s*:\\s*\\\"[a-z_]+\\\"[^{}]*?\\}")
+    private fun extractJsonObjects(text: String): List<String> {
+        val out = mutableListOf<String>()
+        var i = 0
+        while (i < text.length) {
+            if (text[i] != '{') { i++; continue }
+            var depth = 0
+            var j = i
+            var inStr = false
+            var esc = false
+            while (j < text.length) {
+                val c = text[j]
+                if (inStr) {
+                    if (esc) esc = false
+                    else if (c == '\\') esc = true
+                    else if (c == '"') inStr = false
+                } else when (c) {
+                    '"' -> inStr = true
+                    '{' -> depth++
+                    '}' -> {
+                        depth--
+                        if (depth == 0) {
+                            out.add(text.substring(i, j + 1))
+                            break
+                        }
+                    }
+                }
+                j++
+            }
+            i = j + 1
+        }
+        return out
+    }
 
     fun stripActions(reply: String): Triple<String, List<String>, List<JSONObject>> {
+        val direct = parseJsonAction(reply)
+        if (direct != null) {
+            val text = direct.optString("text").trim()
+            val diary = if (direct.optString("action") in setOf("write_diary", "diary") && text.isNotBlank())
+                listOf(SecretRedactor.redactText(text)) else emptyList()
+            val tools = if (direct.optString("action") in allowed) listOf(direct) else emptyList()
+            return Triple("", diary, tools)
+        }
         val diary = mutableListOf<String>(); val tools = mutableListOf<JSONObject>()
         var cleaned = reply
-        for (match in actionBlock.findAll(reply)) {
-            cleaned = cleaned.replace(match.value, "")
-            val action = runCatching { JSONObject(match.value) }.getOrNull() ?: continue
+        for (objectText in extractJsonObjects(reply)) {
+            val action = runCatching { JSONObject(objectText) }.getOrNull()
+                ?.takeIf { it.has("action") } ?: continue
+            cleaned = cleaned.replace(objectText, "")
             when (action.optString("action")) {
                 "write_diary", "diary" -> action.optString("text").trim().takeIf { it.isNotBlank() }?.let(diary::add)
-                "search", "list_shelf", "read_shelf", "recall", "remember_fact", "read_url" -> tools.add(action)
+                "search", "list_shelf", "read_shelf", "recall", "remember_fact", "read_url", "self_check" -> tools.add(action)
                 else -> Unit
             }
         }
@@ -35,9 +75,16 @@ object ToolLoop {
     ): String {
         var current = reply
         var hops = 0
+        fun finish(value: String): String {
+            if (hops > 0) EmotionEngine.onActiveTask(root)
+            return value
+        }
         while (true) {
-            val action = ChatEngine.parseAction(current) ?: return current
-            if (hops >= 3) return current
+            val action = ChatEngine.parseAction(current) ?: return finish(current)
+            if (hops >= 64) return finish(
+                "Не удалось завершить чтение: достигнут лимит 64 последовательных действий. " +
+                    "Файл прочитан не полностью; я не буду утверждать обратное."
+            )
             val name = action.optString("action")
             val params = JSONObject(action.toString()).apply { remove("action") }
             FileManager.appendEvent(root, SecretRedactor.redactEvent(
@@ -63,7 +110,7 @@ object ToolLoop {
                     meta.put("source_urls", urls)
                 }
             }
-            val safeText = SecretRedactor.redactText(result.second).take(4000)
+            val safeText = SecretRedactor.redactText(result.second).take(if (name == "read_shelf") 7600 else 4000)
             FileManager.appendEvent(root, SecretRedactor.redactEvent(
                 JSONObject().put("type", "tool_result").put("action", name)
                     .put("ok", result.first).put("text", safeText)
@@ -75,14 +122,20 @@ object ToolLoop {
                     "Инструмент ${name} вернул ошибку или пустой результат. НЕ утверждай, что действие выполнено успешно. Скажи честно, что не удалось, и предложи альтернативу."))
             }
             hops++
-            if (hops == 3) messages.put(JSONObject().put("role", "system")
+            if (hops == 64) messages.put(JSONObject().put("role", "system")
                 .put("content", "Лимит инструментов исчерпан — ответь обычной прозой"))
-            current = requestNext(messages) ?: return "Не удалось получить ответ после выполнения инструмента."
+            current = requestNext(messages) ?: return finish("Не удалось получить ответ после выполнения инструмента.")
         }
     }
 
     fun executeTool(root: File, action: String, params: JSONObject): Pair<Boolean, String> =
         ChatEngine.executeTool(root, action, params)
+
+    internal fun diaryActionText(raw: String): String? {
+        val action = parseJsonAction(raw) ?: return null
+        if (action.optString("action") !in setOf("write_diary", "diary")) return null
+        return action.optString("text").trim().takeIf { it.isNotBlank() }?.let { SecretRedactor.redactText(it) }
+    }
 
     fun unwrapDiaryReply(
         root: File,
@@ -102,7 +155,7 @@ object ToolLoop {
                 toolLoopRun = true
                 reply = runToolLoop(root, reply, messages, meta, requestNext = requestNext)
             } else if (action == "write_diary" || action == "diary") {
-                return reply.trim()
+                return diaryActionText(reply).orEmpty()
             } else if (json.has("text") && json.opt("text") is String) {
                 return SecretRedactor.redactText(json.optString("text").trim())
             } else {
@@ -116,6 +169,26 @@ object ToolLoop {
     }
 
     internal fun isActionJson(raw: String): Boolean = parseJsonAction(raw) != null
+
+    internal fun isJsonOnly(raw: String): Boolean {
+        val trimmed = raw.trim()
+        val candidate = if (trimmed.startsWith("```") && trimmed.endsWith("```")) {
+            trimmed.substringAfter('\n', "").substringBeforeLast("```").trim()
+                .removePrefix("json").trim()
+        } else trimmed
+        if (!candidate.startsWith("{") && !candidate.startsWith("[")) return false
+        return runCatching { JSONObject(candidate); true }.getOrElse {
+            runCatching { JSONArray(candidate); true }.getOrDefault(false)
+        }
+    }
+
+    /** Visible prose only; JSON-only/action-only responses are not user-facing answers. */
+    internal fun proseCandidate(raw: String): String? {
+        if (raw.isBlank()) return null
+        val cleaned = stripActions(raw).first.trim()
+        if (cleaned.isBlank() || isActionJson(cleaned) || isJsonOnly(cleaned)) return null
+        return cleaned
+    }
 
     private fun parseJsonAction(raw: String): JSONObject? {
         val trimmed = raw.trim()

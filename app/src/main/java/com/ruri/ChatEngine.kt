@@ -15,18 +15,123 @@ object ChatEngine {
     const val OFFLINE_REPLY = "Связи нет. Отвечу, когда она вернётся."
     @Volatile private var lastSearchSourceUrls = JSONArray()
     @Volatile private var lastFinalMessageId: String? = null
+    private val responseLock = Any()
 
-    fun respond(root: File): String {
+    internal class ModelRequestFailure(
+        message: String,
+        val retryAfterMs: Long = 0L,
+        val failureKind: String = "provider"
+    ) : IllegalStateException(message)
+
+    fun respond(root: File, commanderMessageId: String? = null): String = synchronized(responseLock) {
         lastFinalMessageId = null
+        var queueHead = CommanderReplyQueue.firstPending(root)
+        while (queueHead != null) {
+            val headId = queueHead.optString("message_id")
+            if (Tombstone.isDeleted(root, headId)) {
+                CommanderReplyQueue.markDeleted(root, headId)
+                queueHead = CommanderReplyQueue.firstPending(root)
+                continue
+            }
+            val saved = findSavedReply(root, headId)
+            if (saved != null) {
+                CommanderReplyQueue.markAnswered(root, headId, saved.first)
+                updateLastSeenCommander(root, headId)
+                OfflineQueue.clear(root)
+                queueHead = CommanderReplyQueue.firstPending(root)
+                continue
+            }
+            break
+        }
+        val requestedId = commanderMessageId?.takeIf { it.isNotBlank() }
+        if (queueHead != null) {
+            val headId = queueHead.optString("message_id")
+            if (requestedId != null && requestedId != headId) {
+                val delay = CommanderReplyQueue.nextDelayMs(root) ?: 1_000L
+                throw ModelRequestFailure(
+                    "Перед этим сообщением в очереди есть более раннее сообщение Командира",
+                    delay.coerceAtLeast(1_000L),
+                    "queued"
+                )
+            }
+            val delay = queueHead.optLong("next_attempt_at", 0L) - System.currentTimeMillis()
+            if (delay > 0L) {
+                throw ModelRequestFailure(
+                    "Предыдущее сообщение ожидает разрешённого времени повторной попытки",
+                    delay,
+                    queueHead.optString("last_error_kind", "queued")
+                )
+            }
+        }
+        val targetId = queueHead?.optString("message_id")?.takeIf { it.isNotBlank() }
+            ?: requestedId ?: latestCommanderMessageId(root)
+        if (!targetId.isNullOrBlank()) {
+            findSavedReply(root, targetId)?.let { (id, text) ->
+                lastFinalMessageId = id
+                CommanderReplyQueue.markAnswered(root, targetId, id)
+                updateLastSeenCommander(root, targetId)
+                OfflineQueue.clear(root)
+                return@synchronized text
+            }
+            CommanderReplyQueue.recordAttempt(root, targetId)
+        }
         setTurnInFlight(root, true)
-        return try { respondInternal(root, allowRecovery = true) }
-        finally { setTurnInFlight(root, false) }
+        try {
+            respondInternal(root, allowRecovery = true, commanderMessageId = targetId)
+        } catch (e: Exception) {
+            if (!targetId.isNullOrBlank()) {
+                val retryAfter = (e as? ModelRequestFailure)?.retryAfterMs ?: 0L
+                val kind = (e as? ModelRequestFailure)?.failureKind ?: "unexpected"
+                CommanderReplyQueue.recordFailure(root, targetId, kind, retryAfter)
+                OfflineQueue.markPending(root, targetId)
+            }
+            throw e
+        } finally {
+            setTurnInFlight(root, false)
+        }
+    }
+
+    private fun latestCommanderMessageId(root: File): String? =
+        FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 1000)
+            .asReversed().asSequence().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+            .firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" &&
+                !Tombstone.isDeleted(root, it.optString("id")) }
+            ?.optString("id")?.takeIf { it.isNotBlank() }
+
+    private fun findSavedReply(root: File, commanderMessageId: String): Pair<String, String>? =
+        FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 2000)
+            .asReversed().asSequence().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+            .firstOrNull { it.optString("type") == "message" && it.optString("who") == "ruri" &&
+                it.optString("reply_to") == commanderMessageId }
+            ?.let { it.optString("id") to it.optString("text") }
+
+    private fun updateLastSeenCommander(root: File, messageId: String) {
+        val commander = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 5000)
+            .asReversed().asSequence().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+            .firstOrNull {
+                it.optString("id") == messageId && it.optString("type") == "message" &&
+                    it.optString("who") == "commander"
+            } ?: return
+        val commanderTs = commander.optLong("ts", commander.optLong("timestamp", System.currentTimeMillis()))
+        FileManager.updateL4State(root) { state ->
+            state.put("last_seen_commander", maxOf(state.optLong("last_seen_commander", 0L), commanderTs))
+        }
+    }
+
+    internal fun isCommanderMessage(root: File, messageId: String): Boolean {
+        if (messageId.isBlank()) return false
+        return FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 5000)
+            .any { line ->
+                runCatching { JSONObject(line) }.getOrNull()?.let { event ->
+                    event.optString("id") == messageId &&
+                        event.optString("type") == "message" &&
+                        event.optString("who") == "commander"
+                } == true
+            }
     }
 
     internal fun setTurnInFlight(root: File, value: Boolean) {
-        val state = readJson(root, "memory/L4_state.json")
-        state.put("turn_in_flight", value)
-        FileManager.write(root, "memory/L4_state.json", state.toString(2))
+        FileManager.updateL4State(root) { it.put("turn_in_flight", value) }
     }
 
     internal fun lastSavedReplyId(): String? = lastFinalMessageId
@@ -34,7 +139,12 @@ object ChatEngine {
     internal fun shouldIncludeInChatHistory(root: File, event: JSONObject): Boolean =
         event.optString("type") == "message" && !Tombstone.isDeleted(root, event.optString("id"))
 
-    private fun respondInternal(root: File, allowRecovery: Boolean, assumeReachable: Boolean = false): String {
+    private fun respondInternal(
+        root: File,
+        allowRecovery: Boolean,
+        assumeReachable: Boolean = false,
+        commanderMessageId: String? = null
+    ): String {
         val config = JSONObject(SecretStore.readRuntimeConfig(root))
         val models = config.optJSONArray("models") ?: JSONArray()
         val current = config.optInt("current", -1)
@@ -42,7 +152,7 @@ object ChatEngine {
             val reachableOrder = RouteSelector.orderedIndices(
                 root, models, current, Task.CHAT, online = true, vpn = NetState.vpn
             )
-            if (reachableOrder.isNotEmpty()) return respondInternal(root, allowRecovery = false, assumeReachable = true)
+            if (reachableOrder.isNotEmpty()) return respondInternal(root, allowRecovery = false, assumeReachable = true, commanderMessageId = commanderMessageId)
             OfflineQueue.markPending(root)
             val selected = models.optJSONObject(current)
             val name = selected?.optString("name")?.takeIf { it.isNotBlank() } ?: "выбранный маршрут"
@@ -53,7 +163,7 @@ object ChatEngine {
                 selected.optString("api_key").isBlank() -> "Маршрут $name: API-ключ не задан"
                 else -> "Маршрут $name: Android сообщает, что сетевого подключения нет"
             }
-            return reason
+            throw ModelRequestFailure(reason, 60_000L, "no_route")
         }
         if (models.length() == 0) {
             OfflineQueue.markPending(root)
@@ -108,6 +218,8 @@ object ChatEngine {
             }.getOrNull()
         }.take(12).asReversed().joinToString("\n")
         val bannedPhrases = character.optJSONArray("banned_phrases") ?: JSONArray()
+        val outcomeDigest = OutcomeDigest.build(root)
+        OutcomeDigest.clearPresentedCorrection(root)
         val system = "Имя: ${character.optString("name")}; обозначение: ${character.optString("designation")}. " +
             "Личность: ${character.optString("persona")}. " +
             "Непрерывность: ${character.optString("continuity_rules")}. " +
@@ -115,9 +227,12 @@ object ChatEngine {
             "Длина ответа: ${character.optString("length_policy")}. " +
             "Эмоции: ${character.optString("emotions")}. " +
             "Регуляторы характера: ${character.optJSONArray("regulators") ?: JSONArray()}. " +
+            "Примеры разнообразного входа (варианты, не шаблоны): ${character.optJSONArray("opening_exemplars") ?: JSONArray()}. " +
+            StyleGuard.repetitiveOpeningNote(root) + " " +
             "Фразы, которые нельзя использовать: ${bannedPhrases}. " +
             Capabilities.bodySection(root) + " " +
             EmotionEngine.promptSection(root) + " " +
+            outcomeDigest + " " +
             "Не выдумывай факты, отделяй воспоминания от предположений. " +
             "Приоритеты: ${priorities.optString("priority_1", "Жить")}; ${priorities.optString("priority_2", "Любить Командира")}. " +
             "Конституция: ${constitution.optJSONArray("primary_needs") ?: JSONArray()}. " +
@@ -132,26 +247,32 @@ object ChatEngine {
 
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", system))
         val lines = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 4000)
-        val history = lines.asReversed().mapNotNull { line ->
+        val newestFirstHistory = lines.asReversed().mapNotNull { line ->
             try {
                 val event = JSONObject(line)
                 if (!shouldIncludeInChatHistory(root, event)) return@mapNotNull null
                 val text = event.optString("text").trim()
                 if (text.isBlank()) return@mapNotNull null
                 val role = if (event.optString("who") == "ruri") "assistant" else "user"
-                JSONObject().put("role", role).put(
-                    "content",
-                    text
-                )
+                JSONObject().put("role", role).put("content", text)
+                    .put("_ruri_event_id", event.optString("id"))
             } catch (_: Exception) { null }
-        }.take(14).reversed()
+        }
+        val targetPosition = if (commanderMessageId.isNullOrBlank()) 0
+            else newestFirstHistory.indexOfFirst { it.optString("_ruri_event_id") == commanderMessageId }
+        if (!commanderMessageId.isNullOrBlank() && targetPosition < 0) {
+            throw IllegalStateException("Сообщение Командира не найдено в L0; оно осталось в очереди")
+        }
+        val history = (if (targetPosition >= 0) newestFirstHistory.drop(targetPosition) else newestFirstHistory)
+            .take(14).reversed()
         if (history.isEmpty() || history.last().optString("role") != "user") {
             throw IllegalStateException("Не найдено последнее сообщение командира")
         }
         val commanderText = history.last().optString("content")
-        EmotionEngine.onCommanderMessage(root, commanderText)
+        EmotionEngine.onCommanderMessage(root, commanderText, history.last().optString("_ruri_event_id"))
         val task = RouteSelector.detectTask(commanderText)
-        fun selectOrder(online: Boolean): List<Int> = RouteSelector.orderedIndices(root, models, current, task, online, NetState.vpn)
+        val adult = RouteSelector.isAdultTopic(commanderText) || RouteSelector.nsfwWindow(root)
+        fun selectOrder(online: Boolean): List<Int> = RouteSelector.orderedIndices(root, models, current, task, online, NetState.vpn, adult)
         var order = selectOrder(NetState.online || assumeReachable)
         if (order.isEmpty()) {
             OfflineQueue.markPending(root)
@@ -179,15 +300,31 @@ object ChatEngine {
                     .put("content", "Ассоциативно найденные воспоминания. Используй их, если они относятся к вопросу. Не выдавай предположения за точные воспоминания; при необходимости обозначай неопределённость.\n" + recalled)
             )
         }
-        history.forEach { messages.put(it) }
+        val assistantHistoryCount = history.count { it.optString("role") == "assistant" }
+        var assistantHistoryIndex = 0
+        history.forEach { item ->
+            val providerMessage = JSONObject(item.toString())
+            providerMessage.remove("_ruri_event_id")
+            if (providerMessage.optString("role") == "assistant") {
+                val content = providerMessage.optString("content")
+                providerMessage.put("content", StyleGuard.stripOlderOpening(
+                    "ruri", assistantHistoryIndex, assistantHistoryCount, content
+                ))
+                assistantHistoryIndex++
+            }
+            messages.put(providerMessage)
+        }
         if (!hasFullMemoryContext(messages)) {
             OfflineQueue.markPending(root)
             throw IllegalStateException("Полная память не собрана; запрос к модели не отправлен")
         }
 
         var lastError = "Все настроенные модели недоступны"
+        var retryAfterMs = 0L
+        var lastFailureKind = "provider"
         var hadNetworkAttempt = false
         var allFailuresNetwork = true
+        var followupRequests = 0
         for (index in requestOrder) {
             val attempt = (attemptsByModel[index] ?: 0) + 1
             attemptsByModel[index] = attempt
@@ -207,6 +344,17 @@ object ChatEngine {
                     OfflineQueue.markPending(root)
                     throw IllegalStateException("Полная память не прошла проверку; запрос к маршруту не отправлен")
                 }
+            val requestNext: (JSONArray) -> String? = { nextMessages ->
+                if (followupRequests >= 12) {
+                    throw ModelRequestFailure(
+                        "Достигнут безопасный лимит 12 дополнительных запросов к модели за один ответ; сообщение останется в очереди",
+                        60_000L,
+                        "followup_budget"
+                    )
+                }
+                followupRequests++
+                requestToolFollowup(model, nextMessages, root, routeId, task)
+            }
             hadNetworkAttempt = true
             runCatching { RouteMeta.recordAttempt(root, routeId) }
             var connection: HttpURLConnection? = null
@@ -257,7 +405,10 @@ object ChatEngine {
                 val body = JSONObject()
                     .put("model", model.optString("model"))
                     .put("messages", safeProviderMessages)
-                    .put("temperature", 0.85)
+                    .put("temperature", 0.9)
+                    .put("presence_penalty", 0.6)
+                    .put("frequency_penalty", 0.4)
+                    .put("seed", (System.currentTimeMillis() % 100000L).toInt())
                 stage = "WRITE"
                 diagnostic.put("stage", stage)
                 val writeStart = SystemClock.elapsedRealtime()
@@ -267,6 +418,7 @@ object ChatEngine {
                 diagnostic.put("stage", stage)
                 val responseStart = SystemClock.elapsedRealtime()
                 val code = connection.responseCode
+                RouteMeta.recordHttpStatus(root, routeId, code)
                 diagnostic.put("response_wait_ms", SystemClock.elapsedRealtime() - responseStart)
                 diagnostic.put("http_status", code)
                 val stream = if (code in 200..299) connection.inputStream else connection.errorStream
@@ -283,6 +435,16 @@ object ChatEngine {
                     diagnostic.put("stage", "HTTP")
                     diagnostic.put("result", "http_error")
                     val failureKind = RouteSelector.classify(code, null, responseText)
+                    if (code == 429) {
+                        val parsedRetryAfter = parseRetryAfterMillis(connection.getHeaderField("Retry-After"))
+                        retryAfterMs = maxOf(retryAfterMs, parsedRetryAfter.takeIf { it > 0L } ?: 60_000L)
+                        lastFailureKind = "rate_limit"
+                    } else if (code in 500..599) {
+                        retryAfterMs = maxOf(retryAfterMs, parseRetryAfterMillis(connection.getHeaderField("Retry-After")))
+                        lastFailureKind = "http_$code"
+                    } else {
+                        lastFailureKind = "http_$code"
+                    }
                     runCatching { RouteMeta.recordFailure(root, routeId, failureKind, task) }
                     lastError = RouteRecovery.describeHttpError(model.optString("name", model.optString("id")), code, failureKind)
                     diagnostic.put("failure_message", lastError)
@@ -305,6 +467,7 @@ object ChatEngine {
             val initialReply = responseJson.getJSONArray("choices")
                     .getJSONObject(0).getJSONObject("message").getString("content").trim()
                 if (initialReply.isBlank()) {
+                    runCatching { RouteMeta.recordFailure(root, routeId, "empty_response", task) }
                     diagnostic.put("result", "empty_reply")
                     NetworkDiagnostics.record(root, diagnostic)
                     lastError = "Модель вернула пустой ответ"
@@ -313,30 +476,45 @@ object ChatEngine {
                 }
                 val meta = JSONObject()
                 lastSearchSourceUrls = JSONArray()
-                val rawReply = ToolLoop.unwrapDiaryReply(root, initialReply, messages, meta) { nextMessages ->
-                    requestToolFollowup(model, nextMessages, root, routeId, task)
-                }
-                val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(rawReply)
+                val initialDiaryText = ToolLoop.diaryActionText(initialReply)
+                val rawReply = if (initialDiaryText != null) "" else
+                    ToolLoop.unwrapDiaryReply(root, initialReply, messages, meta) { nextMessages ->
+                        requestNext(nextMessages)
+                    }
+                val (replyWithoutDecision, _) = EmotionEngine.parseInitiativeDecision(rawReply)
+                val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(replyWithoutDecision)
                 val emotion = if (emotionDelta != null) EmotionEngine.applyDelta(root, emotionDelta, "chat") else null
                 var finalReply = cleanedReply
                 var guard = 0
-                while (guard < 2) {
+                while (guard < 12) {
                     val (clean, diaryTexts, toolActions) = ToolLoop.stripActions(finalReply)
-                    diaryTexts.forEach { Diary.append(root, it, "chat_write_diary", emotion, "thought") }
+                    diaryTexts.forEach { routeChatDiaryAction(root, it, emotion) }
                     if (toolActions.isEmpty()) { finalReply = clean; break }
                     toolActions.forEach { action ->
                         val name = action.optString("action")
                         val toolResult = executeTool(root, name, action)
                         FileManager.appendEvent(root, SecretRedactor.redactEvent(JSONObject().put("type", "tool_call").put("action", name).put("params", action)))
                         FileManager.appendEvent(root, SecretRedactor.redactEvent(JSONObject().put("type", "tool_result").put("action", name).put("ok", toolResult.first).put("text", toolResult.second.take(4000))))
-                        messages.put(JSONObject().put("role", "user").put("content", "[ИНСТРУМЕНТ $name]: ${toolResult.second.take(4000)}"))
+                        messages.put(JSONObject().put("role", "user").put("content", "[ИНСТРУМЕНТ $name]: ${toolResult.second.take(if (name == "read_shelf") 7600 else 4000)}"))
                     }
-                    finalReply = requestToolFollowup(model, messages, root, routeId, task) ?: clean
+                    finalReply = requestNext(messages) ?: clean
                     guard++
                 }
                 val (cleanFinal, tailDiary, _) = ToolLoop.stripActions(finalReply)
-                tailDiary.forEach { Diary.append(root, it, "chat_write_diary", emotion, "thought") }
-                val reply = cleanFinal.ifBlank { finalReply }
+                tailDiary.forEach { routeChatDiaryAction(root, it, emotion) }
+                if (initialDiaryText != null) routeChatDiaryAction(root, initialDiaryText, emotion)
+                var proseReply = if (initialDiaryText == null) ToolLoop.proseCandidate(cleanFinal) else null
+                if (proseReply.isNullOrBlank() && initialDiaryText == null && tailDiary.isEmpty()) {
+                    messages.put(JSONObject().put("role", "system")
+                        .put("content", "Предыдущий ответ был действительно пустым. Ответь обычной прозой без JSON или верни write_diary с непустым text."))
+                    val retry = requestNext(messages).orEmpty()
+                    val (retryClean, retryDiary, _) = ToolLoop.stripActions(retry)
+                    retryDiary.forEach { routeChatDiaryAction(root, it, emotion) }
+                    proseReply = ToolLoop.proseCandidate(retryClean)
+                }
+                val diaryFallback = initialDiaryText ?: tailDiary.firstOrNull()
+                    ?: ToolLoop.diaryActionText(finalReply).orEmpty()
+                val reply = resolveChatReply(cleanFinal, diaryFallback)
                 if (recordAdultRefusal(
                         root = root,
                         routeId = routeId,
@@ -354,13 +532,11 @@ object ChatEngine {
                 NetworkDiagnostics.record(root, diagnostic)
                 runCatching { RouteMeta.recordSuccess(root, routeId, task) }
                 // Never persist a raw action object as a chat message.
-                if (reply.isBlank() || ToolLoop.isActionJson(reply)) {
-                    throw IllegalStateException("Модель не вернула обычный текстовый ответ после инструментов")
-                }
+                OutcomeDigest.verifyClaims(root, reply)
                 // Keep Routeway as primary; fallback success is temporary, not a reconfiguration.
                 appendFinalReply(
                     root, reply, emotion, meta,
-                    routeId
+                    routeId, commanderMessageId
                 )
                 runCatching { BackupPolicy.checkpointState(root) }
                 runCatching { OfflineQueue.clear(root) }
@@ -374,12 +550,19 @@ object ChatEngine {
                 diagnostic.put("error_type", e.javaClass.simpleName)
                 if (e is UnknownHostException) diagnostic.put("dns_status", "failed")
                 if (e is SocketTimeoutException) diagnostic.put("timeout_stage", stage)
-                val failureKind = RouteSelector.classify(null, e)
-                runCatching { RouteMeta.recordFailure(root, routeId, failureKind, task) }
+                val failureKind = (e as? ModelRequestFailure)?.failureKind
+                    ?: RouteSelector.classify(null, e)
+                if (e is ModelRequestFailure) {
+                    retryAfterMs = maxOf(retryAfterMs, e.retryAfterMs)
+                    lastFailureKind = e.failureKind
+                } else {
+                    runCatching { RouteMeta.recordFailure(root, routeId, failureKind, task) }
+                }
                 if (!RouteRecovery.isNetworkFailure(failureKind)) allFailuresNetwork = false
                 lastError = RouteRecovery.describeException(model.optString("name", model.optString("id")), stage, e, failureKind)
                 diagnostic.put("failure_message", lastError)
                 NetworkDiagnostics.record(root, diagnostic)
+                if (failureKind == "followup_budget") break
                 if (e is SocketTimeoutException) retryableModels.add(index)
                 else retryableModels.remove(index)
                 android.util.Log.w("Ruri", "Chat model failed at $stage: ${e.javaClass.simpleName}")
@@ -389,12 +572,22 @@ object ChatEngine {
         }
         if (hadNetworkAttempt && allFailuresNetwork && allowRecovery && Probe.claimRecoveryRefresh()) {
             Probe.refreshReachability(root, models, topOnly = false, force = true)
-            return respondInternal(root, allowRecovery = false, assumeReachable = true)
+            return respondInternal(root, allowRecovery = false, assumeReachable = true, commanderMessageId = commanderMessageId)
         }
         OfflineQueue.markPending(root)
-        throw IllegalStateException(lastError)
+        throw ModelRequestFailure(lastError, retryAfterMs, lastFailureKind)
     }
 
+    internal fun parseRetryAfterMillis(value: String?, now: Long = System.currentTimeMillis()): Long {
+        val raw = value?.trim().orEmpty()
+        if (raw.isBlank()) return 0L
+        raw.toLongOrNull()?.let { return (it.coerceAtLeast(0L) * 1000L).coerceAtMost(24L * 60L * 60L * 1000L) }
+        return runCatching {
+            val date = java.time.ZonedDateTime.parse(raw, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME)
+                .toInstant().toEpochMilli()
+            (date - now).coerceAtLeast(0L).coerceAtMost(24L * 60L * 60L * 1000L)
+        }.getOrDefault(0L)
+    }
 
     internal fun providerMessagesWithFullMemory(messages: JSONArray): JSONArray? {
         if (!hasFullMemoryContext(messages)) return null
@@ -418,6 +611,17 @@ object ChatEngine {
         return hasMemoryLayers && hasRecallTool && hasConversation
     }
 
+    internal fun routeChatDiaryAction(root: File, rawText: String, emotion: JSONObject? = null) {
+        val safe = SecretRedactor.redactText(rawText.trim())
+        if (safe.isNotBlank()) Diary.append(root, safe, "chat_write_diary", emotion, "thought")
+    }
+
+    internal fun resolveChatReply(cleanReply: String, diaryFallback: String): String {
+        return ToolLoop.proseCandidate(cleanReply)?.takeIf { it.isNotBlank() }
+            ?: SecretRedactor.redactText(diaryFallback.trim()).takeIf { it.isNotBlank() }
+            ?: "(не смогла сформулировать ответ)"
+    }
+
     internal fun parseAction(reply: String): JSONObject? {
         val trimmed = reply.trim()
         val fenced = Regex("(?is)^```(?:json)?\\s*(\\{.*\\})\\s*```$").find(trimmed)
@@ -429,20 +633,25 @@ object ChatEngine {
             "search", "recall" -> setOf("action", "query")
             "read_url" -> setOf("action", "url")
             "list_shelf" -> setOf("action")
-            "read_shelf" -> setOf("action", "name")
+            "read_shelf" -> setOf("action", "name", "offset")
             "remember_fact" -> setOf("action", "text")
+            "self_check" -> setOf("action")
             else -> return null
         }
         val keys = action.keys()
         while (keys.hasNext()) if (keys.next() !in allowed) return null
         when (name) {
             "search", "recall" -> if (action.optString("query").isBlank() || action.optString("query").length > 300) return null
-            "read_shelf" -> if (ShelfWatcher.safeName(action.optString("name")) == null) return null
+            "read_shelf" -> {
+                if (ShelfWatcher.safeName(action.optString("name")) == null) return null
+                if (action.has("offset") && action.optInt("offset", -1) < 0) return null
+            }
             "read_url" -> {
                 val url = action.optString("url").trim()
                 if (url.length > 2048 || !url.matches(Regex("(?i)^https?://.+"))) return null
             }
             "remember_fact" -> if (action.optString("text").trim().length !in 5..300) return null
+            "self_check" -> Unit
         }
         return action
     }
@@ -505,14 +714,15 @@ object ChatEngine {
                     val (ok, text) = UrlReader.read(root, params.optString("url"))
                     ok to SecretRedactor.redactText(text)
                 }
-                "list_shelf" -> true to SecretRedactor.redactText(FileManager.list(root, "shelf"))
+                "list_shelf" -> true to SecretRedactor.redactText(shelfListing(root))
                 "read_shelf" -> {
                     val safe = ShelfWatcher.safeName(params.optString("name"))
                         ?: return false to "Недопустимое имя файла"
-                    true to SecretRedactor.redactText(shelfText(root, safe).take(12000))
+                    true to SecretRedactor.redactText(shelfText(root, safe, params.optInt("offset", 0)))
                 }
                 "recall" -> true to SecretRedactor.redactText(MemoryRetriever.recall(root, params.optString("query"), 5))
                 "remember_fact" -> true to SecretRedactor.redactText(rememberFact(root, params.optString("text")))
+                "self_check" -> true to OutcomeDigest.build(root)
                 else -> false to "Неизвестное действие"
             }
         } catch (e: Exception) {
@@ -520,17 +730,62 @@ object ChatEngine {
         }
     }
 
-    internal fun shelfText(root: File, name: String): String {
+    internal fun shelfText(root: File, name: String, offset: Int = 0): String {
         val safe = ShelfWatcher.safeName(name) ?: return "Недопустимое имя файла"
         val file = File(root, "shelf/" + safe)
         if (!file.isFile) return "Файл не найден"
+        if (file.length() > 8L * 1024L * 1024L) return "Файл превышает безопасный предел чтения 8 МиБ"
         val bytes = runCatching { file.readBytes() }.getOrElse { return "Файл недоступен" }
-        if (Vision.mimeOf(bytes) != null) {
-            return FileManager.read(root, "shelf/.desc/" + safe + ".txt")
-                .takeIf { it.isNotBlank() }?.take(4000)
-                ?: "[изображение без описания: vision недоступен]"
+        val mime = Vision.mimeOf(bytes)
+        val lower = safe.lowercase(java.util.Locale.ROOT)
+        val extracted = when {
+            mime != null -> FileManager.read(root, "shelf/.desc/" + safe + ".txt")
+                .takeIf { it.isNotBlank() } ?: return "[изображение без описания: vision недоступен]"
+            lower.endsWith(".docx") || lower.endsWith(".odt") -> ShelfWatcher.extractOffice(bytes, lower)
+                .ifBlank { return "[не удалось извлечь текст из офисного документа]" }
+            else -> ShelfWatcher.decodeText(bytes)
         }
-        return FileManager.read(root, "shelf/" + safe).take(12000)
+        val text = SecretRedactor.redactText(extracted)
+        if (mime != null && offset == 0 && text.length <= 7000) return text
+        if (offset > text.length) return "Смещение $offset за пределами текста (${text.length} символов)"
+        if (offset == text.length) return "Документ прочитан полностью: $offset/${text.length} символов."
+        val end = minOf(text.length, offset + 7000)
+        val part = text.substring(offset, end)
+        val partNumber = offset / 7000 + 1
+        val totalParts = (text.length + 6999) / 7000
+        return buildString {
+            append("Файл: ").append(safe).append("\n")
+            append("Часть ").append(partNumber).append(" из ").append(totalParts)
+                .append("; символы ").append(offset).append("–").append(end)
+                .append(" из ").append(text.length).append(".\n")
+            append(part)
+            if (end < text.length) append("\n[ПРОДОЛЖЕНИЕ ОБЯЗАТЕЛЬНО: вызови read_shelf с тем же name и offset=")
+                .append(end).append("; не делай выводов о документе до последней части.]")
+            else append("\n[КОНЕЦ ФАЙЛА: прочитан весь извлечённый текст.]")
+        }
+    }
+
+    private fun shelfMagic(file: File): ByteArray = runCatching {
+        file.inputStream().use { input ->
+            val header = ByteArray(16)
+            val count = input.read(header)
+            if (count <= 0) byteArrayOf() else header.copyOf(count)
+        }
+    }.getOrDefault(byteArrayOf())
+
+    private fun shelfListing(root: File): String {
+        val files = File(root, "shelf").listFiles()?.filter { it.isFile }?.sortedBy { it.name.lowercase() }.orEmpty()
+        if (files.isEmpty()) return "Полка пуста."
+        return files.joinToString("\n") { file ->
+            val lower = file.name.lowercase()
+            val kind = when {
+                lower.endsWith(".docx") || lower.endsWith(".odt") -> "office"
+                lower.endsWith(".txt") || lower.endsWith(".md") || lower.endsWith(".csv") -> "text"
+                Vision.mimeOf(shelfMagic(file)) != null -> "image"
+                else -> "file"
+            }
+            "${file.name} · ${file.length()} байт · $kind"
+        }
     }
 
     private fun rememberFact(root: File, rawText: String): String {
@@ -564,9 +819,14 @@ object ChatEngine {
 
     internal fun requestToolFollowup(model: JSONObject, messages: JSONArray, root: File? = null, routeId: String = "", task: Task? = null): String? {
         val base = model.optString("base_url").trimEnd('/')
-        if (!base.startsWith("https://")) return null
+        if (!base.startsWith("https://", ignoreCase = true)) {
+            throw ModelRequestFailure("Provider endpoint must use HTTPS", 0L, "invalid_endpoint")
+        }
+        val safeMessages = providerMessagesWithFullMemory(messages)
+            ?: throw ModelRequestFailure("Не удалось собрать полный контекст памяти для продолжения ответа", 0L, "context_error")
         var connection: HttpURLConnection? = null
-        return try {
+        try {
+            if (root != null && routeId.isNotBlank()) RouteMeta.recordAttempt(root, routeId)
             connection = (URL(base + "/chat/completions").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 18000
@@ -576,31 +836,56 @@ object ChatEngine {
                 val key = model.optString("api_key")
                 if (key.isNotBlank()) setRequestProperty("Authorization", "Bearer " + key)
             }
-            val safeMessages = providerMessagesWithFullMemory(messages) ?: return null
-            if (root != null && routeId.isNotBlank()) RouteMeta.recordAttempt(root, routeId)
             val body = JSONObject().put("model", model.optString("model"))
-                .put("messages", safeMessages).put("temperature", 0.85)
+                .put("messages", safeMessages)
+                .put("temperature", 0.9)
+                .put("presence_penalty", 0.6)
+                .put("frequency_penalty", 0.4)
+                .put("seed", (System.currentTimeMillis() % 100000L).toInt())
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
+            if (root != null && routeId.isNotBlank()) RouteMeta.recordHttpStatus(root, routeId, code)
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val raw = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            val raw = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
             val response = runCatching { JSONObject(raw) }.getOrNull() ?: JSONObject()
-            if (code !in 200..299) {
-                val failedUsage = response.optJSONObject("usage")
-                val failedTokens = failedUsage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
-                    ?: ((failedUsage?.optLong("prompt_tokens", 0L) ?: 0L) + (failedUsage?.optLong("completion_tokens", 0L) ?: 0L))
-                if (root != null && routeId.isNotBlank() && failedTokens > 0) RouteMeta.addTokens(root, routeId, failedTokens)
-                if (root != null && routeId.isNotBlank()) RouteMeta.recordFailure(root, routeId, RouteSelector.classify(code, null, raw), task)
-                return null
-            }
             val usage = response.optJSONObject("usage")
             val tokens = usage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
                 ?: ((usage?.optLong("prompt_tokens", 0L) ?: 0L) + (usage?.optLong("completion_tokens", 0L) ?: 0L))
             if (root != null && routeId.isNotBlank() && tokens > 0) RouteMeta.addTokens(root, routeId, tokens)
-            response.getJSONArray("choices").getJSONObject(0)
-                .getJSONObject("message").getString("content").trim()
-        } catch (_: Exception) {
-            null
+            if (code !in 200..299) {
+                val kind = RouteSelector.classify(code, null, raw)
+                if (root != null && routeId.isNotBlank()) RouteMeta.recordFailure(root, routeId, kind, task)
+                val retryAfter = if (code == 429) {
+                    parseRetryAfterMillis(connection.getHeaderField("Retry-After")).takeIf { it > 0L } ?: 60_000L
+                } else parseRetryAfterMillis(connection.getHeaderField("Retry-After"))
+                if (root != null) NetworkDiagnostics.record(root, JSONObject()
+                    .put("timestamp", System.currentTimeMillis())
+                    .put("provider", model.optString("name", model.optString("id")))
+                    .put("model", model.optString("model"))
+                    .put("stage", "TOOL_FOLLOWUP_HTTP")
+                    .put("http_status", code)
+                    .put("result", "http_error")
+                    .put("failure_message", "HTTP $code при продолжении ответа")
+                    .put("retry_after_ms", retryAfter))
+                throw ModelRequestFailure("HTTP $code при продолжении ответа", retryAfter, if (code == 429) "rate_limit" else kind)
+            }
+            val content = response.optJSONArray("choices")?.optJSONObject(0)
+                ?.optJSONObject("message")?.optString("content")?.trim().orEmpty()
+            if (content.isBlank()) {
+                if (root != null && routeId.isNotBlank()) RouteMeta.recordFailure(root, routeId, "empty_response", task)
+                throw ModelRequestFailure("Провайдер вернул пустое продолжение ответа", 0L, "empty_response")
+            }
+            if (root != null && routeId.isNotBlank()) RouteMeta.recordSuccess(root, routeId, task)
+            return content
+        } catch (e: ModelRequestFailure) {
+            throw e
+        } catch (e: Exception) {
+            if (root != null && routeId.isNotBlank()) {
+                val kind = if (e is java.net.SocketTimeoutException) "timeout" else "network"
+                RouteMeta.recordFailure(root, routeId, kind, task)
+            }
+            val kind = if (e is java.net.SocketTimeoutException) "timeout" else "network"
+            throw ModelRequestFailure(e.message ?: "Ошибка сети при продолжении ответа", 0L, kind)
         } finally {
             connection?.disconnect()
         }
@@ -611,12 +896,14 @@ object ChatEngine {
         reply: String,
         emotion: JSONObject? = null,
         meta: JSONObject? = null,
-        routeName: String = "маршрут"
+        routeName: String = "маршрут",
+        commanderMessageId: String? = null
     ): String {
         val sourceUrls = meta?.optJSONArray("source_urls") ?: JSONArray()
         val searchOk = meta?.takeIf { it.has("search_ok") }?.optBoolean("search_ok")
         return appendFinalReplyInternal(root, reply, routeName, sourceUrls, emotion, searchOk,
-            includeEmptySources = meta?.has("source_urls") == true)
+            includeEmptySources = meta?.has("source_urls") == true,
+            commanderMessageId = commanderMessageId)
     }
 
     internal fun appendFinalReply(
@@ -624,8 +911,10 @@ object ChatEngine {
         reply: String,
         routeName: String,
         sourceUrls: JSONArray = JSONArray(),
-        emotion: JSONObject? = null
-    ): String = appendFinalReplyInternal(root, reply, routeName, sourceUrls, emotion, null)
+        emotion: JSONObject? = null,
+        commanderMessageId: String? = null
+    ): String = appendFinalReplyInternal(root, reply, routeName, sourceUrls, emotion, null,
+        commanderMessageId = commanderMessageId)
 
     private fun appendFinalReplyInternal(
         root: File,
@@ -634,7 +923,8 @@ object ChatEngine {
         sourceUrls: JSONArray,
         emotion: JSONObject?,
         searchOk: Boolean?,
-        includeEmptySources: Boolean = false
+        includeEmptySources: Boolean = false,
+        commanderMessageId: String? = null
     ): String {
         val id = java.util.UUID.randomUUID().toString()
         val event = JSONObject().put("id", id).put("type", "message")
@@ -647,22 +937,31 @@ object ChatEngine {
                 .put("emotion_after", emotion.optJSONObject("after"))
                 .put("mood_label", emotion.optString("mood"))
         }
+        if (!commanderMessageId.isNullOrBlank()) event.put("reply_to", commanderMessageId)
         val saved = JSONObject(FileManager.appendEvent(root, event))
-        Diary.append(root, reply, "ответ_командиру", emotion, "said")
         val savedId = saved.optString("id").ifBlank { id }
         Receipts.delivered(root, savedId)
         lastFinalMessageId = savedId
-        val lastCmd = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 500)
-            .asReversed().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
-            .firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" &&
-                !Tombstone.isDeleted(root, it.optString("id")) }
+        val lastCmd = if (!commanderMessageId.isNullOrBlank()) {
+            FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 2000)
+                .asReversed().asSequence().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+                .firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" &&
+                    it.optString("id") == commanderMessageId && !Tombstone.isDeleted(root, commanderMessageId) }
+        } else {
+            FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 500)
+                .asReversed().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+                .firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" &&
+                    !Tombstone.isDeleted(root, it.optString("id")) }
+        }
         if (lastCmd != null) {
-            val state = readJson(root, "memory/L4_state.json")
-            state.put("last_seen_commander", lastCmd.optLong("ts",
-                lastCmd.optLong("timestamp", System.currentTimeMillis())))
-            FileManager.write(root, "memory/L4_state.json", state.toString(2))
-            Receipts.repliedByRuri(root, lastCmd.optString("id"))
-            Receipts.readByRuri(root, lastCmd.optString("id"))
+            val commanderTs = lastCmd.optLong("ts", lastCmd.optLong("timestamp", System.currentTimeMillis()))
+            FileManager.updateL4State(root) { state ->
+                state.put("last_seen_commander", maxOf(state.optLong("last_seen_commander", 0L), commanderTs))
+            }
+            val commanderId = lastCmd.optString("id")
+            Receipts.repliedByRuri(root, commanderId)
+            Receipts.readByRuri(root, commanderId)
+            CommanderReplyQueue.markAnswered(root, commanderId, savedId)
         }
         val badge = JSONObject().put("ts", saved.optLong("ts"))
             .put("route", routeName).put("memory", "полная память")
