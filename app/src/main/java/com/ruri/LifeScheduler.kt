@@ -46,7 +46,9 @@ object LifeScheduler {
             val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             manager.registerNetworkCallback(NetworkRequest.Builder().build(), object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
-                    if (OfflineQueue.hasPending(context.filesDir)) Thinker.wake(context, "online_after_offline")
+                    if (OfflineQueue.hasPending(context.filesDir) || CommanderReplyQueue.hasPending(context.filesDir)) {
+                        Thinker.wake(context, "online_after_offline")
+                    }
                 }
             })
             networkCallbackRegistered = true
