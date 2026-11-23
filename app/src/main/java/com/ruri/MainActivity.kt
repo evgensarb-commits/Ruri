@@ -35,6 +35,7 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var activityResumed = false
     @Volatile private var visionStatusProbeQueued = false
     private var pendingMessageId: String? = null
+    @Volatile private var verifiedHFCatalog = JSONArray()
     private val importFileRequestCode = 2002
 
     @SuppressLint("SetJavaScriptEnabled", "AddJavascriptInterface")
@@ -526,23 +527,64 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
-        fun saveHFModel(modelId: String): String {
+        fun saveHFModel(modelsJson: String): String {
             return try {
-                val value = modelId.trim()
-                require(value.isNotBlank() && value.length <= 300 && !value.any { it.isWhitespace() } &&
-                    Regex("(?i)(cydonia|rocinante|unslopnemo|dolphin|magnum)").containsMatchIn(value)) {
-                    "В списке нет известной roleplay-кандидатуры; оставайся на MeroMero"
-                }
+                val requested = JSONArray(modelsJson)
+                require(requested.length() in 1..30) { "Нет проверенных бесплатных roleplay-моделей" }
                 val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
                 val models = config.optJSONArray("models") ?: JSONArray()
                 val hf = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
                     .firstOrNull { it.optString("id") == "hf" }
                     ?: throw IllegalStateException("Маршрут Hugging Face не найден")
                 require(hf.optString("api_key").isNotBlank()) { "Сначала сохрани HF token" }
-                hf.put("model", value).put("enabled", true)
+                val verified = (0 until verifiedHFCatalog.length()).mapNotNull { verifiedHFCatalog.optJSONObject(it) }
+                require(verified.isNotEmpty()) { "Сначала заново загрузи проверенный каталог HF" }
+                val selected = mutableListOf<JSONObject>()
+                for (i in 0 until requested.length()) {
+                    val candidate = requested.optJSONObject(i) ?: continue
+                    val modelId = candidate.optString("model")
+                    val provider = candidate.optString("provider")
+                    val trusted = verified.firstOrNull {
+                        it.optString("model") == modelId && it.optString("provider") == provider
+                    } ?: throw IllegalArgumentException("Модель отсутствует в проверенном каталоге HF")
+                    require(trusted.optBoolean("free") &&
+                        trusted.optDouble("price_input", -1.0) == 0.0 &&
+                        trusted.optDouble("price_output", -1.0) == 0.0) {
+                        "Разрешены только подтверждённо бесплатные модели"
+                    }
+                    selected.add(trusted)
+                }
+                require(selected.isNotEmpty()) { "Список моделей пуст" }
+                for (i in models.length() - 1 downTo 0) {
+                    if (models.optJSONObject(i)?.optString("id").orEmpty().startsWith("hf_pool_")) models.remove(i)
+                }
+                hf.put("model", "").put("enabled", false).put("vision", false)
+                selected.forEachIndexed { index, candidate ->
+                    val modelId = candidate.getString("model")
+                    val provider = candidate.getString("provider")
+                    val stableId = "hf_pool_" + Integer.toHexString((modelId + "@" + provider).hashCode())
+                    val route = JSONObject(hf.toString())
+                    route.put("id", stableId)
+                        .put("name", "HF · " + modelId + " · " + provider)
+                        .put("model", modelId + ":" + provider)
+                        .put("api_key", "")
+                        .put("api_key_ref", "hf")
+                        .put("enabled", true)
+                        .put("free_tier", true)
+                        .put("nsfw", true)
+                        .put("vision", false)
+                        .put("priority", index + 2)
+                        .put("hf_model", modelId)
+                        .put("hf_provider", provider)
+                        .put("hf_price_input", candidate.getDouble("price_input"))
+                        .put("hf_price_output", candidate.getDouble("price_output"))
+                        .put("hf_context_length", candidate.optInt("context_length"))
+                        .put("hf_score", candidate.optDouble("score"))
+                    models.put(route)
+                }
                 SecretStore.saveRuntimeConfig(filesDir, config.toString(2))
                 "OK"
-            } catch (e: Exception) { "ERROR: " + (e.message ?: "HF model save failed") }
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "HF model pool save failed") }
         }
 
         @JavascriptInterface
@@ -569,13 +611,9 @@ class MainActivity : AppCompatActivity() {
                         if (code !in 200..299) JSONObject().put("ok", false).put("error", "HF HTTP " + code)
                         else {
                             val body = connection.inputStream.bufferedReader().use { it.readText() }
-                            val data = JSONObject(body).optJSONArray("data") ?: JSONArray()
-                            val ids = JSONArray()
-                            for (index in 0 until data.length()) {
-                                val id = data.optJSONObject(index)?.optString("id").orEmpty()
-                                if (id.isNotBlank()) ids.put(id)
-                            }
-                            JSONObject().put("ok", true).put("models", ids)
+                            val candidates = HFModelCatalog.parse(body)
+                            verifiedHFCatalog = JSONArray(candidates.toString())
+                            JSONObject().put("ok", true).put("models", candidates)
                         }
                     } catch (error: Exception) {
                         JSONObject().put("ok", false).put("error", error.message ?: "HF model list failed")
