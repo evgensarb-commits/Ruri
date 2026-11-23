@@ -10,7 +10,7 @@ import javax.net.ssl.SSLException
 
 enum class Task { CHAT, WARMTH, REASON, CREATIVE, VISION, TOOLS }
 
-/** Selects free routes: configured primary first, then score-ranked failover routes. */
+/** Selects enabled free routes by manual priority, with explicit NSFW and vision overrides. */
 object RouteSelector {
     fun detectTask(text: String, hasImage: Boolean = false): Task = when {
         hasImage -> Task.VISION
