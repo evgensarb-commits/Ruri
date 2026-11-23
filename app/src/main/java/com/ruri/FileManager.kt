@@ -820,32 +820,31 @@ object FileManager {
                 meromeroModel.put("tokens_per_day", 400000L)
             }
 
-            val hfSource = (0 until sourceModels.length()).mapNotNull { sourceModels.optJSONObject(it) }
-                .firstOrNull { it.optString("id") == "hf" }
-            val hf = hfSource?.let { JSONObject(it.toString()) } ?: JSONObject()
-            val selectedHfModel = hf.optString("model")
-                .takeIf { it != "cognitivecomputations/dolphin3.0-mistral-24b:free" }.orEmpty()
-            hf.put("id", "hf")
-                .put("name", "Hugging Face · Serverless Roleplay")
-                .put("base_url", "https://router.huggingface.co/v1")
-                .put("model", selectedHfModel)
+            val nemotronSource = (0 until sourceModels.length()).mapNotNull { sourceModels.optJSONObject(it) }
+                .firstOrNull { it.optString("id") == "nemotron" }
+            val nemotron = nemotronSource?.let { JSONObject(it.toString()) } ?: JSONObject()
+            nemotron.put("id", "nemotron")
+                .put("name", "NVIDIA · Nemotron 3 Nano Omni Free")
+                .put("base_url", "https://integrate.api.nvidia.com/v1")
+                .put("model", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning")
                 .put("api_key", "")
                 .put("free_tier", true)
-                .put("enabled", selectedHfModel.isNotBlank())
-                .put("nsfw", true)
+                .put("enabled", nemotron.optBoolean("enabled", false))
+                .put("nsfw", false)
                 .put("vision", false)
-                .put("rpd", 0)
+                .put("priority", 2)
                 .put("tokens_per_day", 0)
-            if (!config.optBoolean("nsfw_only_routes_v2", false)) hf.put("priority", 2)
-            else if (!hf.has("priority")) hf.put("priority", 2)
 
-            val kept = JSONArray().put(meromeroModel).put(hf)
-            val keepIds = setOf("routeway", "hf")
+            val kept = JSONArray().put(meromeroModel).put(nemotron)
+            val keepIds = setOf("routeway", "nemotron")
             for (index in 0 until sourceModels.length()) {
                 val old = sourceModels.optJSONObject(index) ?: continue
                 val oldId = old.optString("id")
                 if (oldId.isNotBlank() && oldId !in keepIds) SecretStore.removeModelKey(root, oldId)
             }
+            // Remove the retired shared credentials used by generated HF/OpenRouter pool routes.
+            SecretStore.removeModelKey(root, "hf")
+            SecretStore.removeModelKey(root, "openrouter")
 
             val firstNsfwMigration = !config.optBoolean("nsfw_only_routes_v2", false)
             val selectedId = if (firstNsfwMigration) "routeway" else config.optString("selected_route_id")
