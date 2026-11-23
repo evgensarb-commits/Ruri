@@ -125,27 +125,34 @@ object CommanderReplyQueue {
 
     /** Recovery for installations that only had the legacy pending_reply boolean. */
     fun recoverLatestUnanswered(root: File): String? = synchronized(lock) {
-        val pending = readState(root).optJSONArray("pending") ?: JSONArray()
-        if (pending.length() > 0) return@synchronized null
+        val state = readState(root)
+        val pending = state.optJSONArray("pending") ?: JSONArray()
+        val queuedIds = (0 until pending.length()).mapNotNull { pending.optJSONObject(it)?.optString("message_id") }.toSet()
+        val completed = state.optJSONArray("completed") ?: JSONArray()
+        val completedIds = (0 until completed.length()).mapNotNull { completed.optJSONObject(it)?.optString("message_id") }.toSet()
         val receipts = runCatching { JSONObject(Receipts.export(root)) }.getOrElse { JSONObject() }
         val lastSeen = runCatching {
             JSONObject(FileManager.read(root, "memory/L4_state.json")).optLong("last_seen_commander", 0L)
         }.getOrDefault(0L)
-        val lines = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 1000)
+        val lines = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 5000, maxBytes = 4 * 1024 * 1024)
+        val events = lines.mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+        val repliedIds = events.asSequence()
+            .filter { it.optString("type") == "message" && it.optString("who") == "ruri" }
+            .map { it.optString("reply_to") }.filter { it.isNotBlank() }.toSet()
         var firstRecovered: String? = null
-        lines.asSequence().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
-            .filter { event ->
-                val id = event.optString("id")
-                event.optString("type") == "message" && event.optString("who") == "commander" &&
-                    id.isNotBlank() && event.optLong("ts", event.optLong("timestamp", 0L)) > lastSeen &&
-                    !Tombstone.isDeleted(root, id) &&
-                    receipts.optJSONObject(id)?.optBoolean("replied_by_ruri", false) != true
-            }
-            .forEach { event ->
-                val id = event.optString("id")
-                enqueue(root, id)
-                if (firstRecovered == null) firstRecovered = id
-            }
+        events.asSequence().filter { event ->
+            val id = event.optString("id")
+            val timestamp = event.optLong("ts", event.optLong("timestamp", 0L))
+            event.optString("type") == "message" && event.optString("who") == "commander" &&
+                id.isNotBlank() && timestamp >= lastSeen && timestamp > 0L &&
+                id !in queuedIds && id !in completedIds && id !in repliedIds &&
+                !Tombstone.isDeleted(root, id) &&
+                receipts.optJSONObject(id)?.optBoolean("replied_by_ruri", false) != true
+        }.forEach { event ->
+            val id = event.optString("id")
+            enqueue(root, id)
+            if (firstRecovered == null) firstRecovered = id
+        }
         firstRecovered
     }
 
