@@ -485,9 +485,6 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) { "ERROR: " + (e.message ?: "onboarding update failed") }
         }
 
-        // The full decrypted config is native-only; JavaScript receives key-presence flags.
-        fun readRuntimeConfig(): String = SecretStore.readRuntimeConfig(filesDir)
-
         @JavascriptInterface
         fun readPublicRuntimeConfig(): String {
             return try { SecretStore.readPublicRuntimeConfig(filesDir) }
