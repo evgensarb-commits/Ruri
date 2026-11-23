@@ -479,17 +479,20 @@ function startOnboarding(){refreshOnboarding();}
 window.startOnboarding=startOnboarding;window.refreshOnboarding=refreshOnboarding;window.refreshRouteCards=refreshRouteCards;
 $('#onboardingLater').addEventListener('click',function(){$('#onboardingCard').style.display='none';});
 function loadSearch(){try{
-var s=JSON.parse(read('core/search.json')||'{}');
-$('#serperKey').value=s.serper_key||'';
+var s=JSON.parse(Ruri.readPublicSearchConfig()||'{}');
+$('#serperKey').value='';
+$('#serperKey').placeholder=s.has_serper_key?'Ключ сохранён; введи новый для замены':'Вставь Serper API key';
 $('#searxngUrl').value=s.searxng_url||'';
-$('#searchStatus').textContent=(s.serper_key?'Serper: ключ есть. ':'Serper: ключа нет. ')+(s.searxng_url?'Ноут: '+s.searxng_url:'Ноут: не задан.');
+$('#searchStatus').textContent=(s.has_serper_key?'Serper: ключ зашифрован и сохранён. ':'Serper: ключа нет. ')+(s.searxng_url?'Ноут: '+s.searxng_url:'Ноут: не задан.');
 }catch(e){$('#searchStatus').textContent='Ошибка чтения search.json';}}
 $('#saveSearch').addEventListener('click',function(){try{
-var s=JSON.parse(read('core/search.json')||'{}');
+var s=JSON.parse(Ruri.readPublicSearchConfig()||'{}');
 s.serper_key=$('#serperKey').value.trim();
 s.searxng_url=$('#searxngUrl').value.trim();
 ['brave_key','yandex_user','yandex_key','cse_key','cse_cx'].forEach(function(k){delete s[k];});
-write('core/search.json',JSON.stringify(s,null,2));
+var saved=Ruri.saveSearchConfig(JSON.stringify(s));
+if(saved!=='OK')throw new Error(saved);
+$('#serperKey').value='';
 loadSearch();
 alert('Настройки поиска сохранены.');
 }catch(e){alert(e.message);}});
