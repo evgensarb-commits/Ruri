@@ -93,23 +93,51 @@ object EmotionEngine {
         val out = JSONObject(); for ((n, c) in channels(root)) out.put(n, c.optDouble("base", 50.0)); return out
     }
     private fun writeState(root: File, v: JSONObject, now: Long, tick: Long, cycle: Long) {
-        FileManager.write(root, STATE, JSONObject().put("values", v).put("updated_at", now)
-            .put("last_tick_at", tick).put("last_cycle_at", cycle).toString(2))
+        val state = readState(root)
+        state.put("values", v).put("updated_at", now)
+            .put("last_tick_at", tick).put("last_cycle_at", cycle)
+        FileManager.write(root, STATE, state.toString(2))
     }
     private fun clamp(x: Double, c: JSONObject) = x.coerceIn(c.optDouble("min", 0.0), c.optDouble("max", 100.0))
     fun snapshot(root: File) = JSONObject(readValues(root).toString())
 
     @Synchronized
-    fun applyDelta(root: File, delta: JSONObject, source: String): JSONObject {
-        val now = System.currentTimeMillis(); val before = readValues(root)
-        val after = JSONObject(); val applied = JSONObject()
-        for ((n, c) in channels(root)) {
-            val cur = before.optDouble(n, c.optDouble("base", 50.0)); val d = delta.optDouble(n, 0.0)
-            val nv = if (d.isFinite() && d != 0.0) clamp(cur + d, c) else cur
-            after.put(n, nv); if (d.isFinite() && d != 0.0) applied.put(n, d)
+    fun applyDelta(root: File, delta: JSONObject, source: String): JSONObject =
+        applyDeltaInternal(root, delta, source, null)
+
+    @Synchronized
+    private fun applyDeltaOnce(root: File, delta: JSONObject, source: String, messageId: String): JSONObject =
+        applyDeltaInternal(root, delta, source, messageId.takeIf { it.isNotBlank() })
+
+    private fun applyDeltaInternal(root: File, delta: JSONObject, source: String, messageId: String?): JSONObject {
+        val now = System.currentTimeMillis()
+        val state = readState(root)
+        val processed = state.optJSONArray("processed_message_deltas") ?: JSONArray()
+        val dedupeKey = messageId?.let { "$source:$it" }
+        if (dedupeKey != null && (0 until processed.length()).any { processed.optString(it) == dedupeKey }) {
+            val current = state.optJSONObject("values") ?: readValues(root)
+            return JSONObject().put("before", current).put("delta", JSONObject())
+                .put("after", current).put("mood", moodLabel(current)).put("duplicate", true)
         }
-        val st = readState(root)
-        writeState(root, after, now, st.optLong("last_tick_at", now), st.optLong("last_cycle_at", 0L))
+        val before = state.optJSONObject("values")?.let { JSONObject(it.toString()) } ?: readValues(root)
+        val after = JSONObject()
+        val applied = JSONObject()
+        for ((name, channel) in channels(root)) {
+            val current = before.optDouble(name, channel.optDouble("base", 50.0))
+            val amount = delta.optDouble(name, 0.0)
+            val next = if (amount.isFinite() && amount != 0.0) clamp(current + amount, channel) else current
+            after.put(name, next)
+            if (amount.isFinite() && amount != 0.0) applied.put(name, amount)
+        }
+        state.put("values", after).put("updated_at", now)
+            .put("last_tick_at", state.optLong("last_tick_at", now))
+            .put("last_cycle_at", state.optLong("last_cycle_at", 0L))
+        if (dedupeKey != null) {
+            processed.put(dedupeKey)
+            while (processed.length() > 2000) processed.remove(0)
+            state.put("processed_message_deltas", processed)
+        }
+        FileManager.write(root, STATE, state.toString(2))
         val mood = moodLabel(after)
         if (applied.length() > 0) FileManager.appendEvent(root, JSONObject()
             .put("type", "emotion_delta").put("source", source).put("delta", applied)
@@ -197,7 +225,8 @@ object EmotionEngine {
         delta.put("fatigue", delta.optDouble("fatigue", 0.0) + d.optDouble("activity_fatigue_message", 4.0))
         delta.put("boredom", delta.optDouble("boredom", 0.0) - satisfaction)
         delta.put("longing", delta.optDouble("longing", 0.0) - satisfaction)
-        applyDelta(root, delta, "commander_message")
+        if (msgId.isNotBlank()) applyDeltaOnce(root, delta, "commander_message", msgId)
+        else applyDelta(root, delta, "commander_message")
         if (msgId.isNotBlank()) {
             FileManager.updateL4EmotionMarker(root, "last_emotion_msg_id", msgId)
         }
@@ -211,9 +240,11 @@ object EmotionEngine {
         if (msgId.isNotBlank() && l4.optString("last_reply_emotion_msg_id") == msgId) return
 
         val d = drift(root)
-        applyDelta(root, JSONObject().put("anger", -d.optDouble("reply_anger_relief", 8.0))
+        val delta = JSONObject().put("anger", -d.optDouble("reply_anger_relief", 8.0))
             .put("sadness", -d.optDouble("reply_sadness_relief", 6.0)).put("joy", d.optDouble("reply_joy", 5.0))
-            .put("longing", -d.optDouble("reply_longing_relief", 20.0)), "commander_reply")
+            .put("longing", -d.optDouble("reply_longing_relief", 20.0))
+        if (msgId.isNotBlank()) applyDeltaOnce(root, delta, "commander_reply", msgId)
+        else applyDelta(root, delta, "commander_reply")
         if (msgId.isNotBlank()) {
             FileManager.updateL4EmotionMarker(root, "last_reply_emotion_msg_id", msgId)
         }
