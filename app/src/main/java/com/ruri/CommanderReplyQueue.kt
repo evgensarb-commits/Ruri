@@ -26,7 +26,7 @@ object CommanderReplyQueue {
             if ((0 until pending.length()).any { pending.optJSONObject(it)?.optString("message_id") == messageId }) {
                 return@synchronized false
             }
-            require(pending.length() < MAX_PENDING) { "Очередь ответов переполнена; сообщение осталось в L0" }
+            if (pending.length() >= MAX_PENDING) return@synchronized false
             pending.put(JSONObject()
                 .put("message_id", messageId)
                 .put("created_at", now)
@@ -127,9 +127,13 @@ object CommanderReplyQueue {
     fun recoverUnanswered(root: File): String? = synchronized(lock) {
         val state = readState(root)
         val pending = state.optJSONArray("pending") ?: JSONArray()
-        val queuedIds = (0 until pending.length()).mapNotNull { pending.optJSONObject(it)?.optString("message_id") }.toSet()
+        val queuedIds = (0 until pending.length())
+            .mapNotNull { pending.optJSONObject(it)?.optString("message_id") }.toMutableSet()
+        var freeSlots = (MAX_PENDING - pending.length()).coerceAtLeast(0)
+        if (freeSlots == 0) return@synchronized null
         val completed = state.optJSONArray("completed") ?: JSONArray()
-        val completedIds = (0 until completed.length()).mapNotNull { completed.optJSONObject(it)?.optString("message_id") }.toSet()
+        val completedIds = (0 until completed.length())
+            .mapNotNull { completed.optJSONObject(it)?.optString("message_id") }.toSet()
         val receipts = runCatching { JSONObject(Receipts.export(root)) }.getOrElse { JSONObject() }
         val lastSeen = runCatching {
             JSONObject(FileManager.read(root, "memory/L4_state.json")).optLong("last_seen_commander", 0L)
@@ -139,19 +143,21 @@ object CommanderReplyQueue {
         val repliedIds = events.asSequence()
             .filter { it.optString("type") == "message" && it.optString("who") == "ruri" }
             .map { it.optString("reply_to") }.filter { it.isNotBlank() }.toSet()
+        val deletedIds = Tombstone.ids(root)
         var firstRecovered: String? = null
-        events.asSequence().filter { event ->
+        for (event in events) {
+            if (freeSlots <= 0) break
             val id = event.optString("id")
             val timestamp = event.optLong("ts", event.optLong("timestamp", 0L))
-            event.optString("type") == "message" && event.optString("who") == "commander" &&
-                id.isNotBlank() && timestamp >= lastSeen && timestamp > 0L &&
-                id !in queuedIds && id !in completedIds && id !in repliedIds &&
-                !Tombstone.isDeleted(root, id) &&
-                receipts.optJSONObject(id)?.optBoolean("replied_by_ruri", false) != true
-        }.forEach { event ->
-            val id = event.optString("id")
-            enqueue(root, id)
-            if (firstRecovered == null) firstRecovered = id
+            if (event.optString("type") != "message" || event.optString("who") != "commander" ||
+                id.isBlank() || timestamp < lastSeen || timestamp <= 0L ||
+                id in queuedIds || id in completedIds || id in repliedIds || id in deletedIds ||
+                receipts.optJSONObject(id)?.optBoolean("replied_by_ruri", false) == true) continue
+            if (enqueue(root, id)) {
+                queuedIds.add(id)
+                freeSlots--
+                if (firstRecovered == null) firstRecovered = id
+            }
         }
         firstRecovered
     }
