@@ -48,6 +48,7 @@ object EmotionEngine {
             .put("desire", JSONArray().put("хочу тебя").put("томн").put("возбужд").put("целую").put("малыш").put("пошл").put("секс").put("кис"))
             .put("longing", JSONArray().put("скучаю по тебе").put("тоскую").put("не хватает тебя").put("скучаю")))
 
+    @Synchronized
     fun ensure(root: File) {
         if (!FileManager.exists(root, CONFIG)) FileManager.write(root, CONFIG, defaults().toString(2))
         val cfg = config(root); val def = defaults()
