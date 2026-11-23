@@ -34,7 +34,10 @@ internal object HFModelCatalog {
             val modelId = model.optString("id").trim()
             val tags = model.optJSONArray("tags") ?: JSONArray()
             val taggedCandidate = (0 until tags.length()).any { isCandidateId(tags.optString(it), mode) }
-            if (modelId.isBlank() || (!isCandidateId(modelId, mode) && !taggedCandidate)) continue
+            val namedCandidate = isCandidateId(model.optString("name"), mode) ||
+                isCandidateId(model.optString("description"), mode)
+            if (modelId.isBlank() ||
+                (!isCandidateId(modelId, mode) && !taggedCandidate && !namedCandidate)) continue
             roleplayMatches++
             val declaredTask = model.optString("task").ifBlank { model.optString("pipeline_tag") }
             if (declaredTask.isNotBlank() &&
