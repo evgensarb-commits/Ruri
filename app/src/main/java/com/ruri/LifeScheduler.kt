@@ -125,8 +125,12 @@ class RuriLifeWorker(
             LifeStateEngine.process(appContext, reason)
             ShelfWatcher.ingestPending(appContext, pending)
 
-            // Rehydrate per-message outbox entries from durable EventQueue markers after a
-            // process death between the L0 append and the outbox write.
+            // Rehydrate the durable per-message outbox from L0 after process death. New
+            // Commander events share one EventQueue reason so a long offline burst stays compact.
+            val commanderWake = pending.any { item ->
+                val eventReason = item.optString("reason")
+                eventReason == "commander_messages_pending" || eventReason.startsWith("commander_message:")
+            }
             pending.forEach { item ->
                 val eventReason = item.optString("reason")
                 if (eventReason.startsWith("commander_message:")) {
@@ -137,7 +141,7 @@ class RuriLifeWorker(
             }
 
             // Every failed turn remains queued; a provider error never acknowledges the message.
-            if (OfflineQueue.hasPending(root) || CommanderReplyQueue.hasPending(root)) {
+            if (commanderWake || OfflineQueue.hasPending(root) || CommanderReplyQueue.hasPending(root)) {
                 CommanderReplyQueue.recoverLatestUnanswered(root)
                 while (true) {
                     val queued = CommanderReplyQueue.nextDue(root)
