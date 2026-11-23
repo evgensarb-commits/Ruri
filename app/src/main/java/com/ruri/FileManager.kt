@@ -887,7 +887,7 @@ object FileManager {
             val normalized = config.toString(2)
             if (normalized != raw) atomicWrite(file, normalized)
         } catch (e: Exception) {
-            android.util.Log.w("Ruri", "Two-route model migration skipped; original model configuration was preserved", e)
+            android.util.Log.w("Ruri", "Free-route model migration skipped; original model configuration was preserved", e)
         }
     }
 
