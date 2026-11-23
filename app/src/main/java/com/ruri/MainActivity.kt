@@ -287,6 +287,9 @@ class MainActivity : AppCompatActivity() {
                 try {
                     CommanderReplyQueue.enqueue(filesDir, commanderMessageId)
                     val reply = ChatEngine.respond(filesDir, commanderMessageId)
+                    if (!CommanderReplyQueue.isAnswered(filesDir, commanderMessageId)) {
+                        throw IllegalStateException("Ответ не сохранён; сообщение осталось в очереди")
+                    }
                     val messageId = ChatEngine.lastSavedReplyId()
                     mainHandler.post {
                         if (!activityResumed && !messageId.isNullOrBlank()) {
