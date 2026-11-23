@@ -531,10 +531,12 @@ class MainActivity : AppCompatActivity() {
                 val saved = JSONObject(FileManager.appendEvent(filesDir, event))
                 if (event.optString("type") == "message" && event.optString("who") == "commander") {
                     val messageId = saved.optString("id")
-                    Receipts.delivered(filesDir, messageId)
-                    LifeScheduler.enqueueEvent(this@MainActivity, "commander_message:" + messageId)
-                    CommanderReplyQueue.enqueue(filesDir, messageId)
+                    runCatching { CommanderReplyQueue.enqueue(filesDir, messageId) }
+                    runCatching { Receipts.delivered(filesDir, messageId) }
                     runCatching { OfflineQueue.markPending(filesDir, messageId) }
+                    runCatching {
+                        LifeScheduler.enqueueEvent(this@MainActivity, "commander_message:" + messageId)
+                    }
                 }
                 "OK"
             } catch (e: Exception) { "ERROR: " + (e.message ?: "event append failed") }
