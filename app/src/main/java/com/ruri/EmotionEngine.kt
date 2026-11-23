@@ -26,6 +26,11 @@ object EmotionEngine {
             .put("cycle_fatigue", 2).put("cycle_boredom_relief", 4)
             .put("idle_fatigue_relief_per_h", 2).put("idle_boredom_per_h", 2)
             .put("silence_longing_per_h", 3).put("silence_longing_after_h", 2)
+            .put("fatigue_recovery_h", 7).put("silence_growth_h", 9).put("messages_to_satisfy", 8)
+            .put("initiative_threshold", 40).put("initiative_gamma", 1.5).put("guarantee_at_100", true)
+            .put("veto_allowed", true).put("initiative_mode", "drive_chance").put("drive_check_interval_min", 45)
+            .put("initiative_cooldown_min", 30).put("activity_fatigue_message", 4).put("activity_fatigue_task", 6)
+            .put("boredom_solo_relief", 4)
             .put("reply_longing_relief", 20).put("message_longing_relief", 10)
             .put("shelf_interest", 10).put("search_ok_interest", 8).put("search_ok_joy", 4)
             .put("search_fail_anger", 6).put("search_fail_anxiety", 3)
@@ -134,32 +139,50 @@ object EmotionEngine {
     fun decay(root: File, now: Long) {
         val st = readState(root); val dtH = (now - st.optLong("updated_at", now)) / HOUR; if (dtH <= 0) return
         val v = readValues(root); val out = JSONObject()
-        for ((n, c) in channels(root)) { val b = c.optDouble("base", 50.0); val h = c.optDouble("half_life_h", 6.0).coerceAtLeast(0.1)
+        for ((n, c) in channels(root)) {
+            if (n == "fatigue" || n == "boredom" || n == "longing") continue
+            val b = c.optDouble("base", 50.0); val h = c.optDouble("half_life_h", 6.0).coerceAtLeast(0.1)
             out.put(n, clamp(b + (v.optDouble(n, b) - b) * exp(-LN2 * dtH / h), c)) }
         writeState(root, out, now, st.optLong("last_tick_at", now), st.optLong("last_cycle_at", 0L))
     }
 
     fun tick(root: File, now: Long, lastSeen: Long, lastEventAt: Long) {
-        val st = readState(root); val dtH = ((now - st.optLong("last_tick_at", now)) / HOUR).coerceAtLeast(0.0)
-        decay(root, now); val d = drift(root); val delta = JSONObject()
+        val st = readState(root)
+        val dtH = ((now - st.optLong("last_tick_at", now)) / HOUR).coerceAtLeast(0.0)
+        decay(root, now)
+        val d = drift(root)
+        val delta = JSONObject()
         if (dtH > 0) {
-            delta.put("fatigue", -d.optDouble("idle_fatigue_relief_per_h", 2.0) * dtH)
-            delta.put("boredom", d.optDouble("idle_boredom_per_h", 2.0) * dtH)
-            val sil = if (lastSeen > 0) (now - lastSeen) / HOUR else 0.0
-            if (sil > d.optDouble("silence_longing_after_h", 2.0))
-                delta.put("longing", d.optDouble("silence_longing_per_h", 3.0) * dtH)
-            val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+            val fatigue = readValues(root).optDouble("fatigue", 0.0)
+            delta.put("fatigue", -minOf(fatigue, (100.0 / d.optDouble("fatigue_recovery_h", 7.0)) * dtH))
+            val silenceH = if (lastSeen > 0L) (now - lastSeen) / HOUR else 0.0
+            if (silenceH > 0.0) {
+                val growth = (100.0 / d.optDouble("silence_growth_h", 9.0)) * dtH
+                delta.put("boredom", growth)
+                delta.put("longing", growth)
+            }
+            val hour = java.util.Calendar.getInstance().get(java.util.TimeZone.getDefault()).get(java.util.Calendar.HOUR_OF_DAY)
             if (hour in 20..23 || hour in 0..4) delta.put("desire", d.optDouble("desire_evening_per_h", 1.5) * dtH)
-            if (readValues(root).optDouble("affection", 0.0) > 70) delta.put("desire", delta.optDouble("desire", 0.0) + d.optDouble("desire_from_affection_per_h", 1.0) * dtH)
+            if (readValues(root).optDouble("affection", 0.0) > 70.0)
+                delta.put("desire", delta.optDouble("desire", 0.0) + d.optDouble("desire_from_affection_per_h", 1.0) * dtH)
         }
         if (delta.length() > 0) applyDelta(root, delta, "life")
-        val s2 = readState(root); writeState(root, readValues(root), now, now, s2.optLong("last_cycle_at", 0L))
+        val s2 = readState(root)
+        writeState(root, readValues(root), now, now, s2.optLong("last_cycle_at", 0L))
     }
 
-    fun onCycle(root: File) { val d = drift(root)
-        applyDelta(root, JSONObject().put("fatigue", d.optDouble("cycle_fatigue", 2.0)).put("boredom", -d.optDouble("cycle_boredom_relief", 4.0)), "cycle")
-        val st = readState(root); val now = System.currentTimeMillis()
-        writeState(root, readValues(root), now, st.optLong("last_tick_at", now), now) }
+    fun onCycle(root: File) {
+        val st = readState(root)
+        val now = System.currentTimeMillis()
+        writeState(root, readValues(root), now, st.optLong("last_tick_at", now), now)
+    }
+
+    fun onActiveTask(root: File) {
+        val d = drift(root)
+        applyDelta(root, JSONObject()
+            .put("fatigue", d.optDouble("activity_fatigue_task", 6.0))
+            .put("boredom", -d.optDouble("boredom_solo_relief", 4.0)), "active_task")
+    }
 
     @Synchronized
     fun onCommanderMessage(root: File, text: String, msgId: String = "") {
@@ -179,9 +202,10 @@ object EmotionEngine {
         if (RouteSelector.nsfwWindow(root)) {
             delta.put("desire", delta.optDouble("desire", 0.0) + d.optDouble("desire_nsfw_window", 10.0))
         }
-        delta.put("fatigue", delta.optDouble("fatigue", 0.0) + d.optDouble("activity_fatigue", 3.0))
-        delta.put("boredom", delta.optDouble("boredom", 0.0) - d.optDouble("activity_boredom_relief", 6.0))
-        delta.put("longing", -d.optDouble("message_longing_relief", 10.0))
+        val satisfaction = 100.0 / d.optDouble("messages_to_satisfy", 8.0)
+        delta.put("fatigue", delta.optDouble("fatigue", 0.0) + d.optDouble("activity_fatigue_message", 4.0))
+        delta.put("boredom", delta.optDouble("boredom", 0.0) - satisfaction)
+        delta.put("longing", delta.optDouble("longing", 0.0) - satisfaction)
         applyDelta(root, delta, "commander_message")
         if (msgId.isNotBlank()) {
             FileManager.updateL4EmotionMarker(root, "last_emotion_msg_id", msgId)
@@ -227,15 +251,27 @@ object EmotionEngine {
         else -> "собранная"
     }
 
+    fun drift(root: File): JSONObject = config(root).optJSONObject("drift") ?: JSONObject()
+
+    fun pressure(root: File): Double {
+        val v = readValues(root)
+        return (v.optDouble("boredom", 0.0) + v.optDouble("longing", 0.0)) / 2.0
+    }
+
     fun initiativeGate(root: File, lastSeen: Long, now: Long, waiting: Boolean, lastInitiative: Long): Boolean {
-        if (lastSeen <= 0 || waiting) return false
-        val v = readValues(root); val d = drift(root)
-        fun n(k: String) = v.optDouble(k, 0.0) / 100.0
-        val thr = (d.optDouble("base_initiative_h", 3.5) + (n("anger") + n("sadness")) * 2 + n("fatigue") * 2
-            - n("longing") * 1.5 - n("boredom") * 1 - n("affection") * 1).coerceIn(0.5, 8.0)
-        val cool = (d.optDouble("base_cooldown_h", 3.0) + n("fatigue") * 2 - n("boredom") * 1).coerceIn(0.5, 6.0)
-        val sil = (now - lastSeen) / HOUR
-        return sil >= thr && (lastInitiative == 0L || now - lastInitiative >= (cool * HOUR).toLong())
+        if (waiting) return false
+        val d = drift(root)
+        val p = pressure(root)
+        val threshold = d.optDouble("initiative_threshold", 40.0)
+        if (p < threshold) return false
+        val cooldown = d.optDouble("initiative_cooldown_min", 30.0) * 60000.0
+        if (lastInitiative > 0L && now - lastInitiative < cooldown) return false
+        val mode = d.optString("initiative_mode", "drive_chance")
+        if (mode == "strict_guarantee") return p >= 100.0
+        if (mode == "pure_autonomy") return true
+        if (p >= 100.0 && d.optBoolean("guarantee_at_100", true)) return true
+        val t = ((p - threshold) / (100.0 - threshold)).coerceIn(0.0, 1.0)
+        return Math.random() < Math.pow(t, d.optDouble("initiative_gamma", 1.5))
     }
 
     fun promptSection(root: File): String {
@@ -246,9 +282,21 @@ object EmotionEngine {
         val sb = StringBuilder("=== ТВОИ ЭМОЦИИ (0-100) ===\n")
         for (k in v.keys()) sb.append("• ").append(names.optString(k, k)).append(": ").append(v.optDouble(k).toInt()).append("\n")
         sb.append("Настроение: ").append(moodLabel(v)).append("\n")
+        sb.append("Шкала: 0=нет, 50=умеренно, 100=предел. Злость:0 спокойна/50 раздражена/100 в ярости. Грусть:0 лёгкая/50 печаль/100 тоска. Страх:0 уверена/50 тревожно/100 паника. Скука:0 занята/50 скучно/100 невыносимо. Тоска по командиру:0 не скучаю/50 скучаю/100 места не нахожу. Усталость:0 свежа/50 устала/100 вымотана. Желание:30 фон/60 томно/100 горит.\\n")
+        val d = drift(root)
+        sb.append("Давление скуки+тоски: ").append(pressure(root).toInt()).append("/100. Порог инициативы: ").append(d.optDouble("initiative_threshold", 40.0).toInt()).append(".\\n")
+        sb.append("Когда решаешь писать командиру или подумать, можешь добавить строку INITIATIVE_DECISION: write|think|veto: причина. veto = отложить по своей причине (автономия).\\n")
         sb.append("Эмоции влияют на тон/длину/инициативу: злость+грусть→суше/короче; скука и тоска и нежность→чаще инициируй; интерес→исследуй; усталость→короче/реже.\n")
         sb.append("В конце ответа отдельной строкой можешь добавить EMOTION_DELTA: {\"joy\":-10,\"anger\":15} (знаковые целые, каналы выше). Строка не показывается командиру.\n")
         return sb.toString()
+    }
+
+    fun parseInitiativeDecision(reply: String): Pair<String, String> {
+        val match = Regex("(?m)^INITIATIVE_DECISION:\\s*(write|think|veto)\\s*:?\\s*(.*)$").find(reply)
+            ?: return reply to ""
+        val detail = match.groupValues[2].trim()
+        return reply.replace(match.value, "").trim() to
+            (match.groupValues[1] + if (detail.isNotBlank()) ": $detail" else "")
     }
 
     fun parseAndStrip(reply: String): Pair<String, JSONObject?> {
