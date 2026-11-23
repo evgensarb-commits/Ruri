@@ -302,8 +302,13 @@ class MainActivity : AppCompatActivity() {
                     }
                 } catch (e: Exception) {
                     val error = e.message ?: "Ошибка ответа модели"
-                    CommanderReplyQueue.enqueue(filesDir, commanderMessageId)
-                    LifeScheduler.scheduleCommanderReplyRetry(this@MainActivity, CommanderReplyQueue.nextDelayMs(filesDir) ?: 30_000L)
+                    runCatching { CommanderReplyQueue.enqueue(filesDir, commanderMessageId) }
+                    runCatching {
+                        LifeScheduler.scheduleCommanderReplyRetry(
+                            this@MainActivity,
+                            CommanderReplyQueue.nextDelayMs(filesDir) ?: 30_000L
+                        )
+                    }
                     mainHandler.post {
                         if (::web.isInitialized) web.evaluateJavascript(
                             "window.onNativeChatResult(" + JSONObject.quote(callbackId) + ",null," +
