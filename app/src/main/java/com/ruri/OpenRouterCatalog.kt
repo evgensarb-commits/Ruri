@@ -16,7 +16,7 @@ internal object OpenRouterCatalog {
         "(?i)(nsfw|uncensored|abliterat|noromaid|lumimaid|mythomax|cydonia|rocinante|" +
             "unslopnemo|stheno|eva[-_ ]?llama|tiefighter|dark[-_ ]?idol|midnight[-_ ]?miqu|" +
             "magnum|euryale|pygmalion|airoboros|kunoichi|fimbulvetr|toppy|capybara|role[-_ ]?play|roleplay|erp|lewd|smut|erotic|adult|18[+]|no[-_ ]?filter|" +
-            "not[-_ ]?safe[-_ ]?for[-_ ]?work)"
+            "not[-_ ]?safe[-_ ]?for[-_ ]?work|dolphin|venice[-_ ]?uncensored)"
     )
 
     data class CatalogResult(
