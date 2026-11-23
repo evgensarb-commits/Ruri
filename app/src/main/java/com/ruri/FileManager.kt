@@ -838,7 +838,6 @@ object FileManager {
                 .put("rpd", 50)
                 .put("requests_per_day", 50)
                 .put("tokens_per_day", 0)
-                .put("reset_hour_utc", 0)
             if (!config.optBoolean("nsfw_only_routes_v1", false)) {
                 dolphin.put("priority", 2)
             } else if (!dolphin.has("priority")) {
@@ -855,7 +854,8 @@ object FileManager {
                 }
             }
 
-            val selectedId = config.optString("selected_route_id")
+            val firstNsfwMigration = !config.optBoolean("nsfw_only_routes_v1", false)
+            val selectedId = if (firstNsfwMigration) "routeway" else config.optString("selected_route_id")
             val selectedIndex = (0 until kept.length()).firstOrNull { index ->
                 kept.optJSONObject(index)?.optString("id") == selectedId
             }
@@ -868,8 +868,8 @@ object FileManager {
                 .put("manual_route_order_v1", true)
                 .remove("api_key")
             if (!config.has("nsfw_override")) config.put("nsfw_override", true)
-            if (!config.has("route_mode")) config.put("route_mode", "AUTO")
-            if (selectedIndex == null) config.put("selected_route_id", "routeway")
+            if (firstNsfwMigration || !config.has("route_mode")) config.put("route_mode", "AUTO")
+            config.put("selected_route_id", "routeway")
 
             val normalized = config.toString(2)
             if (normalized != raw) atomicWrite(file, normalized)
