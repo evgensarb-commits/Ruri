@@ -87,7 +87,7 @@ class NoDeadRoutesInDiagnosticsTest {
             val routes = snapshot.getJSONObject("routes")
             assertTrue(routes.length() == 2)
             assertTrue(routes.has("routeway"))
-            assertTrue(routes.has("hf"))
+            assertTrue(routes.has("nemotron"))
             assertFalse(routes.has("routeway-minimax"))
             assertFalse(routes.has("routeway-darksoul"))
             assertFalse(routes.has("requesty"))
