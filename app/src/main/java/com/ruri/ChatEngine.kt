@@ -324,6 +324,7 @@ object ChatEngine {
         var lastFailureKind = "provider"
         var hadNetworkAttempt = false
         var allFailuresNetwork = true
+        var followupRequests = 0
         for (index in requestOrder) {
             val attempt = (attemptsByModel[index] ?: 0) + 1
             attemptsByModel[index] = attempt
@@ -343,6 +344,17 @@ object ChatEngine {
                     OfflineQueue.markPending(root)
                     throw IllegalStateException("Полная память не прошла проверку; запрос к маршруту не отправлен")
                 }
+            val requestNext: (JSONArray) -> String? = { nextMessages ->
+                if (followupRequests >= 12) {
+                    throw ModelRequestFailure(
+                        "Достигнут безопасный лимит 12 дополнительных запросов к модели за один ответ; сообщение останется в очереди",
+                        60_000L,
+                        "followup_budget"
+                    )
+                }
+                followupRequests++
+                requestToolFollowup(model, nextMessages, root, routeId, task)
+            }
             hadNetworkAttempt = true
             runCatching { RouteMeta.recordAttempt(root, routeId) }
             var connection: HttpURLConnection? = null
@@ -467,14 +479,14 @@ object ChatEngine {
                 val initialDiaryText = ToolLoop.diaryActionText(initialReply)
                 val rawReply = if (initialDiaryText != null) "" else
                     ToolLoop.unwrapDiaryReply(root, initialReply, messages, meta) { nextMessages ->
-                        requestToolFollowup(model, nextMessages, root, routeId, task)
+                        requestNext(nextMessages)
                     }
                 val (replyWithoutDecision, _) = EmotionEngine.parseInitiativeDecision(rawReply)
                 val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(replyWithoutDecision)
                 val emotion = if (emotionDelta != null) EmotionEngine.applyDelta(root, emotionDelta, "chat") else null
                 var finalReply = cleanedReply
                 var guard = 0
-                while (guard < 64) {
+                while (guard < 12) {
                     val (clean, diaryTexts, toolActions) = ToolLoop.stripActions(finalReply)
                     diaryTexts.forEach { routeChatDiaryAction(root, it, emotion) }
                     if (toolActions.isEmpty()) { finalReply = clean; break }
@@ -485,7 +497,7 @@ object ChatEngine {
                         FileManager.appendEvent(root, SecretRedactor.redactEvent(JSONObject().put("type", "tool_result").put("action", name).put("ok", toolResult.first).put("text", toolResult.second.take(4000))))
                         messages.put(JSONObject().put("role", "user").put("content", "[ИНСТРУМЕНТ $name]: ${toolResult.second.take(if (name == "read_shelf") 7600 else 4000)}"))
                     }
-                    finalReply = requestToolFollowup(model, messages, root, routeId, task) ?: clean
+                    finalReply = requestNext(messages) ?: clean
                     guard++
                 }
                 val (cleanFinal, tailDiary, _) = ToolLoop.stripActions(finalReply)
@@ -495,7 +507,7 @@ object ChatEngine {
                 if (proseReply.isNullOrBlank() && initialDiaryText == null && tailDiary.isEmpty()) {
                     messages.put(JSONObject().put("role", "system")
                         .put("content", "Предыдущий ответ был действительно пустым. Ответь обычной прозой без JSON или верни write_diary с непустым text."))
-                    val retry = requestToolFollowup(model, messages, root, routeId, task).orEmpty()
+                    val retry = requestNext(messages).orEmpty()
                     val (retryClean, retryDiary, _) = ToolLoop.stripActions(retry)
                     retryDiary.forEach { routeChatDiaryAction(root, it, emotion) }
                     proseReply = ToolLoop.proseCandidate(retryClean)
@@ -550,6 +562,7 @@ object ChatEngine {
                 lastError = RouteRecovery.describeException(model.optString("name", model.optString("id")), stage, e, failureKind)
                 diagnostic.put("failure_message", lastError)
                 NetworkDiagnostics.record(root, diagnostic)
+                if (failureKind == "followup_budget") break
                 if (e is SocketTimeoutException) retryableModels.add(index)
                 else retryableModels.remove(index)
                 android.util.Log.w("Ruri", "Chat model failed at $stage: ${e.javaClass.simpleName}")
