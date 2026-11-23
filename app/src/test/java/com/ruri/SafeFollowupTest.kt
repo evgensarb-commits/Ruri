@@ -52,10 +52,12 @@ class SafeFollowupTest {
     @Test
     fun dropsOnlyExplicitlyMarkedNonFinalUserMessages() {
         val full = chain()
-        full.put(1, msg("user", "избыточная техническая реплика", discardable = true))
+        full.put(full.length() - 1, msg("user", "избыточная техническая реплика", discardable = true))
+        full.put(msg("user", "ответь прозой"))
         val lean = FollowupContextBuilder.lean(full)
         assertFalse(contents(lean).any { it.contains("избыточная техническая реплика") })
-        assertTrue(contents(lean).any { it.contains("важным условием") }.not())
+        assertTrue(contents(lean).any { it.contains("важным условием") })
+        assertEquals("ответь прозой", contents(lean).last())
         assertTrue((0 until lean.length()).none {
             lean.getJSONObject(it).has(FollowupContextBuilder.DISCARDABLE_FIELD)
         })
@@ -84,7 +86,9 @@ class SafeFollowupTest {
 
     @Test
     fun savesCharactersOnlyWhenCallerProvidesExplicitDiscardabilityEvidence() {
-        val full = chain().put(msg("user", "x".repeat(2000), discardable = true))
+        val full = chain()
+        full.put(full.length() - 1, msg("user", "x".repeat(2000), discardable = true))
+        full.put(msg("user", "ответь прозой"))
         val lean = FollowupContextBuilder.lean(full)
         assertTrue(FollowupContextBuilder.chars(lean) < FollowupContextBuilder.chars(full))
     }
