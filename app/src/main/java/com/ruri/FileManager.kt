@@ -306,7 +306,7 @@ object FileManager {
             "nsfw_refusal", "error")
         val requested = filter.takeIf { it == "all" || it in allowed } ?: "all"
         val result = JSONArray()
-        readLastLines(root, L0_PATH, maxLines = 500, maxBytes = 2 * 1024 * 1024)
+        readLastLines(root, L0_PATH, maxLines = 5000, maxBytes = 8 * 1024 * 1024)
             .asReversed().forEach { line ->
                 if (result.length() >= bounded) return@forEach
                 val event = runCatching { SecretRedactor.redactEvent(JSONObject(line)) }.getOrNull() ?: return@forEach
