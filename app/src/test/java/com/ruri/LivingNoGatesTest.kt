@@ -41,7 +41,8 @@ class LivingNoGatesTest {
         Diary.append(root, "Одинаковая фраза", "test", null, "said")
         Diary.append(root, "Одинаковая фраза", "test", null, "said")
         val entries = JSONObject(FileManager.read(root, "memory/L2_diary.json")).getJSONArray("entries")
-        assertEquals(2, entries.length())
+        assertEquals(1, entries.length())
+        assertEquals("thought", entries.getJSONObject(0).optString("kind"))
     }
 
     @Test fun DiaryDedupStrongTest() {
