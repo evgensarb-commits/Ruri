@@ -16,7 +16,7 @@ object SearchRouter {
     private val deny = Regex("(?i)(lolicon|shotacon|child\\s*porn|underage\\s*sex|minor\\s*nude)")
 
     private fun cfg(root: File) =
-        runCatching { JSONObject(FileManager.read(root, CFG)) }.getOrElse { JSONObject() }
+        runCatching { SecretStore.readSearchConfig(root) }.getOrElse { JSONObject() }
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
