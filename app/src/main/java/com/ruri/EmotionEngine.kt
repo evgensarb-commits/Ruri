@@ -259,8 +259,29 @@ object EmotionEngine {
         if (mode == "strict_guarantee") return p >= 100.0
         if (mode == "pure_autonomy") return true
         if (p >= 100.0 && d.optBoolean("guarantee_at_100", true)) return true
-        val t = ((p - threshold) / (100.0 - threshold)).coerceIn(0.0, 1.0)
-        return Math.random() < Math.pow(t, d.optDouble("initiative_gamma", 1.5))
+        val chance = Math.pow(((p - threshold) / (100.0 - threshold)).coerceIn(0.0, 1.0),
+            d.optDouble("initiative_gamma", 1.5))
+        val roll = initiativeRoll(now, p, lastSeen, lastInitiative)
+        val passed = roll < chance
+        FileManager.appendEvent(root, JSONObject()
+            .put("type", "initiative_gate_evaluated")
+            .put("pressure", p)
+            .put("threshold", threshold)
+            .put("chance", chance)
+            .put("roll", roll)
+            .put("passed", passed)
+            .put("ts", now))
+        return passed
+    }
+
+    internal fun initiativeRoll(now: Long, pressure: Double, lastSeen: Long, lastInitiative: Long): Double {
+        var value = now xor pressure.toBits() xor
+            (lastSeen * -7046029254386353131L) xor
+            (lastInitiative * -4658895280553007687L)
+        value = (value xor (value ushr 30)) * -4658895280553007687L
+        value = (value xor (value ushr 27)) * -7723592293110705685L
+        value = value xor (value ushr 31)
+        return (value ushr 11).toDouble() / 9007199254740992.0
     }
 
     fun promptSection(root: File): String {
