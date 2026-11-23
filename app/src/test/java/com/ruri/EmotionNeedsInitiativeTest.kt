@@ -98,6 +98,13 @@ class NoReflectionTimerTest {
     @Test fun schedulerExposesOnlyDriveCheckCadence() {
         assertFalse(LifeScheduler.driveCheckDue(1000000L + 44L * 60000L, 1000000L, 45.0))
         assertTrue(LifeScheduler.driveCheckDue(1000000L + 45L * 60000L, 1000000L, 45.0))
+        val candidates = listOf(java.io.File("src/main/java/com/ruri/LifeScheduler.kt"),
+            java.io.File("app/src/main/java/com/ruri/LifeScheduler.kt"))
+        val source = candidates.firstOrNull { it.isFile }?.readText()
+            ?: throw AssertionError("LifeScheduler source not found")
+        assertFalse(source.contains("reflectionDue"))
+        assertFalse(source.contains("reflection_h"))
+        assertTrue(source.contains("driveCheckDue"))
     }
 }
 
@@ -129,10 +136,14 @@ class ThinkingNotFatiguingTest {
 }
 
 class ActiveTaskFatiguesTest {
-    @Test fun executedToolActivityAddsFatigueAndRelievesSoloBoredom() {
+    @Test fun executedToolLoopAddsFatigueAndRelievesSoloBoredom() {
         val root = needsTestRoot()
         setEmotionValues(root, fatigue = 20.0, boredom = 50.0)
-        EmotionEngine.onActiveTask(root)
+        val result = ToolLoop.runToolLoop(root,
+            """{"action":"search","query":"test"}""", org.json.JSONArray(),
+            performTool = { _, _ -> true to "found" },
+            requestNext = { "Готово." })
+        assertEquals("Готово.", result)
         val values = EmotionEngine.readValues(root)
         assertEquals(26.0, values.optDouble("fatigue"), 0.001)
         assertEquals(46.0, values.optDouble("boredom"), 0.001)
