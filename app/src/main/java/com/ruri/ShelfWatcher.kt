@@ -89,6 +89,21 @@ object ShelfWatcher {
             return null
         }
 
+        val lower = safe.lowercase()
+        if (lower.endsWith(".docx") || lower.endsWith(".odt")) {
+            val officeText = SecretRedactor.redactText(extractOffice(bytes, lower)).take(12000)
+            if (officeText.isNotBlank()) {
+                val id = "shelf-" + file.name.hashCode() + "-" + file.lastModified()
+                FileManager.appendEvent(root, JSONObject()
+                    .put("id", id).put("ts", System.currentTimeMillis())
+                    .put("type", "shelf_file_ingested").put("source", "shelf")
+                    .put("name", safe).put("size_bytes", bytes.size)
+                    .put("text", officeText).put("extractor", "office_xml"))
+                return (safe.substringBeforeLast('.', safe) + " " + officeText.take(180))
+                    .trim().take(280).takeIf { it.length >= 2 }
+            }
+        }
+
         val text = decodeText(bytes).take(12000)
         val id = "shelf-" + file.name.hashCode() + "-" + file.lastModified()
         FileManager.appendEvent(root, JSONObject()
@@ -107,6 +122,64 @@ object ShelfWatcher {
         val name = value.substringAfterLast('/').substringAfterLast('\\')
         if (name.isBlank() || name == "." || name == ".." || name.length > 120) return null
         return name
+    }
+
+    /**
+     * Extracts paragraph text from DOCX/ODT ZIP containers without third-party libraries.
+     * The uncompressed XML is bounded to avoid pathological ZIP entries.
+     */
+    internal fun extractOffice(bytes: ByteArray, name: String): String {
+        val target = if (name.endsWith(".odt", ignoreCase = true)) "content.xml" else "word/document.xml"
+        val xmlBytes = runCatching {
+            java.util.zip.ZipInputStream(bytes.inputStream()).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) {
+                    if (entry.name == target) {
+                        val output = java.io.ByteArrayOutputStream()
+                        val buffer = ByteArray(8192)
+                        var total = 0
+                        while (true) {
+                            val count = zip.read(buffer)
+                            if (count < 0) break
+                            total += count
+                            if (total > 2 * 1024 * 1024) return@use null
+                            output.write(buffer, 0, count)
+                        }
+                        return@use output.toByteArray()
+                    }
+                    zip.closeEntry()
+                    entry = zip.nextEntry
+                }
+                null
+            }
+        }.getOrNull() ?: return ""
+
+        return runCatching {
+            val parser = android.util.Xml.newPullParser()
+            parser.setFeature(org.xmlpull.v1.XmlPullParser.FEATURE_PROCESS_DOCDECL, false)
+            parser.setInput(xmlBytes.inputStream(), "UTF-8")
+            val text = StringBuilder()
+            var event = parser.eventType
+            while (event != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
+                when (event) {
+                    org.xmlpull.v1.XmlPullParser.TEXT,
+                    org.xmlpull.v1.XmlPullParser.CDSECT -> text.append(parser.text)
+                    org.xmlpull.v1.XmlPullParser.START_TAG -> when (parser.name.substringAfter(':')) {
+                        "tab" -> text.append('\t')
+                        "br" -> text.append('\n')
+                    }
+                    org.xmlpull.v1.XmlPullParser.END_TAG -> if (
+                        parser.name.substringAfter(':') == "p"
+                    ) text.append('\n')
+                }
+                event = parser.next()
+            }
+            text.toString()
+                .replace(Regex("[ \\t]+"), " ")
+                .replace(Regex(" *\\n *"), "\\n")
+                .replace(Regex("\\n{2,}"), "\\n")
+                .trim()
+        }.getOrDefault("")
     }
 
     internal fun decodeText(bytes: ByteArray): String {
