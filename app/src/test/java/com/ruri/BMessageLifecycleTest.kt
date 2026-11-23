@@ -193,4 +193,38 @@ class CapabilitiesHandsTest {
             assertTrue(prompt.contains("один JSON-объект"))
         } finally { root.deleteRecursively() }
     }
+class L4AtomicUpdateTest {
+    @Test fun concurrentFieldUpdatesAreNotLost() {
+        val root = bTestRoot("ruri-l4-atomic")
+        try {
+            FileManager.init(root)
+            val pool = java.util.concurrent.Executors.newFixedThreadPool(8)
+            val tasks = (0 until 8).map {
+                pool.submit {
+                    repeat(100) {
+                        FileManager.updateL4State(root) { state ->
+                            state.put("atomic_counter", state.optInt("atomic_counter", 0) + 1)
+                        }
+                    }
+                }
+            }
+            tasks.forEach { it.get() }
+            pool.shutdown()
+            assertEquals(800, JSONObject(FileManager.read(root, "memory/L4_state.json")).optInt("atomic_counter"))
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun malformedL4IsPreservedWhenAnAtomicUpdateIsAttempted() {
+        val root = bTestRoot("ruri-l4-corrupt")
+        try {
+            FileManager.init(root)
+            val file = File(root, "memory/L4_state.json")
+            file.writeText("{broken", Charsets.UTF_8)
+            val result = runCatching { FileManager.updateL4State(root) { it.put("onboarding_done", true) } }
+            assertTrue(result.isFailure)
+            assertEquals("{broken", file.readText(Charsets.UTF_8))
+        } finally { root.deleteRecursively() }
+    }
+}
+
 }
