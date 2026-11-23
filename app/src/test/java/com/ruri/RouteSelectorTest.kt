@@ -201,7 +201,7 @@ class QuotaOrderTest {
                 .put(JSONObject().put("id", "routeway").put("model", "gemma-4-26b-a4b-it-meromero:free")
                     .put("tokens_per_day", 400000).put("priority", 1).put("nsfw", true).put("vision", true)
                     .put("free_tier", true).put("enabled", true).put("api_key", "set"))
-                .put(JSONObject().put("id", "hf").put("model", "TheDrummer/Cydonia-24B-v4.1")
+                .put(JSONObject().put("id", "nemotron").put("model", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning")
                     .put("free_tier", true).put("enabled", true).put("api_key", "set").put("priority", 2).put("nsfw", true).put("vision", false))
             val order = RouteSelector.orderedIndices(root, models, current = 0, task = Task.CHAT, online = true, vpn = false)
             assertEquals(listOf(0, 1), order)
