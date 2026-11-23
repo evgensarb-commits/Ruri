@@ -122,7 +122,7 @@ object FactExtractor {
             if (key.isBlank()) continue
             val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
             runCatching { RouteMeta.recordAttempt(root, routeId) }
-            val response = request(model, prompt)
+            val response = request(model, prompt, root, routeId)
             if (response.isNullOrBlank()) {
                 runCatching { RouteMeta.recordFailure(root, routeId, "other", Task.REASON) }
                 continue
@@ -334,7 +334,7 @@ object FactExtractor {
         $transcript
     """.trimIndent()
 
-    private fun request(model: JSONObject, prompt: String): String? {
+    private fun request(model: JSONObject, prompt: String, root: File, routeId: String): String? {
         var connection: HttpURLConnection? = null
         return try {
             val baseUrl = model.optString("base_url").trimEnd('/')
@@ -355,6 +355,7 @@ object FactExtractor {
                 .put("max_tokens", 1200)
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val status = connection.responseCode
+            RouteMeta.recordHttpStatus(root, routeId, status)
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
             val raw = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: return null
             if (status !in 200..299) return null
