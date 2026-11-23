@@ -144,7 +144,7 @@ object Thinker {
                     .put("content", "Предыдущий ответ был действительно пустым. Ответь обычной русской прозой или верни write_diary с непустым полем text."))
                 val retry = requestNext(messages)
                 reply = if (retry.isNullOrBlank()) null else ToolLoop.unwrapDiaryReply(root, retry, messages) { next ->
-                    ChatEngine.requestToolFollowup(model, next, root, routeId, task)
+                    requestNext(next)
                 }
                 if (reply.isNullOrBlank()) {
                     appendEvent(root, "thought_lost", JSONObject()
