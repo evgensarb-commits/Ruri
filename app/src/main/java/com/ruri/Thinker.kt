@@ -77,6 +77,12 @@ object Thinker {
             initiative = true
         }
 
+        if (originalReason.contains("drive_check") && !initiative) {
+            state.put("last_thought", now)
+            persistStatePreservingTurnInFlight(root, state)
+            return
+        }
+
         appendEvent(root, "wake", JSONObject()
             .put("reason", reason)
             .put("battery", BatteryLevel.get(ctx))
@@ -189,8 +195,9 @@ object Thinker {
             config.put("current", successfulIndex)
             SecretStore.saveRuntimeConfig(root, config.toString(2))
         }
-        val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(reply)
+        val (replyWithoutEmotion, emotionDelta) = EmotionEngine.parseAndStrip(reply)
         val emotion = if (emotionDelta != null) EmotionEngine.applyDelta(root, emotionDelta, "thought") else null
+        val (cleanedReply, decision) = EmotionEngine.parseInitiativeDecision(replyWithoutEmotion)
         val (cleanThought, diaryTexts, _) = ToolLoop.stripActions(cleanedReply)
         val diaryText = cleanThought.ifBlank {
             diaryTexts.firstOrNull() ?: ToolLoop.diaryActionText(cleanedReply).orEmpty()
@@ -200,6 +207,25 @@ object Thinker {
             appendEvent(root, "thought_lost", JSONObject()
                 .put("reason", "truly_empty")
                 .put("route", successfulRouteId))
+            state.put("last_thought", now)
+            persistStatePreservingTurnInFlight(root, state)
+            return
+        }
+
+        val drift = EmotionEngine.drift(root)
+        val mode = drift.optString("initiative_mode", "drive_chance")
+        val effective = when {
+            decision.startsWith("veto") && drift.optBoolean("veto_allowed", true) && mode != "strict_guarantee" -> "veto"
+            decision.startsWith("think") -> "think"
+            decision.startsWith("write") -> "write"
+            mode == "pure_autonomy" -> "think"
+            else -> "write"
+        }
+        if (initiative && effective != "write") {
+            val body = safeReply.ifBlank { cleanedReply }
+            Diary.append(root, body, reason, emotion, "thought")
+            if (effective == "veto") appendEvent(root, "initiative_vetoed",
+                JSONObject().put("reason", decision.ifBlank { "veto_without_reason" }))
             state.put("last_thought", now)
             persistStatePreservingTurnInFlight(root, state)
             return
