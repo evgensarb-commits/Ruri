@@ -481,7 +481,7 @@ select.appendChild(new Option(label,m.model+'@'+m.provider));
 });
 if(!hfAvailableModels.length){select.appendChild(new Option('Нет подтверждённых free RP-моделей',''));var st=result.stats||{};$('#hfStatus').textContent='Подходящих бесплатных RP-маршрутов нет. HF моделей: '+(st.models_seen||0)+'; RP-кандидатов: '+(st.roleplay_matches||0)+'; live-провайдеров у них: '+(st.live_providers||0)+'; бесплатных live-провайдеров: '+(st.free_providers||0)+'.';$('#hfCandidates').textContent='HF-пул не активирован; основной маршрут — MeroMero. is_free=true и явные нулевые цены учитываются как бесплатные.';}
 else{
-$('#hfStatus').textContent='Подтверждено бесплатных live roleplay-маршрутов: '+hfAvailableModels.length+'. Цена input/output — 0; неизвестные цены исключены.';
+$('#hfStatus').textContent='Подтверждено бесплатных live roleplay-маршрутов: '+hfAvailableModels.length+'. Бесплатность подтверждена полем is_free или нулевой ценой input/output.';
 $('#hfCandidates').textContent=hfAvailableModels.slice(0,8).map(function(m,i){return (i+1)+') '+m.model+' через '+m.provider+' · '+m.context_length+' ctx · '+(m.throughput==null?'скорость н/д':m.throughput+' tok/s')+' · '+(m.latency==null?'задержка н/д':m.latency+' ms')+(m.is_free_promo?' · временно бесплатно':(' · }).join('\n')+(hfAvailableModels.length>8?'\n… ещё '+(hfAvailableModels.length-8):'');
 }
 }catch(e){$('#hfStatus').textContent='Ошибка разбора ответа HF: '+e.message;}};
