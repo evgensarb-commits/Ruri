@@ -475,6 +475,27 @@ object FileManager {
         }
     }
 
+    /** Execute a short L4 transaction while excluding every other L4 reader/writer. */
+    fun <T> withL4StateLock(root: File, block: () -> T): T {
+        val target = safe(root, "memory/L4_state.json")
+            ?: throw IllegalArgumentException("Invalid L4 path")
+        return synchronized(lockFor(target)) { block() }
+    }
+
+    /** Atomic read-modify-write for one L4 state object. */
+    fun updateL4State(root: File, mutate: (JSONObject) -> Unit): JSONObject {
+        val target = safe(root, "memory/L4_state.json")
+            ?: throw IllegalArgumentException("Invalid L4 path")
+        synchronized(lockFor(target)) {
+            val state = if (target.isFile) {
+                runCatching { JSONObject(target.readText(Charsets.UTF_8)) }.getOrElse { JSONObject() }
+            } else JSONObject()
+            mutate(state)
+            atomicWrite(target, state.toString(2))
+            return JSONObject(state.toString())
+        }
+    }
+
     /** Atomically update one of the two monotonic emotion deduplication markers in L4. */
     fun updateL4EmotionMarker(root: File, key: String, messageId: String) {
         require(key == "last_emotion_msg_id" || key == "last_reply_emotion_msg_id")
