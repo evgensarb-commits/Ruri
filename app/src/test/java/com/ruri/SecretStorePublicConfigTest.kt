@@ -32,4 +32,22 @@ class SecretStorePublicConfigTest {
         assertFalse(safe.contains("serper-secret"))
         assertEquals("https://search.example", config.optString("searxng_url"))
     }
+    @Test fun localBackupSerializersNeverExportLegacyPlaintextKeys() {
+        val rawConfig = JSONObject()
+            .put("models", org.json.JSONArray().put(JSONObject()
+                .put("id", "routeway").put("api_key", "model-secret").put("has_key", true)))
+            .put("api_key", "root-secret").toString()
+        val safeConfig = SecretStore.configForBackup(rawConfig)
+        assertFalse(safeConfig.contains("model-secret"))
+        assertFalse(safeConfig.contains("root-secret"))
+        val model = JSONObject(safeConfig).getJSONArray("models").getJSONObject(0)
+        assertEquals("", model.optString("api_key"))
+        assertFalse(model.has("has_key"))
+
+        val safeSearch = SecretStore.searchConfigForBackup(
+            JSONObject().put("serper_key", "search-secret").toString()
+        )
+        assertFalse(safeSearch.contains("search-secret"))
+        assertEquals("", JSONObject(safeSearch).optString("serper_key"))
+    }
 }
