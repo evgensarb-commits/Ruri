@@ -189,16 +189,17 @@ class RuriLifeWorker(
             runCatching { JSONObject(it) }.getOrNull()
         }.firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" } ?: return
         val id = latest.optString("id").ifBlank { latest.optLong("ts").toString() }
-        val rawState = FileManager.read(root, "memory/L4_state.json")
-        if (rawState.isBlank()) return
-        val state = runCatching { JSONObject(rawState) }.getOrNull() ?: return
-        if (state.optString("last_research_detection_id") == id) return
         val message = latest.optString("text").trim()
         val pattern = Regex("(?iu)(?:что такое|кто такой|кто такая|что значит|объясни термин|объясни понятие|расскажи о)\\s+([^?!.\\n]{2,100})")
         val term = pattern.find(message)?.groupValues?.get(1)?.trim()?.take(100)
-        state.put("last_research_detection_id", id)
-        FileManager.write(root, "memory/L4_state.json", state.toString(2))
-        if (!term.isNullOrBlank()) LifeScheduler.enqueueEvent(context, "research_task:" + term)
+        var claimed = false
+        FileManager.updateL4State(root) { state ->
+            if (state.optString("last_research_detection_id") != id) {
+                state.put("last_research_detection_id", id)
+                claimed = true
+            }
+        }
+        if (claimed && !term.isNullOrBlank()) LifeScheduler.enqueueEvent(context, "research_task:" + term)
     }
 
     private fun runResearchTasks(root: java.io.File, pending: List<JSONObject>) {
