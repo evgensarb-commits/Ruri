@@ -256,8 +256,6 @@ class RuriLifeWorker(
 
     private fun shouldRunRemoteCognition(context: Context, reason: String): Boolean {
         val root = context.filesDir
-        val state = try { JSONObject(FileManager.read(root, "memory/L4_state.json")) }
-            catch (_: Exception) { JSONObject() }
         val now = System.currentTimeMillis()
         val notificationEvent = reason.contains("phone_notification")
         val explicitSelfTask = reason.contains("research_task") || reason.contains("capability_gap")
@@ -266,12 +264,15 @@ class RuriLifeWorker(
         if (!driveCheckEvent) {
             val drift = EmotionEngine.drift(root)
             val interval = drift.optDouble("drive_check_interval_min", 45.0)
-            if (LifeScheduler.driveCheckDue(now, state.optLong("last_drive_check", 0L), interval)) {
-                state.put("last_drive_check", now)
-                FileManager.write(root, "memory/L4_state.json", state.toString(2))
-                if (EmotionEngine.pressure(root) >= drift.optDouble("initiative_threshold", 40.0)) {
-                    LifeScheduler.enqueueEvent(context, "drive_check")
+            var claimed = false
+            FileManager.updateL4State(root) { latest ->
+                if (LifeScheduler.driveCheckDue(now, latest.optLong("last_drive_check", 0L), interval)) {
+                    latest.put("last_drive_check", now)
+                    claimed = true
                 }
+            }
+            if (claimed && EmotionEngine.pressure(root) >= drift.optDouble("initiative_threshold", 40.0)) {
+                LifeScheduler.enqueueEvent(context, "drive_check")
             }
         }
 
