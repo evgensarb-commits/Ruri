@@ -442,6 +442,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
+        fun saveRouteOrder(json: String): String {
+            return try {
+                val payload = JSONObject(json)
+                val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
+                RouteSelector.applyManualRouteOrder(config, payload)
+                SecretStore.saveRuntimeConfig(filesDir, config.toString(2))
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "route order save failed") }
+        }
+
+        @JavascriptInterface
         fun appendEvent(eventJson: String): String {
             return try {
                 val event = JSONObject(eventJson)
