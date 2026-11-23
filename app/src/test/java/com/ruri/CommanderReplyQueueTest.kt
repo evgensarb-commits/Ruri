@@ -49,7 +49,7 @@ class CommanderReplyQueueTest {
         val root = root()
         FileManager.init(root)
         FileManager.appendEvent(root, org.json.JSONObject()
-            .put("id", "legacy-msg").put("type", "message").put("who", "commander").put("text", "Ответь"))
+            .put("id", "legacy-msg").put("type", "message").put("who", "commander").put("text", "Ответь").put("ts", System.currentTimeMillis()))
         OfflineQueue.markPending(root)
         assertEquals("legacy-msg", CommanderReplyQueue.recoverLatestUnanswered(root))
         assertEquals("legacy-msg", CommanderReplyQueue.nextDue(root, System.currentTimeMillis())?.optString("message_id"))
