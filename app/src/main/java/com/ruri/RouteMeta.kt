@@ -230,6 +230,7 @@ object RouteMeta {
             it.put("failures_today", 0)
             it.put("rate_limits_today", 0)
             it.put("network_errors_today", 0)
+            it.put("region_restrictions_today", 0)
             it.put("timeouts_today", 0)
             it.put("http_responses_today", 0)
             it.put("http_4xx_today", 0)
@@ -262,7 +263,8 @@ object RouteMeta {
         it.put("failures_today", it.optInt("failures_today", 0) + 1)
         it.put("last_failure_kind", kind.take(40))
         when (kind) {
-            "network", "region" -> it.put("network_errors_today", it.optInt("network_errors_today", 0) + 1)
+            "network" -> it.put("network_errors_today", it.optInt("network_errors_today", 0) + 1)
+            "region" -> it.put("region_restrictions_today", it.optInt("region_restrictions_today", 0) + 1)
             "timeout" -> it.put("timeouts_today", it.optInt("timeouts_today", 0) + 1)
         }
         it.put("success_streak", 0)
