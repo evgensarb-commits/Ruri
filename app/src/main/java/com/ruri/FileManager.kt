@@ -217,7 +217,7 @@ object FileManager {
             }
         } == true
         if (hasMeroRoute) {
-            SecretStore.migrateRoutewayFallbackKey(root, "routeway", "routeway-minimax")
+            SecretStore.removeModelKey(root, "routeway-minimax")
         }
         SecretStore.removeModelKey(root, "routeway-darksoul")
         RouteMeta.pruneToConfiguredRoutes(root)
@@ -801,7 +801,7 @@ object FileManager {
             if (sourceMeromeroId != "routeway") {
                 SecretStore.migrateRoutewayFallbackKey(root, sourceMeromeroId, "routeway")
             }
-            val meromero = meromero
+            val meromeroModel = meromero
                 .put("id", "routeway")
                 .put("name", "Routeway · Gemma MeroMero Free")
                 .put("base_url", "https://api.routeway.ai/v1")
@@ -812,12 +812,12 @@ object FileManager {
                 .put("nsfw", true)
                 .put("vision", true)
             if (!config.optBoolean("nsfw_only_routes_v1", false)) {
-                meromero.put("priority", 1)
-            } else if (!meromero.has("priority")) {
-                meromero.put("priority", 1)
+                meromeroModel.put("priority", 1)
+            } else if (!meromeroModel.has("priority")) {
+                meromeroModel.put("priority", 1)
             }
-            if (meromero.optLong("tokens_per_day", 0L) <= 0L) {
-                meromero.put("tokens_per_day", 400000L)
+            if (meromeroModel.optLong("tokens_per_day", 0L) <= 0L) {
+                meromeroModel.put("tokens_per_day", 400000L)
             }
 
             val dolphinSource = (0 until sourceModels.length()).mapNotNull { sourceModels.optJSONObject(it) }
@@ -845,7 +845,7 @@ object FileManager {
                 dolphin.put("priority", 2)
             }
 
-            val kept = JSONArray().put(meromero).put(dolphin)
+            val kept = JSONArray().put(meromeroModel).put(dolphin)
             val keepIds = setOf("routeway", "openrouter-dolphin")
             for (index in 0 until sourceModels.length()) {
                 val old = sourceModels.optJSONObject(index) ?: continue
