@@ -328,6 +328,10 @@ class MainActivity : AppCompatActivity() {
             FileManager.readLastEvents(filesDir, filter, limit).toString()
 
         @JavascriptInterface
+        fun readLastLines(path: String, limit: Int): String =
+            JSONArray(FileManager.readLastLines(filesDir, path, maxLines = limit.coerceIn(1, 1000))).toString()
+
+        @JavascriptInterface
         fun readMemoryLayer(layer: String): String = when (layer) {
             "L0" -> JSONArray(FileManager.readLastLines(filesDir, "memory/L0_raw.jsonl", maxLines = 100).map {
                 runCatching { JSONObject(it) }.getOrNull() ?: JSONObject()
