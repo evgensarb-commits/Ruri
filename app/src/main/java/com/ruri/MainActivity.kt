@@ -536,6 +536,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     models.put(route)
                 }
+                route.remove("api_key_ref")
                 route.put("api_key", value)
                     .put("enabled", true)
                     .put("base_url", "https://integrate.api.nvidia.com/v1")
