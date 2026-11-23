@@ -68,6 +68,7 @@ object Diagnostics {
                 .put("failures_today", if (sameDay) meta.optInt("failures_today", 0) else 0)
                 .put("rate_limits_today", if (sameDay) meta.optInt("rate_limits_today", 0) else 0)
                 .put("network_errors_today", if (sameDay) meta.optInt("network_errors_today", 0) else 0)
+                .put("region_restrictions_today", if (sameDay) meta.optInt("region_restrictions_today", 0) else 0)
                 .put("timeouts_today", if (sameDay) meta.optInt("timeouts_today", 0) else 0)
                 .put("http_responses_today", if (sameDay) meta.optInt("http_responses_today", 0) else 0)
                 .put("http_4xx_today", if (sameDay) meta.optInt("http_4xx_today", 0) else 0)
@@ -88,6 +89,7 @@ object Diagnostics {
         var failuresTodayTotal = 0
         var rateLimitsTodayTotal = 0
         var networkErrorsTodayTotal = 0
+        var regionRestrictionsTodayTotal = 0
         var timeoutsTodayTotal = 0
         var http4xxTodayTotal = 0
         var http5xxTodayTotal = 0
@@ -100,6 +102,7 @@ object Diagnostics {
             failuresTodayTotal += route.optInt("failures_today", 0)
             rateLimitsTodayTotal += route.optInt("rate_limits_today", 0)
             networkErrorsTodayTotal += route.optInt("network_errors_today", 0)
+            regionRestrictionsTodayTotal += route.optInt("region_restrictions_today", 0)
             timeoutsTodayTotal += route.optInt("timeouts_today", 0)
             http4xxTodayTotal += route.optInt("http_4xx_today", 0)
             http5xxTodayTotal += route.optInt("http_5xx_today", 0)
@@ -111,6 +114,7 @@ object Diagnostics {
             .put("failures_today", failuresTodayTotal)
             .put("rate_limits_429_today", rateLimitsTodayTotal)
             .put("network_errors_today", networkErrorsTodayTotal)
+            .put("region_restrictions_today", regionRestrictionsTodayTotal)
             .put("timeouts_today", timeoutsTodayTotal)
             .put("http_4xx_today", http4xxTodayTotal)
             .put("http_5xx_today", http5xxTodayTotal))
