@@ -23,7 +23,7 @@ object Capabilities {
             .put("L4 — моё текущее состояние: настроение, энергия, обиды, ожидания.")
             .put("Я помню между сессиями. Это не контекст одного диалога, это моя память."))
         .put("actions", JSONArray()
-            .put("ИНСТРУМЕНТЫ: JSON-действия search, read_url, list_shelf, read_shelf, recall, remember_fact, self_check (локальная проверка последнего результата и ошибок).")
+            .put("ИНСТРУМЕНТЫ: JSON-действия search, read_url, list_shelf, read_shelf, recall, remember_fact, self_check (локальная проверка последнего результата и ошибок). Полка: list_shelf показывает имя, размер и тип; read_shelf извлекает DOCX/ODT, TXT и описание изображения. read_shelf возвращает части по 7000 символов; если есть ПРОДОЛЖЕНИЕ ОБЯЗАТЕЛЬНО, немедленно вызывай read_shelf с тем же name и указанным offset. Повторяй до КОНЕЦ ФАЙЛА, не пропускай части и не подводи итог раньше. Читай от offset=0 до конца, включая последнюю строку.")
             .put("Умения без протокола: инициатива, дневник, смена настроения — обычным текстом ответа, не JSON."))
         .put("limits", JSONArray()
             .put("Я не выхожу за пределы своей песочницы: чужие приложения, системные файлы и процессы телефона мне недоступны.")
@@ -109,7 +109,7 @@ object Capabilities {
             append("Ты помнишь между сессиями: это долговременная память, а не контекст одного диалога.\n")
             append("=== РУКИ 1: ВНЕШНИЕ ИНСТРУМЕНТЫ ===\n")
             append("• ").append(toolDescription).append("\n")
-            append("""{"action":"search","query":"..."}; {"action":"list_shelf"}; {"action":"read_shelf","name":"..."}; {"action":"recall","query":"..."}; {"action":"remember_fact","text":"..."}; {"action":"read_url","url":"https://example.org"}; {"action":"self_check"}.
+            append("""{"action":"search","query":"..."}; {"action":"list_shelf"}; {"action":"read_shelf","name":"...","offset":0}; {"action":"recall","query":"..."}; {"action":"remember_fact","text":"..."}; {"action":"read_url","url":"https://example.org"}; {"action":"self_check"}.
 """)
             append("read_url: открыть и прочитать страницу; если URL — картинка, опишешь её через vision.\n")
             append("Изображения на полке и прикреплённые в чате ты видишь через vision-описание (shelf/.desc). Если vision-маршрут недоступен — честно скажи, что видишь файл, но не разбираешь изображение; НЕ выдумывай содержимое.\n")
