@@ -10,11 +10,9 @@ import java.net.URL
 object Vision {
     private const val TINY_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
     private const val MAX_IMAGE_BYTES = 8 * 1024 * 1024
-    private const val PROBE_TTL_MS = 24L * 60L * 60L * 1000L
 
     /** Select only routes accepted by the shared free-route policy; no paid or disabled fallback. */
     fun visionRoute(root: File): JSONObject? {
-        if (!NetState.online) return null
         val config = runCatching { JSONObject(SecretStore.readRuntimeConfig(root)) }.getOrElse { JSONObject() }
         val models = config.optJSONArray("models") ?: JSONArray()
         return findVisionRoute(
@@ -31,18 +29,15 @@ object Vision {
     fun cachedVisionRoute(root: File): JSONObject? {
         val config = runCatching { JSONObject(SecretStore.readRuntimeConfig(root)) }.getOrElse { JSONObject() }
         val models = config.optJSONArray("models") ?: JSONArray()
-        val meromero = (0 until models.length()).firstNotNullOfOrNull { index ->
-            models.optJSONObject(index)?.takeIf { model ->
-                model.optString("model").contains("meromero", ignoreCase = true) ||
-                    model.optString("id").equals("routeway", ignoreCase = true)
-            }
-        } ?: return null
-        if (!isEligibleVisionModel(meromero)) return null
-        val caps = RouteMeta.route(root, routeId(meromero)).optJSONObject("caps") ?: JSONObject()
-        return if (caps.optBoolean("vision", false)) JSONObject(meromero.toString()) else null
+        val order = RouteSelector.orderedIndices(
+            root, models, config.optInt("current", 0), Task.VISION
+        )
+        return order.firstNotNullOfOrNull { index ->
+            models.optJSONObject(index)?.takeIf(::isEligibleVisionModel)?.let { JSONObject(it.toString()) }
+        }
     }
 
-    /** Injectable selection seam for unit tests; production always supplies the real network probe. */
+    /** Vision capability is a manual route declaration; no provider probe or auto-capability flag. */
     internal fun findVisionRoute(
         root: File,
         models: JSONArray,
@@ -60,51 +55,9 @@ object Vision {
             online = online,
             vpn = vpn
         )
-        if (order.isEmpty()) return null
-
-        val candidates = order.mapNotNull { index ->
-            models.optJSONObject(index)?.takeIf(::isEligibleVisionModel)
+        return order.firstNotNullOfOrNull { index ->
+            models.optJSONObject(index)?.takeIf(::isEligibleVisionModel)?.let { JSONObject(it.toString()) }
         }
-        for (model in candidates) {
-            val id = routeId(model)
-            val caps = RouteMeta.route(root, id).optJSONObject("caps") ?: JSONObject()
-            if (caps.optBoolean("vision", false)) return JSONObject(model.toString())
-        }
-
-        for (model in candidates) {
-            val id = routeId(model)
-            val meta = RouteMeta.route(root, id)
-            val caps = meta.optJSONObject("caps") ?: JSONObject()
-            if (caps.has("vision") && !caps.optBoolean("vision") &&
-                now - meta.optLong("vision_probe_at", 0L) < PROBE_TTL_MS) continue
-
-            // A capability probe is a real provider request and consumes the route's free quota.
-            RouteMeta.recordAttempt(root, id)
-            val capable = runCatching { probeRoute(JSONObject(model.toString())) }.getOrDefault(false)
-            val probeSnippet = if (capable) {
-                "Vision probe accepted an image-grounded response."
-            } else {
-                "Vision probe did not confirm image interpretation."
-            }
-            FileManager.appendEvent(root, JSONObject()
-                .put("type", "vision_probe_result")
-                .put("route", id)
-                .put("capable", capable)
-                .put("snippet", probeSnippet)
-                .put("ts", now))
-            runCatching { OutcomeDigest.recordVisionProbe(root, id, capable, probeSnippet) }
-            RouteMeta.update(root, id) {
-                val updatedCaps = it.optJSONObject("caps") ?: JSONObject()
-                updatedCaps.put("vision", capable)
-                it.put("caps", updatedCaps).put("vision_probe_at", now)
-            }
-            if (capable) {
-                runCatching { RouteMeta.recordSuccess(root, id, Task.VISION) }
-                return JSONObject(model.toString())
-            }
-            runCatching { RouteMeta.recordFailure(root, id, "other", Task.VISION) }
-        }
-        return null
     }
 
     internal fun isEligibleVisionModel(model: JSONObject): Boolean =
