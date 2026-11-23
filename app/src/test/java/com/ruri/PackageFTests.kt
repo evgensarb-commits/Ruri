@@ -283,13 +283,14 @@ class EmotionRedesignTest {
         }
     }
 
-    @Test fun cyclePairsFatigueGrowthWithBoredomRelief() {
-        val root = packageFRoot("ruri-fatigue-boredom-coupling")
+    @Test fun passiveCycleDoesNotChangeFatigueOrBoredom() {
+        val root = packageFRoot("ruri-passive-cycle")
         try {
+            val before = EmotionEngine.readValues(root)
             EmotionEngine.onCycle(root)
             val values = EmotionEngine.readValues(root)
-            assertEquals(52.0, values.getDouble("fatigue"), 0.0)
-            assertEquals(16.0, values.getDouble("boredom"), 0.0)
+            assertEquals(before.getDouble("fatigue"), values.getDouble("fatigue"), 0.0)
+            assertEquals(before.getDouble("boredom"), values.getDouble("boredom"), 0.0)
         } finally {
             root.deleteRecursively()
         }
