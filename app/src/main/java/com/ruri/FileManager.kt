@@ -822,6 +822,11 @@ object FileManager {
                 .put("two_route_migration_v1", true)
                 .put("manual_route_order_v1", true)
             if (!config.has("nsfw_override")) config.put("nsfw_override", true)
+            if (!config.has("route_mode")) config.put("route_mode", "AUTO")
+            if (!config.has("selected_route_id")) {
+                val selected = kept.optJSONObject(config.optInt("current", 0))
+                config.put("selected_route_id", selected?.optString("id") ?: "routeway")
+            }
 
             val normalized = config.toString(2)
             if (normalized != raw) atomicWrite(file, normalized)
