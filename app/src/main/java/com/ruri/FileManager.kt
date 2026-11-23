@@ -218,7 +218,7 @@ object FileManager {
         if (hasMeroRoute) {
             SecretStore.removeModelKey(root, "routeway-minimax")
         }
-        listOf("routeway-darksoul", "routeway-minimax", "minimax", "requesty", "groq", "gigachat", "yandexgpt")
+        listOf("routeway-darksoul", "routeway-minimax", "openrouter-dolphin", "minimax", "requesty", "groq", "gigachat", "yandexgpt")
             .forEach { SecretStore.removeModelKey(root, it) }
         RouteMeta.pruneToConfiguredRoutes(root)
         RouteMeta.migrateLegacyNsfwFlags(root)
