@@ -117,6 +117,8 @@ object ChatEngine {
             "Длина ответа: ${character.optString("length_policy")}. " +
             "Эмоции: ${character.optString("emotions")}. " +
             "Регуляторы характера: ${character.optJSONArray("regulators") ?: JSONArray()}. " +
+            "Примеры разнообразного входа (варианты, не шаблоны): ${character.optJSONArray("opening_exemplars") ?: JSONArray()}. " +
+            StyleGuard.repetitiveOpeningNote(root) + " " +
             "Фразы, которые нельзя использовать: ${bannedPhrases}. " +
             Capabilities.bodySection(root) + " " +
             EmotionEngine.promptSection(root) + " " +
@@ -182,9 +184,13 @@ object ChatEngine {
                     .put("content", "Ассоциативно найденные воспоминания. Используй их, если они относятся к вопросу. Не выдавай предположения за точные воспоминания; при необходимости обозначай неопределённость.\n" + recalled)
             )
         }
-        history.forEach {
-            val providerMessage = JSONObject(it.toString())
+        history.forEachIndexed { index, item ->
+            val providerMessage = JSONObject(item.toString())
             providerMessage.remove("_ruri_event_id")
+            if (providerMessage.optString("role") == "assistant" && index < history.size - 2) {
+                val content = providerMessage.optString("content")
+                providerMessage.put("content", content.replace(Regex("^\\s*\\*[^*]{1,80}\\*\\s*"), ""))
+            }
             messages.put(providerMessage)
         }
         if (!hasFullMemoryContext(messages)) {
@@ -264,7 +270,10 @@ object ChatEngine {
                 val body = JSONObject()
                     .put("model", model.optString("model"))
                     .put("messages", safeProviderMessages)
-                    .put("temperature", 0.85)
+                    .put("temperature", 0.9)
+                    .put("presence_penalty", 0.6)
+                    .put("frequency_penalty", 0.4)
+                    .put("seed", (System.currentTimeMillis() % 100000L).toInt())
                 stage = "WRITE"
                 diagnostic.put("stage", stage)
                 val writeStart = SystemClock.elapsedRealtime()
