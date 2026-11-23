@@ -184,12 +184,17 @@ object ChatEngine {
                     .put("content", "Ассоциативно найденные воспоминания. Используй их, если они относятся к вопросу. Не выдавай предположения за точные воспоминания; при необходимости обозначай неопределённость.\n" + recalled)
             )
         }
-        history.forEachIndexed { index, item ->
+        val assistantHistoryCount = history.count { it.optString("role") == "assistant" }
+        var assistantHistoryIndex = 0
+        history.forEach { item ->
             val providerMessage = JSONObject(item.toString())
             providerMessage.remove("_ruri_event_id")
-            if (providerMessage.optString("role") == "assistant" && index < history.size - 2) {
+            if (providerMessage.optString("role") == "assistant") {
                 val content = providerMessage.optString("content")
-                providerMessage.put("content", StyleGuard.stripOlderOpening("ruri", index, history.size, content))
+                providerMessage.put("content", StyleGuard.stripOlderOpening(
+                    "ruri", assistantHistoryIndex, assistantHistoryCount, content
+                ))
+                assistantHistoryIndex++
             }
             messages.put(providerMessage)
         }
