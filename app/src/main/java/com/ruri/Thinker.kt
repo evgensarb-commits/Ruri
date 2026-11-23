@@ -121,7 +121,8 @@ object Thinker {
         val prompt = buildPrompt(ctx, root, state, reason, initiative)
         val current = config.optInt("current", 0)
         val task = if (initiative) Task.WARMTH else Task.REASON
-        val order = FreeModelRouter.orderedIndices(root, models, current, task)
+        val adult = RouteSelector.isAdultTopic(RouteSelector.latestCommanderText(root)) || RouteSelector.nsfwWindow(root)
+        val order = RouteSelector.orderedIndices(root, models, current, task, adult = adult)
         if (order.isEmpty()) {
             state.put("last_thought", now)
             persistStatePreservingTurnInFlight(root, state)
