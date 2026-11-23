@@ -217,7 +217,6 @@ object Thinker {
         OutcomeDigest.verifyClaims(root, safeReply)
         val notificationMessageId = if (initiative) {
             val messageId = appendChatMessage(root, "ruri", safeReply, now, ChatEngine.sourceUrlsSnapshot(), successfulRouteId)
-            if (ChatEngine.diaryMirrorSaid(root)) Diary.append(root, safeReply, "инициатива", emotion, "said")
             messageId
         } else {
             if (Diary.isDuplicate(root, safeReply, "thought")) {
