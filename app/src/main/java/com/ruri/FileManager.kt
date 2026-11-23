@@ -171,11 +171,13 @@ object FileManager {
             {
               "models": [
                 { "id": "routeway", "name": "Routeway · Gemma MeroMero Free", "base_url": "https://api.routeway.ai/v1", "api_key": "", "model": "gemma-4-26b-a4b-it-meromero:free", "priority": 1, "tokens_per_day": 400000, "free_tier": true, "enabled": true },
-                { "id": "routeway-minimax", "name": "MiniMax M3.1 Flash Free", "base_url": "https://api.routeway.ai/v1", "api_key": "", "model": "minimax-m3.1-flash:free", "priority": 2, "free_tier": true, "enabled": true }
+                { "id": "routeway-minimax", "name": "MiniMax M3.1 Flash Free", "base_url": "https://api.routeway.ai/v1", "api_key": "", "model": "minimax-m3.1-flash:free", "priority": 2, "free_tier": true, "enabled": true },
+                { "id": "routeway-darksoul", "name": "Routeway · Gemma Darksoul Free", "base_url": "https://api.routeway.ai/v1", "api_key": "", "model": "gemma-4-26b-a4b-it-darksoul:free", "priority": 3, "free_tier": true, "enabled": true, "nsfw": true, "vision": false }
               ],
               "current": 0,
               "free_only": true,
               "two_route_migration_v1": true,
+              "three_route_migration_v1": true,
               "quota_used": 0,
               "quota_reset": 0
             }
@@ -218,6 +220,9 @@ object FileManager {
         } == true
         if (hasMeroRoute) {
             SecretStore.migrateRoutewayFallbackKey(root, "routeway", "routeway-minimax")
+        }
+        if (hasMeroRoute) {
+            SecretStore.migrateRoutewayFallbackKey(root, "routeway", "routeway-darksoul")
         }
         RouteMeta.pruneToConfiguredRoutes(root)
         RouteMeta.migrateLegacyNsfwFlags(root)
@@ -840,11 +845,37 @@ object FileManager {
                 if (!minimax.has("vision")) minimax.put("vision", false)
             }
 
-            val kept = JSONArray().put(meromero).put(minimax)
+            val darksoulSource = (0 until sourceModels.length()).mapNotNull { sourceModels.optJSONObject(it) }
+                .firstOrNull {
+                    it.optString("model") == "gemma-4-26b-a4b-it-darksoul:free" ||
+                        it.optString("id") == "routeway-darksoul"
+                }
+            val darksoul = darksoulSource?.let { JSONObject(it.toString()) } ?: JSONObject()
+            val sourceDarksoulId = darksoul.optString("id")
+            if (sourceDarksoulId.isNotBlank() && sourceDarksoulId != "routeway-darksoul") {
+                SecretStore.migrateRoutewayFallbackKey(root, sourceDarksoulId, "routeway-darksoul")
+            }
+            darksoul.put("id", "routeway-darksoul")
+                .put("name", "Routeway · Gemma Darksoul Free")
+                .put("base_url", "https://api.routeway.ai/v1")
+                .put("api_key", "")
+                .put("model", "gemma-4-26b-a4b-it-darksoul:free")
+                .put("free_tier", true)
+                .put("enabled", true)
+            if (manualOrderMigration) {
+                darksoul.put("priority", 3).put("nsfw", true).put("vision", false)
+            } else {
+                if (!darksoul.has("priority")) darksoul.put("priority", 3)
+                if (!darksoul.has("nsfw")) darksoul.put("nsfw", true)
+                if (!darksoul.has("vision")) darksoul.put("vision", false)
+            }
+
+            val kept = JSONArray().put(meromero).put(minimax).put(darksoul)
             config.put("models", kept)
-                .put("current", config.optInt("current", 0).coerceIn(0, 1))
+                .put("current", config.optInt("current", 0).coerceIn(0, 2))
                 .put("free_only", true)
                 .put("two_route_migration_v1", true)
+                .put("three_route_migration_v1", true)
                 .put("manual_route_order_v1", true)
             if (!config.has("nsfw_override")) config.put("nsfw_override", true)
             if (!config.has("route_mode")) config.put("route_mode", "AUTO")
