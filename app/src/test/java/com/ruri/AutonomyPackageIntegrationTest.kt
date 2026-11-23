@@ -52,12 +52,14 @@ class AutonomyPackageIntegrationTest {
     }
 
     @Test
-    fun runtimeMigrationKeepsOnlyMeroMeroAndMiniMaxFree() {
+    fun runtimeMigrationKeepsOnlyMeroMeroAndHFFreePool() {
         val fileManager = source("src/main/java/com/ruri/FileManager.kt")
         val routeSelector = source("src/main/java/com/ruri/RouteSelector.kt")
-        assertTrue(fileManager.contains("two_route_migration_v1"))
+        assertTrue(fileManager.contains("nsfw_only_routes_v2"))
         assertTrue(fileManager.contains("gemma-4-26b-a4b-it-meromero:free"))
-        assertTrue(fileManager.contains("minimax-m3.1-flash:free"))
+        assertTrue(fileManager.contains("Hugging Face · Serverless Roleplay"))
+        assertTrue(fileManager.contains("https://router.huggingface.co/v1"))
+        assertFalse(fileManager.contains("cognitivecomputations/dolphin3.0-mistral-24b:free"))
         assertTrue(fileManager.contains("free_only"))
         assertTrue(fileManager.contains("RouteMeta.pruneToConfiguredRoutes"))
         assertTrue(routeSelector.contains("compareBy<Int>"))
