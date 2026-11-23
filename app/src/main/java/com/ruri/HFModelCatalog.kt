@@ -5,7 +5,7 @@ import org.json.JSONObject
 
 /** Strict free-only Hugging Face Inference Providers catalog. Unknown prices/status are excluded. */
 internal object HFModelCatalog {
-    private val roleplay = Regex("(?i)(cydonia|rocinante|unslopnemo|magnum|roleplay|mythomax|stheno|noromaid|eva[-_ ]?llama|tiefighter)")
+    private val roleplay = Regex("(?i)(cydonia|rocinante|unslopnemo|magnum|roleplay|mythomax|stheno|noromaid|eva[-_ ]?llama|tiefighter|lumimaid|rpmax|anubis|dark[-_ ]?idol|fimbulvetr|sao10k|midnight[-_ ]?miqu|lewd|abliterat)")
     private val forbiddenLegacy = Regex("(?i)dolphin")
 
     fun parse(raw: String): JSONArray {
@@ -15,10 +15,15 @@ internal object HFModelCatalog {
             val model = data.optJSONObject(i) ?: continue
             val modelId = model.optString("id").trim()
             if (modelId.isBlank() || !roleplay.containsMatchIn(modelId) || forbiddenLegacy.containsMatchIn(modelId)) continue
+            val declaredTask = model.optString("task").ifBlank { model.optString("pipeline_tag") }
+            if (declaredTask.isNotBlank() &&
+                !declaredTask.contains("text-generation", true) &&
+                !declaredTask.contains("chat-completion", true)) continue
             val providers = model.optJSONArray("providers") ?: model.optJSONArray("inference_providers") ?: continue
             for (p in 0 until providers.length()) {
                 val provider = providers.optJSONObject(p) ?: continue
                 if (!provider.optString("status").equals("live", true)) continue
+                if (provider.has("is_free") && !provider.optBoolean("is_free")) continue
                 val pricing = provider.optJSONObject("pricing") ?: continue
                 val input = price(pricing, "input", "prompt")
                 val output = price(pricing, "output", "completion")
