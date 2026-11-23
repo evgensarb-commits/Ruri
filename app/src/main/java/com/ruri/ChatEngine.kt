@@ -67,6 +67,18 @@ object ChatEngine {
                 it.optString("reply_to") == commanderMessageId }
             ?.let { it.optString("id") to it.optString("text") }
 
+    internal fun isCommanderMessage(root: File, messageId: String): Boolean {
+        if (messageId.isBlank()) return false
+        return FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 5000)
+            .any { line ->
+                runCatching { JSONObject(line) }.getOrNull()?.let { event ->
+                    event.optString("id") == messageId &&
+                        event.optString("type") == "message" &&
+                        event.optString("who") == "commander"
+                } == true
+            }
+    }
+
     internal fun setTurnInFlight(root: File, value: Boolean) {
         FileManager.updateL4State(root) { it.put("turn_in_flight", value) }
     }
