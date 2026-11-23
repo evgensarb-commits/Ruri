@@ -64,8 +64,8 @@ class AutonomousDriftTest : EmotionEngineTestBase() {
             .put("updated_at", now - EMOTION_TEST_HOUR_MS)
             .put("last_tick_at", now - EMOTION_TEST_HOUR_MS)
         FileManager.write(root, "memory/emotions.json", state.toString())
-        EmotionEngine.tick(root, now, 0L, now - 1L)
-        assertEquals(22.0, EmotionEngine.readValues(root).getDouble("boredom"), 0.1)
+        EmotionEngine.tick(root, now, now - EMOTION_TEST_HOUR_MS, now - 1L)
+        assertEquals(31.111, EmotionEngine.readValues(root).getDouble("boredom"), 0.1)
     }
 }
 
@@ -113,10 +113,10 @@ class InitiativeGateEmotionTest : EmotionEngineTestBase() {
         val lastSeen = now - 4L * EMOTION_TEST_HOUR_MS
         assertEquals(false, EmotionEngine.initiativeGate(root, lastSeen, now, false, 0L))
 
-        EmotionEngine.applyDelta(root, JSONObject().put("boredom", 80.0), "test")
+        EmotionEngine.applyDelta(root, JSONObject().put("boredom", 80.0).put("longing", 80.0), "test")
         assertEquals(true, EmotionEngine.initiativeGate(root, lastSeen, now, false, 0L))
 
-        EmotionEngine.applyDelta(root, JSONObject().put("boredom", -80.0)
+        EmotionEngine.applyDelta(root, JSONObject().put("boredom", -100.0).put("longing", -100.0)
             .put("anger", 90.0).put("fatigue", 80.0), "test")
         assertEquals(false, EmotionEngine.initiativeGate(root, lastSeen, now, false, 0L))
     }
@@ -182,9 +182,9 @@ class EmotionOncePerMessageTest : EmotionEngineTestBase() {
         EmotionEngine.onCommanderMessage(root, "Привет, Рури", "commander-message-42")
         val afterFirst = EmotionEngine.readValues(root)
 
-        assertEquals(before.getDouble("fatigue") + 3.0, afterFirst.getDouble("fatigue"), 0.0)
-        assertEquals(before.getDouble("boredom") - 6.0, afterFirst.getDouble("boredom"), 0.0)
-        assertEquals(before.getDouble("longing") - 10.0, afterFirst.getDouble("longing"), 0.0)
+        assertEquals(before.getDouble("fatigue") + 4.0, afterFirst.getDouble("fatigue"), 0.0)
+        assertEquals(before.getDouble("boredom") - 12.5, afterFirst.getDouble("boredom"), 0.0)
+        assertEquals(before.getDouble("longing") - 12.5, afterFirst.getDouble("longing"), 0.0)
 
         EmotionEngine.onCommanderMessage(root, "Привет, Рури", "commander-message-42")
         val afterRetry = EmotionEngine.readValues(root)
