@@ -81,7 +81,7 @@ object ToolLoop {
         }
         while (true) {
             val action = ChatEngine.parseAction(current) ?: return finish(current)
-            if (hops >= 3) return finish(current)
+            if (hops >= 64) return finish(current)
             val name = action.optString("action")
             val params = JSONObject(action.toString()).apply { remove("action") }
             FileManager.appendEvent(root, SecretRedactor.redactEvent(
@@ -107,7 +107,7 @@ object ToolLoop {
                     meta.put("source_urls", urls)
                 }
             }
-            val safeText = SecretRedactor.redactText(result.second).take(4000)
+            val safeText = SecretRedactor.redactText(result.second).take(if (name == "read_shelf") 7600 else 4000)
             FileManager.appendEvent(root, SecretRedactor.redactEvent(
                 JSONObject().put("type", "tool_result").put("action", name)
                     .put("ok", result.first).put("text", safeText)
@@ -119,7 +119,7 @@ object ToolLoop {
                     "Инструмент ${name} вернул ошибку или пустой результат. НЕ утверждай, что действие выполнено успешно. Скажи честно, что не удалось, и предложи альтернативу."))
             }
             hops++
-            if (hops == 3) messages.put(JSONObject().put("role", "system")
+            if (hops == 64) messages.put(JSONObject().put("role", "system")
                 .put("content", "Лимит инструментов исчерпан — ответь обычной прозой"))
             current = requestNext(messages) ?: return finish("Не удалось получить ответ после выполнения инструмента.")
         }
