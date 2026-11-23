@@ -127,7 +127,7 @@ class RuriLifeWorker(
 
             // A queued Commander turn is answered once connectivity returns. The transient
             // offline notice is never appended to L0; ChatEngine records only a real reply.
-            if (NetState.online && (OfflineQueue.hasPending(root) || CommanderReplyQueue.hasPending(root))) {
+            if (OfflineQueue.hasPending(root) || CommanderReplyQueue.hasPending(root)) {
                 CommanderReplyQueue.recoverLatestUnanswered(root)
                 while (true) {
                     val queued = CommanderReplyQueue.nextDue(root)
