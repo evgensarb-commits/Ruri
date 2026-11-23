@@ -26,8 +26,8 @@ class OpenRouterCatalogTest {
         assertEquals(1, result.models.length())
         assertEquals("community/Noromaid-20B:free", result.models.getJSONObject(0).getString("model"))
         assertEquals(5, result.modelsSeen)
-        assertEquals(3, result.candidates)
-        assertEquals(2, result.freeVariants)
+        assertEquals(4, result.candidates)
+        assertEquals(3, result.freeVariants)
         assertEquals(2, result.zeroPriced)
         assertEquals(1, result.eligible)
     }
