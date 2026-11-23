@@ -658,6 +658,7 @@ object ChatEngine {
         val safe = ShelfWatcher.safeName(name) ?: return "Недопустимое имя файла"
         val file = File(root, "shelf/" + safe)
         if (!file.isFile) return "Файл не найден"
+        if (file.length() > 8L * 1024L * 1024L) return "Файл превышает безопасный предел чтения 8 МиБ"
         val bytes = runCatching { file.readBytes() }.getOrElse { return "Файл недоступен" }
         val mime = Vision.mimeOf(bytes)
         val lower = safe.lowercase(java.util.Locale.ROOT)
@@ -688,6 +689,14 @@ object ChatEngine {
         }
     }
 
+    private fun shelfMagic(file: File): ByteArray = runCatching {
+        file.inputStream().use { input ->
+            val header = ByteArray(16)
+            val count = input.read(header)
+            if (count <= 0) byteArrayOf() else header.copyOf(count)
+        }
+    }.getOrDefault(byteArrayOf())
+
     private fun shelfListing(root: File): String {
         val files = File(root, "shelf").listFiles()?.filter { it.isFile }?.sortedBy { it.name.lowercase() }.orEmpty()
         if (files.isEmpty()) return "Полка пуста."
@@ -696,7 +705,7 @@ object ChatEngine {
             val kind = when {
                 lower.endsWith(".docx") || lower.endsWith(".odt") -> "office"
                 lower.endsWith(".txt") || lower.endsWith(".md") || lower.endsWith(".csv") -> "text"
-                Vision.mimeOf(runCatching { file.readBytes() }.getOrDefault(byteArrayOf())) != null -> "image"
+                Vision.mimeOf(shelfMagic(file)) != null -> "image"
                 else -> "file"
             }
             "${file.name} · ${file.length()} байт · $kind"
