@@ -144,6 +144,9 @@ class RuriLifeWorker(
                     }
                     try {
                         val reply = ChatEngine.respond(root, commanderId)
+                        if (!CommanderReplyQueue.isAnswered(root, commanderId)) {
+                            throw IllegalStateException("Модель вернула управление без сохранённого ответа; сообщение оставлено в очереди")
+                        }
                         val replyId = ChatEngine.lastSavedReplyId()
                         if (reply != ChatEngine.OFFLINE_REPLY) Notifier.thought(appContext, reply, replyId)
                     } catch (drainError: Exception) {
