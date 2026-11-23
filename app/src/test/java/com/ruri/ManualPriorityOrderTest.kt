@@ -95,4 +95,59 @@ class ManualPriorityOrderTest {
         assertTrue(updated.getJSONObject(1).getBoolean("vision"))
         assertFalse(config.getBoolean("nsfw_override"))
     }
+    @Test
+    fun autoUsesManualPriorityOrderRegardlessOfSelectedModel() {
+        val root = root()
+        try {
+            val config = JSONObject(FileManager.read(root, "core/config.json"))
+                .put("route_mode", "AUTO").put("selected_route_id", "routeway")
+            FileManager.write(root, "core/config.json", config.toString(2))
+            assertEquals(listOf(1, 0), RouteSelector.orderedIndices(root, models(), 0, Task.CHAT))
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test
+    fun manualPinsAllRequestsToSelectedModelWithoutFallback() {
+        val root = root()
+        try {
+            val config = JSONObject(FileManager.read(root, "core/config.json"))
+                .put("route_mode", "MANUAL").put("selected_route_id", "routeway")
+            FileManager.write(root, "core/config.json", config.toString(2))
+            assertEquals(listOf(0), RouteSelector.orderedIndices(root, models(), 1, Task.CHAT))
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test
+    fun manualFallbackStartsWithSelectedThenUsesPriorityOrder() {
+        val root = root()
+        try {
+            val config = JSONObject(FileManager.read(root, "core/config.json"))
+                .put("route_mode", "MANUAL_FALLBACK").put("selected_route_id", "routeway")
+            FileManager.write(root, "core/config.json", config.toString(2))
+            assertEquals(listOf(0, 1), RouteSelector.orderedIndices(root, models(), 1, Task.CHAT))
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test
+    fun manualVisionRequiresSelectedRouteToDeclareVision() {
+        val root = root()
+        try {
+            val config = JSONObject(FileManager.read(root, "core/config.json"))
+                .put("route_mode", "MANUAL").put("selected_route_id", "routeway-minimax")
+            FileManager.write(root, "core/config.json", config.toString(2))
+            assertEquals(emptyList<Int>(), RouteSelector.orderedIndices(root, models(), 1, Task.VISION))
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test
+    fun savingRouteModeAndSelectedRoutePersistsBoth() {
+        val config = JSONObject().put("models", models())
+        val payload = JSONObject().put("route_mode", "MANUAL_FALLBACK")
+            .put("selected_route_id", "routeway").put("routes", JSONArray())
+        RouteSelector.applyManualRouteOrder(config, payload)
+        assertEquals("MANUAL_FALLBACK", config.getString("route_mode"))
+        assertEquals("routeway", config.getString("selected_route_id"))
+        assertEquals(0, config.getInt("current"))
+    }
+
 }
