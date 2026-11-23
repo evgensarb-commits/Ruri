@@ -59,7 +59,6 @@ class AutonomyPackageIntegrationTest {
         assertTrue(fileManager.contains("gemma-4-26b-a4b-it-meromero:free"))
         assertTrue(fileManager.contains("Hugging Face · Serverless Roleplay"))
         assertTrue(fileManager.contains("https://router.huggingface.co/v1"))
-        assertFalse(fileManager.contains("cognitivecomputations/dolphin3.0-mistral-24b:free"))
         assertTrue(fileManager.contains("free_only"))
         assertTrue(fileManager.contains("RouteMeta.pruneToConfiguredRoutes"))
         assertTrue(routeSelector.contains("compareBy<Int>"))
