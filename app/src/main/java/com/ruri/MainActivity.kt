@@ -822,12 +822,39 @@ class MainActivity : AppCompatActivity() {
             return try {
                 val requested = JSONArray(modelsJson)
                 require(requested.length() in 1..30) { "Нет подтверждённых бесплатных NSFW/RP-моделей OpenRouter" }
-                val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
-                val models = config.optJSONArray("models") ?: JSONArray()
-                val openRouter = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
+                var config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
+                var models = config.optJSONArray("models") ?: JSONArray()
+                var openRouter = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
                     .firstOrNull { it.optString("id") == "openrouter" }
-                    ?: throw IllegalStateException("Маршрут OpenRouter не найден")
-                require(openRouter.optString("api_key").isNotBlank()) { "Сначала сохрани OpenRouter API key" }
+                if (openRouter == null) {
+                    // Recover a missing base route from the HF route template. Its credential
+                    // is already stored independently under the stable "openrouter" secret ID.
+                    val template = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
+                        .firstOrNull { it.optString("id") == "hf" }
+                        ?: throw IllegalStateException("Не найден шаблон маршрута для OpenRouter")
+                    openRouter = JSONObject(template.toString()).apply {
+                        put("id", "openrouter")
+                        put("name", "OpenRouter · free NSFW pool")
+                        put("model", "")
+                        put("base_url", "https://openrouter.ai/api/v1")
+                        put("enabled", false)
+                        put("vision", false)
+                        put("priority", 999)
+                        remove("api_key_ref")
+                        remove("hf_model")
+                        remove("hf_provider")
+                    }
+                    models.put(openRouter)
+                    SecretStore.saveRuntimeConfig(filesDir, config.toString(2))
+                    config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
+                    models = config.optJSONArray("models") ?: JSONArray()
+                    openRouter = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
+                        .firstOrNull { it.optString("id") == "openrouter" }
+                }
+                openRouter ?: throw IllegalStateException("Не удалось восстановить маршрут OpenRouter")
+                require(openRouter.optString("api_key").isNotBlank()) {
+                    "Ключ OpenRouter не найден в Android Keystore — сохрани его заново"
+                }
                 val verified = (0 until verifiedOpenRouterCatalog.length())
                     .mapNotNull { verifiedOpenRouterCatalog.optJSONObject(it) }
                 require(verified.isNotEmpty()) { "Сначала заново загрузи проверенный каталог OpenRouter" }
