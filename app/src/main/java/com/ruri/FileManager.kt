@@ -801,68 +801,80 @@ object FileManager {
             if (sourceMeromeroId != "routeway") {
                 SecretStore.migrateRoutewayFallbackKey(root, sourceMeromeroId, "routeway")
             }
-            val meromeroId = "routeway"
-            if (!meromero.optString("model").contains("meromero", ignoreCase = true)) {
-                meromero.put("model", "gemma-4-26b-a4b-it-meromero:free")
-            }
-            val manualOrderMigration = !config.optBoolean("manual_route_order_v1", false)
-            meromero.put("id", meromeroId)
+            val meromero = meromero
+                .put("id", "routeway")
                 .put("name", "Routeway · Gemma MeroMero Free")
                 .put("base_url", "https://api.routeway.ai/v1")
+                .put("model", "gemma-4-26b-a4b-it-meromero:free")
                 .put("api_key", "")
                 .put("free_tier", true)
                 .put("enabled", true)
-            if (manualOrderMigration) {
-                meromero.put("priority", 2).put("nsfw", true).put("vision", true)
-            } else {
-                if (!meromero.has("priority")) meromero.put("priority", 2)
-                if (!meromero.has("nsfw")) meromero.put("nsfw", true)
-                if (!meromero.has("vision")) meromero.put("vision", true)
+                .put("nsfw", true)
+                .put("vision", true)
+            if (!config.optBoolean("nsfw_only_routes_v1", false)) {
+                meromero.put("priority", 1)
+            } else if (!meromero.has("priority")) {
+                meromero.put("priority", 1)
             }
             if (meromero.optLong("tokens_per_day", 0L) <= 0L) {
                 meromero.put("tokens_per_day", 400000L)
             }
 
-            val minimaxSource = (0 until sourceModels.length()).mapNotNull { sourceModels.optJSONObject(it) }
-                .firstOrNull { it.optString("model") == "minimax-m3.1-flash:free" }
-            val minimax = minimaxSource?.let { JSONObject(it.toString()) } ?: JSONObject()
-            minimax.put("id", "routeway-minimax")
-                .put("name", "MiniMax M3.1 Flash Free")
-                .put("base_url", "https://api.routeway.ai/v1")
+            val dolphinSource = (0 until sourceModels.length()).mapNotNull { sourceModels.optJSONObject(it) }
+                .firstOrNull {
+                    it.optString("id") == "openrouter-dolphin" ||
+                        it.optString("model") == "cognitivecomputations/dolphin3.0-mistral-24b:free"
+                }
+            val dolphin = dolphinSource?.let { JSONObject(it.toString()) } ?: JSONObject()
+            dolphin.put("id", "openrouter-dolphin")
+                .put("name", "OpenRouter · Dolphin 3.0 Mistral 24B Free")
+                .put("base_url", "https://openrouter.ai/api/v1")
+                .put("model", "cognitivecomputations/dolphin3.0-mistral-24b:free")
                 .put("api_key", "")
-                .put("model", "minimax-m3.1-flash:free")
                 .put("free_tier", true)
                 .put("enabled", true)
-            if (manualOrderMigration) {
-                minimax.put("priority", 1).put("nsfw", false).put("vision", false)
-            } else {
-                if (!minimax.has("priority")) minimax.put("priority", 1)
-                if (!minimax.has("nsfw")) minimax.put("nsfw", false)
-                if (!minimax.has("vision")) minimax.put("vision", false)
+                .put("nsfw", true)
+                .put("vision", false)
+                .put("rpd", 50)
+                .put("requests_per_day", 50)
+                .put("tokens_per_day", 0)
+                .put("reset_hour_utc", 0)
+            if (!config.optBoolean("nsfw_only_routes_v1", false)) {
+                dolphin.put("priority", 2)
+            } else if (!dolphin.has("priority")) {
+                dolphin.put("priority", 2)
             }
 
-            val kept = JSONArray().put(meromero).put(minimax)
+            val kept = JSONArray().put(meromero).put(dolphin)
+            val keepIds = setOf("routeway", "openrouter-dolphin")
+            for (index in 0 until sourceModels.length()) {
+                val old = sourceModels.optJSONObject(index) ?: continue
+                val oldId = old.optString("id")
+                if (oldId.isNotBlank() && oldId !in keepIds) {
+                    SecretStore.removeModelKey(root, oldId)
+                }
+            }
+
             val selectedId = config.optString("selected_route_id")
             val selectedIndex = (0 until kept.length()).firstOrNull { index ->
                 kept.optJSONObject(index)?.optString("id") == selectedId
             }
-            val selectedCurrent = selectedIndex ?: config.optInt("current", 0).coerceIn(0, 1)
+            val selectedCurrent = selectedIndex ?: 0
             config.put("models", kept)
                 .put("current", selectedCurrent)
                 .put("free_only", true)
                 .put("two_route_migration_v1", true)
+                .put("nsfw_only_routes_v1", true)
                 .put("manual_route_order_v1", true)
+                .remove("api_key")
             if (!config.has("nsfw_override")) config.put("nsfw_override", true)
             if (!config.has("route_mode")) config.put("route_mode", "AUTO")
-            if (selectedIndex == null) {
-                val selected = kept.optJSONObject(selectedCurrent)
-                config.put("selected_route_id", selected?.optString("id") ?: "routeway")
-            }
+            if (selectedIndex == null) config.put("selected_route_id", "routeway")
 
             val normalized = config.toString(2)
             if (normalized != raw) atomicWrite(file, normalized)
         } catch (e: Exception) {
-            android.util.Log.w("Ruri", "Free-route model migration skipped; original model configuration was preserved", e)
+            android.util.Log.w("Ruri", "NSFW free-route migration skipped; original model configuration was preserved", e)
         }
     }
 
