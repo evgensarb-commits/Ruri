@@ -54,7 +54,7 @@ class CommanderReplyQueueTest {
         FileManager.appendEvent(root, org.json.JSONObject()
             .put("id", "legacy-msg-2").put("type", "message").put("who", "commander").put("text", "Второе").put("ts", now + 1L))
         OfflineQueue.markPending(root)
-        assertEquals("legacy-msg-1", CommanderReplyQueue.recoverLatestUnanswered(root))
+        assertEquals("legacy-msg-1", CommanderReplyQueue.recoverUnanswered(root))
         assertEquals(2, CommanderReplyQueue.pendingCount(root))
         assertEquals("legacy-msg-1", CommanderReplyQueue.nextDue(root, System.currentTimeMillis())?.optString("message_id"))
     }
