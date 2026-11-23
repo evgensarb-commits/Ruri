@@ -104,8 +104,8 @@ class LastSeenSuccessfulOnlyTest {
 }
 
 class VisionProbeLoggedTest {
-    @Test fun everyCapabilityProbeIsStoredAndUpdatesSelfModelLimitations() {
-        val root = packageFRoot("ruri-vision-probe-log")
+    @Test fun manuallyDeclaredVisionRouteIsSelectedWithoutProbeOrAutoCapabilityMutation() {
+        val root = packageFRoot("ruri-vision-manual-declaration")
         try {
             val models = JSONArray().put(
                 JSONObject()
@@ -115,23 +115,20 @@ class VisionProbeLoggedTest {
                     .put("api_key", "test-key")
                     .put("free_tier", true)
                     .put("enabled", true)
+                    .put("vision", true)
+                    .put("priority", 1)
             )
-            assertNull(Vision.findVisionRoute(
+            val selected = Vision.findVisionRoute(
                 root, models, 0, online = true, vpn = false,
-                probeRoute = { false }, now = 1_800_000_000_000L
-            ))
-            val probe = FileManager.readLastLines(root, "memory/L0_raw.jsonl", 50)
+                probeRoute = { throw AssertionError("Manual declaration must not probe provider") }
+            )
+            assertEquals("vision-route", selected?.optString("id"))
+            val events = FileManager.readLastLines(root, "memory/L0_raw.jsonl", 50)
                 .mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
-                .last { it.optString("type") == "vision_probe_result" }
-            assertEquals("vision-route", probe.optString("route"))
-            assertFalse(probe.optBoolean("capable"))
-            assertTrue(probe.optString("snippet").isNotBlank())
-            var self = JSONObject(FileManager.read(root, "memory/self_model.json"))
-            assertTrue(self.optJSONArray("limitations").toString().contains("vision_probe:"))
-            Capabilities.ensure(root)
-            self = JSONObject(FileManager.read(root, "memory/self_model.json"))
-            assertTrue(self.optJSONArray("limitations").toString().contains("vision_probe:"))
-            assertTrue(Capabilities.bodySection(root).contains("vision_probe:"))
+            assertFalse(events.any { it.optString("type") == "vision_probe_result" })
+            val self = JSONObject(FileManager.read(root, "memory/self_model.json"))
+            assertFalse(self.optJSONArray("limitations").toString().contains("vision_probe:"))
+            assertFalse(Capabilities.bodySection(root).contains("vision_probe:"))
         } finally {
             root.deleteRecursively()
         }
