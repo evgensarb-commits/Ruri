@@ -70,4 +70,18 @@ class CommanderReplyQueueTest {
         assertEquals("older", CommanderReplyQueue.firstPending(root)?.optString("message_id"))
     }
 
+    @Test fun recoveryFillsMissingMessagesEvenWhenOutboxAlreadyHasPendingItems() {
+        val root = root()
+        FileManager.init(root)
+        val now = System.currentTimeMillis()
+        repeat(3) { index ->
+            FileManager.appendEvent(root, org.json.JSONObject()
+                .put("id", "partial-$index").put("type", "message").put("who", "commander")
+                .put("text", "Message $index").put("ts", now + index))
+        }
+        CommanderReplyQueue.enqueue(root, "partial-0")
+        assertEquals("partial-1", CommanderReplyQueue.recoverUnanswered(root))
+        assertEquals(3, CommanderReplyQueue.pendingCount(root))
+    }
+
 }
