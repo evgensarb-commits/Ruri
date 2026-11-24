@@ -59,12 +59,16 @@ class LongDetectTest {
     @Test fun longContextSwitchesTaskExceptVision() {
         assertEquals(Task.LONG, RouteSelector.detectTaskWithContext("привет", estimatedTokens = 131000))
         assertEquals(Task.CHAT, RouteSelector.detectTaskWithContext("привет", estimatedTokens = 130000))
-        assertEquals(Task.REASON, RouteSelector.detectTaskWithContext("докажи теорему", estimatedTokens = 200000))
+        assertEquals(Task.LONG, RouteSelector.detectTaskWithContext("докажи теорему", estimatedTokens = 200000))
         assertEquals(Task.VISION, RouteSelector.detectTaskWithContext("что на фото?", hasImage = true, estimatedTokens = 500000))
     }
 }
 
 class RuriV2RoutingFixture {
+    /** Migration result as seen in memory, with provider keys (production keeps them in SecretStore). */
+    var migratedConfig: JSONObject? = null
+        private set
+
     fun migratedRoot(): File {
         val root = Files.createTempDirectory("ruri-v2-routing").toFile()
         FileManager.init(root)
@@ -77,7 +81,12 @@ class RuriV2RoutingFixture {
             .put("model", "arliai/qwq-32b-arliai-rpr-v1:free")
             .put("free_tier", true).put("enabled", true))
         RouterAPIMigration.applyMigration(cfg)
-        FileManager.write(root, "core/config.json", cfg.toString(2))
+        migratedConfig = JSONObject(cfg.toString())
+        // Persist the public half exactly as SecretStore does: provider keys never touch config.json.
+        val public = JSONObject(cfg.toString())
+        val ms = public.optJSONArray("models") ?: JSONArray()
+        for (i in 0 until ms.length()) ms.optJSONObject(i)?.put("api_key", "")
+        FileManager.write(root, "core/config.json", public.toString(2))
         return root
     }
 
@@ -204,7 +213,7 @@ class SingleRouterAPIKeyTest {
         val fixture = RuriV2RoutingFixture()
         val root = fixture.migratedRoot()
         try {
-            val models = fixture.migratedModels(root)
+            val models = fixture.migratedConfig!!.getJSONArray("models")
             val keys = (0 until models.length()).mapNotNull { i ->
                 val m = models.optJSONObject(i) ?: return@mapNotNull null
                 if (m.optString("id").startsWith("routerapi-")) m.optString("api_key") else null
