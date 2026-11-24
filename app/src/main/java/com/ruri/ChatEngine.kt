@@ -159,7 +159,7 @@ object ChatEngine {
             val id = selected?.optString("id")?.ifBlank { "route_$current" } ?: "route_$current"
             val meta = RouteMeta.route(root, id)
             val reason = when {
-                selected == null -> "Нет доступного маршрута: список бесплатных моделей пуст"
+                selected == null -> "Нет доступного маршрута: список моделей пуст"
                 selected.optString("api_key").isBlank() -> "Маршрут $name: API-ключ не задан"
                 else -> "Маршрут $name: Android сообщает, что сетевого подключения нет"
             }
@@ -167,7 +167,7 @@ object ChatEngine {
         }
         if (models.length() == 0) {
             OfflineQueue.markPending(root)
-            throw IllegalStateException("Нет настроенных бесплатных маршрутов с полной памятью")
+            throw IllegalStateException("Нет настроенных маршрутов с полной памятью")
         }
         // Retry transient failures only. HTTP 429 hands off immediately to the next free route.
         val attemptsByModel = mutableMapOf<Int, Int>()
@@ -288,7 +288,7 @@ object ChatEngine {
             }
             val reason = when {
                 specificReason.isNotBlank() -> specificReason
-                else -> "Нет настроенного бесплатного маршрута с API-ключом."
+                else -> "Нет настроенного маршрута с API-ключом."
             }
             throw IllegalStateException(reason)
         }

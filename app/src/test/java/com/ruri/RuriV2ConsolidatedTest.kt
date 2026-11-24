@@ -553,4 +553,19 @@ class UnifiedRoutesTest {
         assertTrue(html.contains("saveRoutewayKey"))
         assertTrue(html.contains("primaryRouteSelect"))
     }
+
+    @Test fun liveDiagnosticsProbeEveryEnabledProvider() {
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        // The diagnostics screen must offer a real connection test, not only cached counters.
+        assertTrue(html.contains("id=\"verifyRoutes\""))
+        assertTrue(html.contains("ПРОВЕРИТЬ СВЯЗЬ С ПРОВАЙДЕРАМИ"))
+        val bridge = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        assertTrue(bridge.contains("fun verifyRoutes"))
+        val probe = RepoSources.text("app/src/main/java/com/ruri/Probe.kt")
+        assertTrue(probe.contains("authenticatedStatus"))
+        // Eligibility must never gate on free_tier: paid routes must be reachable.
+        assertTrue(probe.contains("`free_tier` is telemetry, not a gate"))
+        val selector = RepoSources.text("app/src/main/java/com/ruri/RouteSelector.kt")
+        assertFalse(selector.contains("model.optBoolean(\"free_tier\""))
+    }
 }

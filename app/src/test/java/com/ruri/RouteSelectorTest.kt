@@ -19,7 +19,7 @@ class RouteSelectorTest {
                 .put(JSONObject().put("id", "route-b").put("free_tier", true).put("enabled", true)
                     .put("api_key", "configured").put("priority", 2))
                 .put(JSONObject().put("id", "paid").put("free_tier", false).put("enabled", true)
-                    .put("api_key", "configured").put("priority", 0))
+                    .put("api_key", "configured").put("priority", 3))
 
             RouteMeta.update(root, "route-a") { it.getJSONObject("scores").put(Task.WARMTH.name, 0.1) }
             RouteMeta.update(root, "route-b") { it.getJSONObject("scores").put(Task.WARMTH.name, 0.9) }
@@ -27,12 +27,38 @@ class RouteSelectorTest {
             val order = RouteSelector.orderedIndices(
                 root, models, current = 0, task = Task.WARMTH, online = true, vpn = false
             )
-            assertEquals(listOf(0, 1), order)
+            assertEquals(listOf(0, 1, 2), order)
             val fallbackScores = RouteSelector.orderedIndices(
                 root, models, current = -1, task = Task.WARMTH, online = true, vpn = false
             )
-            assertEquals(listOf(0, 1), fallbackScores)
-            assertTrue(order.none { models.getJSONObject(it).optString("id") == "paid" })
+            assertEquals(listOf(0, 1, 2), fallbackScores)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun enabledPaidRoutesAreEligibleSoManualModeCanIsolateOnePaidModel() {
+        val root = Files.createTempDirectory("ruri-route-selector-paid").toFile()
+        try {
+            FileManager.init(root)
+            // Commander's exact scenario: Routeway tokens are exhausted for the day, so the
+            // paid Cydonia route is enabled and MANUAL mode must reach it — not silently
+            // collapse to an empty order because `free_tier` was treated as a gate.
+            val models = JSONArray()
+                .put(JSONObject().put("id", "routeway").put("free_tier", true).put("enabled", false)
+                    .put("api_key", "configured").put("priority", 1))
+                .put(JSONObject().put("id", "routerapi-cydonia").put("free_tier", false)
+                    .put("enabled", true).put("api_key", "configured").put("priority", 2))
+
+            val config = JSONObject(FileManager.read(root, "core/config.json"))
+                .put("route_mode", "MANUAL").put("selected_route_id", "routerapi-cydonia")
+            FileManager.write(root, "core/config.json", config.toString(2))
+
+            val order = RouteSelector.orderedIndices(
+                root, models, current = -1, task = Task.CHAT, online = true, vpn = false
+            )
+            assertEquals(listOf(1), order)
         } finally {
             root.deleteRecursively()
         }

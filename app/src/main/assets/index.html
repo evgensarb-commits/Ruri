@@ -123,6 +123,7 @@ button.action.secondary{background:transparent;color:var(--gold)}
 <section class="pane overlay-pane" id="pane-diag">
 <div class="scroll"><div class="overlay-head"><h2 class="section">СОСТОЯНИЕ <span>системы</span></h2><button id="closeDiagnostics">✕</button></div>
 <button class="action" id="run-diag" style="margin-bottom:12px">ОБНОВИТЬ ДАННЫЕ</button>
+<button class="action secondary" id="verifyRoutes" style="margin-bottom:12px">ПРОВЕРИТЬ СВЯЗЬ С ПРОВАЙДЕРАМИ</button>
 <button class="action secondary" id="forceRefreshRoutes" style="margin-bottom:12px">ПЕРЕПРОВЕРИТЬ ДОСТУПНОСТЬ</button>
 <pre id="diag-out" style="background:#050810;border:1px solid #32456d;color:#dde3ec;padding:12px;font:12px/1.5 monospace;border-radius:4px;white-space:pre-wrap;overflow-wrap:anywhere">Нажми «ОБНОВИТЬ ДАННЫЕ»</pre>
 <div class="card" id="l0Journal">
@@ -453,6 +454,20 @@ $('#run-diag').addEventListener('click',function(){
     var data=JSON.parse(Ruri.getDiagnostics());
     out.textContent=JSON.stringify(data,null,2);
   }catch(e){out.textContent='Ошибка диагностики: '+e.message;}
+});
+$('#verifyRoutes').addEventListener('click',function(){
+  var btn=this,out=$('#diag-out');
+  btn.disabled=true;out.textContent='Живая проверка маршрутов… (запрос к каждому включённому провайдеру, до ~10 с)';
+  try{
+    var data=JSON.parse(Ruri.verifyRoutes()||'{}');
+    if(data.error){out.textContent='Ошибка проверки: '+data.error;return;}
+    if(data.online===false){out.textContent='Нет сети — проверка не выполнялась.';return;}
+    var label={ok:'ОК',bad_key:'КЛЮЧ ОТКЛОНЁН (401)',no_credits:'НЕТ КРЕДИТОВ (402)',forbidden:'ДОСТУП ЗАПРЕЩЁН (403)',bad_model_path:'НЕВЕРНЫЙ ПУТЬ (404)',rate_limited:'ЛИМИТ (429)',provider_error:'ОШИБКА ПРОВАЙДЕРА (5xx)',network_failed:'СЕТЕВАЯ ОШИБКА',no_key:'КЛЮЧ НЕ ЗАДАН',no_base_url:'НЕВЕРНЫЙ АДРЕС'};
+    var lines=['ЖИВАЯ ПРОВЕРКА · '+new Date().toLocaleString('ru-RU')];
+    Object.keys(data.routes||{}).forEach(function(id){var r=data.routes[id];lines.push(r.name+' ('+id+'): '+(label[r.result]||r.result)+(r.http_status!=null?' · HTTP '+r.http_status:'')+(r.detail?' · '+r.detail:''));});
+    out.textContent=lines.join('\n');
+  }catch(e){out.textContent='Ошибка проверки: '+e.message;}
+  finally{btn.disabled=false;}
 });
 function loadNetworkDiagnostics(){try{var d=JSON.parse(Ruri.readNetworkDiagnostics()||'{}');if(!d.available){$('#networkDiagnostics').textContent=d.message||'Нет данных';return;}var rows=['Провайдер: '+(d.provider||'—'),'Модель: '+(d.model||'—'),'Сервер: '+(d.base_url||'—'),'DNS: '+(d.dns_status||'—')+' · '+(d.dns_addresses||0)+' адресов · '+(d.dns_ms==null?'—':d.dns_ms+' мс'),'TLS/подключение: '+(d.connect_tls_ms==null?'—':d.connect_tls_ms+' мс'),'Отправка: '+(d.write_ms==null?'—':d.write_ms+' мс'),'Ожидание HTTP: '+(d.response_wait_ms==null?'—':d.response_wait_ms+' мс'),'Чтение ответа: '+(d.response_body_ms==null?'—':d.response_body_ms+' мс'),'HTTP: '+(d.http_status==null?'—':d.http_status),'Этап: '+(d.stage||'—'),'Результат: '+(d.result||'—'),'Последний провайдер: '+(d.provider||'—')];var totals=JSON.parse(Ruri.getDiagnostics()||'{}').model_requests||{};rows.unshift('Нейросети: сегодня '+(totals.today_total||0)+' · всего '+(totals.lifetime_total||0)+' · 429 '+(totals.rate_limits_429_today||0)+' · сетевые ошибки '+(totals.network_errors_today||0)+' · региональные ограничения '+(totals.region_restrictions_today||0)+' · тайм-ауты '+(totals.timeouts_today||0));if(d.timeout_stage)rows.push('Тайм-аут: '+d.timeout_stage);if(d.error_type)rows.push('Тип ошибки: '+d.error_type);if(d.failure_message)rows.push('Причина: '+d.failure_message);$('#networkDiagnostics').textContent=rows.join('\\n');}catch(e){$('#networkDiagnostics').textContent='Ошибка чтения диагностики: '+e.message;}}
 $('#refreshNetworkDiagnostics').addEventListener('click',loadNetworkDiagnostics);

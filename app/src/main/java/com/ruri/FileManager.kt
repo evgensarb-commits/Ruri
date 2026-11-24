@@ -783,14 +783,19 @@ object FileManager {
             // v3: MiniMax and known-dead legacy routes are dropped; every other
             // configured route is preserved untouched (including user-disabled ones)
             // so manual priorities keep their meaning.
-            val legacyDeadIds = setOf("routeway-minimax", "requesty", "groq", "routeway-darksoul")
+            val legacyDeadIds = setOf("routeway-minimax", "requesty", "groq", "routeway-darksoul", "nemotron")
+            // Substring kill-list for routes that no longer exist at the provider. Matching
+            // the model string too removes ghosts whose ids were never standardised.
+            val legacyDeadMarkers = listOf("nemotron", "minimax-m3.1-flash:free")
             val kept = JSONArray()
             var hasMeromero = false
             for (i in 0 until sourceModels.length()) {
                 val model = sourceModels.optJSONObject(i) ?: continue
                 val modelId = model.optString("id")
                 val modelValue = model.optString("model")
-                if (modelId in legacyDeadIds || modelValue == "minimax-m3.1-flash:free") continue
+                val lowered = (modelId + " " + modelValue).lowercase()
+                if (modelId in legacyDeadIds) continue
+                if (legacyDeadMarkers.any { lowered.contains(it) }) continue
                 if (modelValue.contains("meromero", ignoreCase = true) ||
                     modelId.contains("meromero", ignoreCase = true)) hasMeromero = true
                 kept.put(model)

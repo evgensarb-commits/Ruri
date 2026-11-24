@@ -73,9 +73,13 @@ object RouteSelector {
         vpn: Boolean = NetState.vpn,
         adult: Boolean = false
     ): List<Int> {
+        // `free_tier` is informational telemetry only. It must never gate eligibility:
+        // a paid route the commander explicitly enabled has to be reachable, otherwise
+        // MANUAL / MANUAL_FALLBACK silently collapse to an empty order and no request
+        // is ever sent to the paid provider.
         val eligible = (0 until models.length()).filter { index ->
             val model = models.optJSONObject(index) ?: return@filter false
-            model.optBoolean("free_tier", true) && model.optBoolean("enabled", true)
+            model.optBoolean("enabled", true)
         }
         var order = eligible.sortedWith(
             compareBy<Int> { models.optJSONObject(it)?.optInt("priority", 99) ?: 99 }
