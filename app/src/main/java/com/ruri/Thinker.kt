@@ -118,7 +118,7 @@ object Thinker {
         for (index in order) {
             val model = models.optJSONObject(index) ?: continue
             // All cognition routes must carry the full memory context.
-            if (model.optString("api_key").isBlank()) continue
+            if (model.optString("api_key").isBlank() && !model.optBoolean("api_key_optional", false)) continue
             val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
             val requestNext: (JSONArray) -> String? = { nextMessages ->
                 if (followupRequests >= 8) {
