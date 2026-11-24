@@ -74,7 +74,7 @@ class RouteSelectorTest {
 }
 
 class OnlyTwoRoutesTest {
-    @Test fun migrationKeepsOnlyMeroMeroAndMiniMaxAndPrunesOldMetadata() {
+    @Test fun migrationDropsMinimaxAndLegacyDeadRoutesAndKeepsConfiguredOnes() {
         val root = Files.createTempDirectory("ruri-only-two-routes").toFile()
         try {
             FileManager.init(root)
@@ -83,62 +83,68 @@ class OnlyTwoRoutesTest {
                 .put(JSONObject().put("id", "routeway").put("name", "MeroMero")
                     .put("base_url", "https://api.routeway.ai/v1")
                     .put("model", "gemma-4-26b-a4b-it-meromero:free")
-                    .put("free_tier", true).put("enabled", true))
+                    .put("free_tier", true).put("enabled", true).put("priority", 1))
+                .put(JSONObject().put("id", "routeway-minimax").put("model", "minimax-m3.1-flash:free")
+                    .put("free_tier", true).put("enabled", true).put("priority", 2))
                 .put(JSONObject().put("id", "requesty").put("model", "legacy-requesty")
                     .put("free_tier", true).put("enabled", true))
                 .put(JSONObject().put("id", "groq").put("model", "legacy-groq")
                     .put("free_tier", false).put("enabled", false))
-                .put(JSONObject().put("id", "routeway-darksoul").put("name", "Gemma Darksoul")
-                    .put("base_url", "https://api.routeway.ai/v1")
-                    .put("model", "gemma-4-26b-a4b-it-darksoul:free")
-                    .put("free_tier", true).put("enabled", true))
             config.put("models", oldModels).put("current", 2)
-                .put("route_mode", "MANUAL")
-                .put("selected_route_id", "routeway-darksoul")
             FileManager.write(root, "core/config.json", config.toString(2))
-            FileManager.write(root, RouteMeta.PATH, JSONObject()
-                .put("routeway", JSONObject().put("day_count", 1))
-                .put("requesty", JSONObject().put("day_count", 2))
-                .put("groq", JSONObject().put("day_count", 3))
-                .put("routeway-darksoul", JSONObject().put("day_count", 4)).toString(2))
+
+            FileManager.init(root)
+
+            val migrated = JSONObject(FileManager.read(root, "core/config.json"))
+            val models = migrated.getJSONArray("models")
+            val ids = (0 until models.length()).map { models.getJSONObject(it).optString("id") }
+            assertEquals(listOf("routeway"), ids)
+            assertTrue(models.getJSONObject(0).getString("model").contains("meromero"))
+            assertTrue(migrated.getBoolean("routes_v3_no_minimax"))
+            assertFalse(ids.contains("routeway-minimax"))
+            assertFalse(ids.contains("requesty"))
+            assertFalse(ids.contains("groq"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test fun migrationKeepsUserDisabledAndCustomRoutesUntouched() {
+        val root = Files.createTempDirectory("ruri-custom-routes").toFile()
+        try {
+            FileManager.init(root)
+            val config = JSONObject(FileManager.read(root, "core/config.json"))
+            val oldModels = JSONArray()
+                .put(JSONObject().put("id", "routeway").put("model", "gemma-4-26b-a4b-it-meromero:free")
+                    .put("free_tier", true).put("enabled", false).put("priority", 1))
+                .put(JSONObject().put("id", "routerapi-glm").put("model", "z-ai/glm-5.3-flash")
+                    .put("free_tier", true).put("enabled", true).put("priority", 2))
+            config.put("models", oldModels)
+            FileManager.write(root, "core/config.json", config.toString(2))
 
             FileManager.init(root)
 
             val migrated = JSONObject(FileManager.read(root, "core/config.json"))
             val models = migrated.getJSONArray("models")
             assertEquals(2, models.length())
-            assertTrue(models.getJSONObject(0).getString("model").contains("meromero"))
-            assertEquals("minimax-m3.1-flash:free", models.getJSONObject(1).getString("model"))
-            assertEquals(2, models.getJSONObject(0).getInt("priority"))
-            assertTrue(models.getJSONObject(0).getBoolean("nsfw"))
-            assertTrue(models.getJSONObject(0).getBoolean("vision"))
-            assertEquals(1, models.getJSONObject(1).getInt("priority"))
-            assertFalse(models.getJSONObject(1).getBoolean("nsfw"))
-            assertFalse(models.getJSONObject(1).getBoolean("vision"))
-            assertTrue(migrated.getBoolean("nsfw_override"))
-            assertEquals("routeway-minimax", migrated.getString("selected_route_id"))
-            assertEquals(1, migrated.getInt("current"))
-            val metadata = RouteMeta.load(root)
-            assertTrue(metadata.has("routeway"))
-            assertFalse(metadata.has("requesty"))
-            assertFalse(metadata.has("groq"))
-            assertFalse(metadata.has("routeway-darksoul"))
+            // The Commander disabled MeroMero on purpose: migration must not re-enable it.
+            assertFalse(models.getJSONObject(0).getBoolean("enabled"))
+            assertEquals("routerapi-glm", models.getJSONObject(1).optString("id"))
         } finally {
             root.deleteRecursively()
         }
     }
 }
 
-class MinimaxFreeIdTest {
-    @Test fun configUsesOnlyTheExplicitFreeMiniMaxModelId() {
-        val root = Files.createTempDirectory("ruri-minimax-free-id").toFile()
+class NoMinimaxAfterMigrationTest {
+    @Test fun freshConfigHasNoMinimaxRoute() {
+        val root = Files.createTempDirectory("ruri-no-minimax").toFile()
         try {
             FileManager.init(root)
             val models = JSONObject(FileManager.read(root, "core/config.json")).getJSONArray("models")
-            val minimax = (0 until models.length()).map { models.getJSONObject(it) }
-                .first { it.optString("id") == "routeway-minimax" }
-            assertEquals("minimax-m3.1-flash:free", minimax.getString("model"))
-            assertFalse(minimax.getString("model") == "minimax-m3.1-flash")
+            val ids = (0 until models.length()).map { models.getJSONObject(it).optString("id") }
+            assertFalse(ids.contains("routeway-minimax"))
+            assertTrue(ids.contains("routeway"))
         } finally {
             root.deleteRecursively()
         }
@@ -155,7 +161,6 @@ class VisionGemmaOnlyTest {
             val config = JSONObject(FileManager.read(root, "core/config.json"))
             val configured = config.getJSONArray("models")
             configured.getJSONObject(0).put("vision", false)
-            configured.getJSONObject(1).put("vision", false)
             FileManager.write(root, "core/config.json", config.toString(2))
             assertEquals(null, Vision.cachedVisionRoute(root))
         } finally {
@@ -169,9 +174,7 @@ class VisionGemmaOnlyTest {
             val models = JSONArray()
                 .put(JSONObject().put("id", "routeway").put("model", "gemma-4-26b-a4b-it-meromero:free")
                     .put("tokens_per_day", 400000).put("vision", true).put("free_tier", true).put("enabled", true).put("api_key", "set"))
-                .put(JSONObject().put("id", "routeway-minimax").put("model", "minimax-m3.1-flash:free")
-                    .put("free_tier", true).put("enabled", true).put("api_key", "set"))
-            val order = RouteSelector.orderedIndices(root, models, current = 1, task = Task.VISION, online = true, vpn = false)
+            val order = RouteSelector.orderedIndices(root, models, current = 0, task = Task.VISION, online = true, vpn = false)
             assertEquals(listOf(0), order)
         } finally {
             root.deleteRecursively()
@@ -188,10 +191,8 @@ class QuotaOrderTest {
             val models = JSONArray()
                 .put(JSONObject().put("id", "routeway").put("model", "gemma-4-26b-a4b-it-meromero:free")
                     .put("tokens_per_day", 400000).put("free_tier", true).put("enabled", true).put("api_key", "set"))
-                .put(JSONObject().put("id", "routeway-minimax").put("model", "minimax-m3.1-flash:free")
-                    .put("free_tier", true).put("enabled", true).put("api_key", "set"))
             val order = RouteSelector.orderedIndices(root, models, current = 0, task = Task.CHAT, online = true, vpn = false)
-            assertEquals(listOf(0, 1), order)
+            assertEquals(listOf(0), order)
         } finally {
             root.deleteRecursively()
         }

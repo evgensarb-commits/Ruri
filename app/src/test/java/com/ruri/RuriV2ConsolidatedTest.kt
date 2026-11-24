@@ -471,3 +471,86 @@ class ShelfNamesOnlyTest {
         assertTrue(source.contains("(полный текст читай через read_shelf)"))
     }
 }
+
+class UnifiedRoutesTest {
+    @Test fun disabledRouteIsExcludedFromOrderingWithoutAnyRequest() {
+        val root = Files.createTempDirectory("ruri-unified-routes").toFile()
+        try {
+            FileManager.init(root)
+            val models = JSONArray()
+                .put(JSONObject().put("id", "routeway").put("model", "gemma-meromero:free")
+                    .put("free_tier", true).put("enabled", false).put("api_key", "set").put("priority", 1))
+                .put(JSONObject().put("id", "routerapi-glm").put("model", "z-ai/glm-5.3-flash")
+                    .put("free_tier", true).put("enabled", true).put("api_key", "set").put("priority", 2))
+            val order = RouteSelector.orderedIndices(root, models, 0, Task.CHAT, online = true, vpn = false)
+            assertEquals(listOf(1), order)
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun routeOrderPayloadCanToggleEnabledState() {
+        val config = JSONObject().put("models", JSONArray()
+            .put(JSONObject().put("id", "routeway").put("enabled", true).put("priority", 1))
+            .put(JSONObject().put("id", "routerapi-glm").put("enabled", true).put("priority", 2)))
+        val payload = JSONObject().put("routes", JSONArray()
+            .put(JSONObject().put("id", "routeway").put("priority", 1).put("enabled", false))
+            .put(JSONObject().put("id", "routerapi-glm").put("priority", 2).put("enabled", true)))
+        RouteSelector.applyManualRouteOrder(config, payload)
+        val models = config.getJSONArray("models")
+        assertFalse(models.getJSONObject(0).getBoolean("enabled"))
+        assertTrue(models.getJSONObject(1).getBoolean("enabled"))
+    }
+
+    @Test fun legacyPayloadWithoutEnabledFieldKeepsStateUntouched() {
+        val config = JSONObject().put("models", JSONArray()
+            .put(JSONObject().put("id", "routeway").put("enabled", false).put("priority", 1)))
+        val payload = JSONObject().put("routes", JSONArray()
+            .put(JSONObject().put("id", "routeway").put("priority", 3)))
+        RouteSelector.applyManualRouteOrder(config, payload)
+        assertFalse(config.getJSONArray("models").getJSONObject(0).getBoolean("enabled"))
+    }
+
+    @Test fun migrationDropsMinimaxEverywhere() {
+        val root = Files.createTempDirectory("ruri-unified-no-minimax").toFile()
+        try {
+            FileManager.init(root)
+            val config = JSONObject(FileManager.read(root, "core/config.json"))
+            config.put("models", JSONArray()
+                .put(JSONObject().put("id", "routeway").put("model", "gemma-4-26b-a4b-it-meromero:free")
+                    .put("free_tier", true).put("enabled", true))
+                .put(JSONObject().put("id", "routeway-minimax").put("model", "minimax-m3.1-flash:free")
+                    .put("free_tier", true).put("enabled", true))
+                .put(JSONObject().put("id", "routerapi-glm").put("model", "z-ai/glm-5.3-flash")
+                    .put("free_tier", true).put("enabled", true)))
+            FileManager.write(root, "core/config.json", config.toString(2))
+            FileManager.init(root)
+            val ids = (0 until JSONObject(FileManager.read(root, "core/config.json")).getJSONArray("models").length())
+                .map { JSONObject(FileManager.read(root, "core/config.json")).getJSONArray("models").getJSONObject(it).optString("id") }
+            assertFalse(ids.contains("routeway-minimax"))
+            assertTrue(ids.contains("routeway") && ids.contains("routerapi-glm"))
+            assertTrue(JSONObject(FileManager.read(root, "core/config.json")).optBoolean("routes_v3_no_minimax"))
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun freshInstallKeepsMeromeroWithoutMinimax() {
+        val root = Files.createTempDirectory("ruri-unified-fresh").toFile()
+        try {
+            FileManager.init(root)
+            val config = JSONObject(FileManager.read(root, "core/config.json"))
+            val models = config.getJSONArray("models")
+            val ids = (0 until models.length()).map { models.getJSONObject(it).optString("id") }
+            assertTrue(ids.contains("routeway"))
+            assertFalse(ids.contains("routeway-minimax"))
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun unifiedUiSingleRoutesCardWithoutLegacyProviderCard() {
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        assertTrue(html.contains("МАРШРУТЫ · ЕДИНАЯ НАСТРОЙКА"))
+        assertFalse(html.contains("ДВА БЕСПЛАТНЫХ МАРШРУТА"))
+        assertFalse(html.contains("ПРОВАЙДЕР ДЛЯ СОХРАНЕНИЯ КЛЮЧА"))
+        assertFalse(html.contains("\$('#saveKey')"))
+        assertTrue(html.contains("class=\"enabled\""))
+        assertTrue(html.contains("saveRoutewayKey"))
+        assertTrue(html.contains("primaryRouteSelect"))
+    }
+}

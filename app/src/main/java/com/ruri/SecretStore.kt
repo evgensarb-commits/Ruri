@@ -242,7 +242,7 @@ object SecretStore {
     }
 
     /**
-     * Reuses the existing Routeway credential for the MiniMax Routeway endpoint.
+     * Reuses the existing Routeway credential for another Routeway-hosted route.
      * The key remains encrypted in Android Keystore and is never copied into config.json.
      */
     fun migrateRoutewayFallbackKey(root: File, primaryRouteId: String, fallbackRouteId: String) = synchronized(lock) {
