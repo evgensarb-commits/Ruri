@@ -393,7 +393,7 @@ class FullMemoryGuardPassesTest {
 
     @Test fun incompleteMemoryContextIsRejected() {
         val messages = JSONArray()
-            .put(JSONObject().put("role", "system").put("content", "ТВОИ ФАКТЫ (L1) и L2 без L3 и recall"))
+            .put(JSONObject().put("role", "system").put("content", "ТВОИ ФАКТЫ (L1) и дневник без автобиографии"))
             .put(JSONObject().put("role", "user").put("content", "привет"))
         assertFalse(ChatEngine.hasFullMemoryContext(messages))
         assertNull(ChatEngine.providerMessagesWithFullMemory(messages))
