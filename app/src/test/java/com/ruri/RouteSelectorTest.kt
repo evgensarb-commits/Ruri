@@ -145,7 +145,7 @@ class RouterApiMigrationTest {
             val routerModels = (0 until models.length()).map { models.getJSONObject(it) }
                 .filter { it.optString("id").startsWith("routerapi-") }
             assertEquals(4, routerModels.size)
-            assertTrue(routerModels.all { !it.optBoolean("enabled") && it.optString("api_key").isBlank() })
+            assertTrue(routerModels.all { it.optBoolean("enabled") && it.optBoolean("api_key_optional") && it.optString("api_key").isBlank() })
             assertTrue(routerModels.all { !it.optBoolean("free_tier") })
             assertEquals("https://routerai.ru/api/v1", routerModels.first().getString("base_url"))
             assertTrue(config.getBoolean("routerapi_migration_v2"))
