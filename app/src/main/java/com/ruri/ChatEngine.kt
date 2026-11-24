@@ -829,6 +829,40 @@ object ChatEngine {
         return "Факт записан в твою L1-память с confidence 0.6."
     }
 
+    internal fun leanFollowup(full: JSONArray): JSONArray {
+        val out = JSONArray()
+        if (full.length() == 0) return out
+        out.put(full.getJSONObject(0))
+        val lastIndex = full.length() - 1
+        for (i in 1 until full.length()) {
+            val message = full.optJSONObject(i) ?: continue
+            val content = message.optString("content")
+            if (message.optString("role") == "user" &&
+                (content.startsWith("[ИНСТРУМЕНТ") || i == lastIndex)) out.put(message)
+        }
+        return out
+    }
+
+    internal fun notificationContext(root: File, limit: Int = 5): String {
+        val events = FileManager.readLastLines(
+            root, "memory/L0_raw.jsonl", maxLines = 6000, maxBytes = 4 * 1024 * 1024
+        ).mapNotNull { line ->
+            runCatching { JSONObject(line) }.getOrNull()
+                ?.takeIf { it.optString("type") == "phone_notification" }
+        }
+        val recent = events.takeLast(limit.coerceAtLeast(1))
+        val older = events.dropLast(recent.size)
+        val details = recent.joinToString("\n") { event ->
+            "- " + event.optString("package") + ": " + event.optString("title") + " — " + event.optString("text")
+        }
+        if (older.isEmpty()) return details
+        val topics = older.map { it.optString("title").ifBlank { it.optString("package") } }
+            .filter { it.isNotBlank() }.distinct().take(3)
+        val summary = "+" + older.size + " более старых уведомлений" +
+            if (topics.isEmpty()) "" else " (сводка: " + topics.joinToString("; ") + ")"
+        return listOf(summary, details).filter { it.isNotBlank() }.joinToString("\n")
+    }
+
     internal fun requestToolFollowup(model: JSONObject, messages: JSONArray, root: File? = null, routeId: String = "", task: Task? = null): String? {
         val base = model.optString("base_url").trimEnd('/')
         if (!base.startsWith("https://", ignoreCase = true)) {
