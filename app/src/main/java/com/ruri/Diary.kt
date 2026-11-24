@@ -24,6 +24,15 @@ object Diary {
         return false
     }
 
+    fun lastThoughtAt(root: File): Long {
+        val entries = runCatching {
+            JSONObject(FileManager.read(root, "memory/L2_diary.json")).optJSONArray("entries")
+        }.getOrNull() ?: return 0L
+        return (0 until entries.length()).maxOfOrNull { index ->
+            entries.optJSONObject(index)?.optLong("ts", 0L) ?: 0L
+        } ?: 0L
+    }
+
     @Synchronized
     fun append(root: File, text: String, trigger: String, emotion: JSONObject?, kind: String = "thought") {
         if (kind != "thought") return
