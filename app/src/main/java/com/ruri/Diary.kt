@@ -24,10 +24,10 @@ object Diary {
         return false
     }
 
-    fun thoughtCount(root: File): Int = runCatching {
-        JSONObject(FileManager.read(root, "memory/L2_diary.json"))
-            .optJSONArray("entries")?.length() ?: 0
-    }.getOrDefault(0)
+    fun thoughtCount(root: File): Long = runCatching {
+        val diary = JSONObject(FileManager.read(root, "memory/L2_diary.json"))
+        diary.optLong("total_entries", diary.optJSONArray("entries")?.length()?.toLong() ?: 0L)
+    }.getOrDefault(0L)
 
     fun lastThoughtAt(root: File): Long {
         val entries = runCatching {
