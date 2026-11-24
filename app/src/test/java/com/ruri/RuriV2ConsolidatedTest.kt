@@ -16,11 +16,12 @@ object RepoSources {
     fun text(relPath: String): String = file(relPath).readText()
 
     fun file(relPath: String): File {
-        var dir = File(System.getProperty("user.dir", ".")).absoluteFile
-        repeat(6) {
-            val candidate = File(dir, relPath)
+        var dir: File? = File(System.getProperty("user.dir", ".")).absoluteFile
+        for (i in 0 until 6) {
+            val d = dir ?: break
+            val candidate = File(d, relPath)
             if (candidate.isFile) return candidate
-            dir = dir.parentFile ?: break
+            dir = d.parentFile
         }
         error("Не найден файл $relPath от ${System.getProperty("user.dir")}")
     }
