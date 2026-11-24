@@ -249,7 +249,7 @@ object FileManager {
     }
 
     private fun migrateRouterApiRoutes(root: File) {
-        val config = runCatching { JSONObject(SecretStore.readRuntimeConfig(root)) }.getOrElse { return }
+        val config = runCatching { JSONObject(read(root, CONFIG_PATH)) }.getOrElse { return }
         if (config.optBoolean("routerapi_migration_v2", false)) return
 
         val base = config.optString("routerapi_base", "https://routerai.ru/api/v1")
