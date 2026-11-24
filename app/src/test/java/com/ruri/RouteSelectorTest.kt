@@ -215,6 +215,12 @@ class TaskRouteSequenceTest {
             FileManager.init(root)
             val config = JSONObject(FileManager.read(root, "core/config.json"))
             val models = config.getJSONArray("models")
+            for (index in 0 until models.length()) {
+                val model = models.getJSONObject(index)
+                if (model.optString("id").startsWith("routerapi-")) {
+                    model.put("enabled", model.optString("id") == "routerapi-glm" || model.optString("id") == "routerapi-deepseek")
+                }
+            }
             val order = RouteSelector.orderedIndices(
                 root, models, 0, Task.CODE, online = true, vpn = false, routeTaskKey = "code"
             )
