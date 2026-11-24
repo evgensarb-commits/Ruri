@@ -37,7 +37,10 @@ object ShelfWatcher {
         val safe = safeName(name) ?: return
         val root = ctx.filesDir
         val seen = readSeen(root)
-        if (seen.optBoolean(safe)) return
+        val f = File(root, "shelf/" + safe)
+        val sig = f.length().toString() + ":" + f.lastModified()
+        if (seen.optBoolean(safe) && seen.optString("sig:" + safe) == sig) return
+        seen.put("sig:" + safe, sig)
         seen.put(safe, true)
         FileManager.write(root, SEEN, seen.toString(2))
         LifeScheduler.enqueueEvent(ctx.applicationContext, "shelf_file_added:" + safe)

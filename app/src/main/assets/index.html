@@ -196,7 +196,7 @@ var box=$('#diary');box.innerHTML='';
 var visible=entries.filter(function(e){
 return (!e.id||!Ruri.isMessageDeleted(e.id))&&(e.kind||'thought')==='thought';
 }).slice(-100).reverse();
-visible.forEach(function(e){var d=messageNode('ruri',e.text,e.ts,e);var kind=e.kind==='said'?'СКАЗАЛА':'МЫСЛЬ';d.querySelector('.meta').firstChild.textContent=kind+' · '+new Date(e.ts||Date.now()).toLocaleString('ru-RU');box.appendChild(d);});
+visible.forEach(function(e){var d=messageNode('ruri',e.text,e.ts,e);var kind='МЫСЛЬ';d.querySelector('.meta').firstChild.textContent=kind+' · '+new Date(e.ts||Date.now()).toLocaleString('ru-RU');box.appendChild(d);});
 }catch(e){$('#diary').textContent='Ошибка чтения дневника: '+e.message;}
 }
 
