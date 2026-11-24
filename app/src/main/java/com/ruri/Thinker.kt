@@ -308,29 +308,13 @@ object Thinker {
         val recallQuery = (reason + " " + recentCommanderContext).take(900)
         val recalledMemories = MemoryRetriever.recall(root, recallQuery, limit = 5)
         val shelfNames = try { JSONArray(FileManager.list(root, "shelf")) } catch (_: Exception) { JSONArray() }
-        val shelfText = StringBuilder()
-        for (i in 0 until minOf(shelfNames.length(), 6)) {
-            val name = shelfNames.optString(i)
-            if (name.isNotBlank()) {
-                shelfText.append("\n--- ").append(name).append(" ---\n")
-                    .append(shelfContextText(root, name))
+        val shelfText = if (!initiative) "" else buildString {
+            for (i in 0 until minOf(shelfNames.length(), 6)) {
+                val name = shelfNames.optString(i)
+                if (name.isNotBlank()) append("\n- ").append(name).append(" (").append(name.substringAfterLast(".", "file")).append(")")
             }
         }
-        // Commander explicitly enabled full notification context for Ruri's cognition.
-        // Only authentication credentials are withheld; ordinary personal content remains visible.
-        val notificationLines = FileManager.readLastLines(
-            root, "memory/L0_raw.jsonl", maxLines = 6000, maxBytes = 4 * 1024 * 1024
-        )
-        val notificationText = notificationLines.asReversed().mapNotNull { line ->
-            try {
-                val event = JSONObject(line)
-                if (event.optString("type") != "phone_notification") return@mapNotNull null
-                val source = event.optString("package").take(160)
-                val title = event.optString("title")
-                val body = event.optString("text")
-                "- $source: $title — $body"
-            } catch (_: Exception) { null }
-        }.take(20).asReversed().joinToString("\n")
+        val notificationText = if (initiative) ChatEngine.notificationContext(root, 5) else ""
         val bodyEventText = FileManager.readLastLines(
             root, "memory/L0_raw.jsonl", maxLines = 1200, maxBytes = 1024 * 1024
         ).asReversed().mapNotNull { line ->
