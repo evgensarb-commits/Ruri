@@ -345,8 +345,8 @@ object ChatEngine {
             if (attempt > 1) Thread.sleep(if (attempt == 2) 2000L else 5000L)
             val model = models.optJSONObject(index) ?: continue
             val key = model.optString("api_key")
-            if (key.isBlank()) {
-                lastError = "${model.optString("name", model.optString("id"))}: требуется бесплатный API-ключ"
+            if (key.isBlank() && !model.optBoolean("api_key_optional", false)) {
+                lastError = "${model.optString("name", model.optString("id"))}: требуется API-ключ"
                 continue
             }
             val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
