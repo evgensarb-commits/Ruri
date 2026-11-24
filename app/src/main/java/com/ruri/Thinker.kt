@@ -308,12 +308,9 @@ object Thinker {
         val recalledMemories = MemoryRetriever.recall(root, recallQuery, limit = 5)
         val shelfNames = try { JSONArray(FileManager.list(root, "shelf")) } catch (_: Exception) { JSONArray() }
         val shelfText = StringBuilder()
-        for (i in 0 until minOf(shelfNames.length(), 6)) {
+        for (i in 0 until minOf(shelfNames.length(), 8)) {
             val name = shelfNames.optString(i)
-            if (name.isNotBlank()) {
-                shelfText.append("\n--- ").append(name).append(" ---\n")
-                    .append(shelfContextText(root, name))
-            }
+            if (name.isNotBlank()) shelfText.append("- ").append(name).append(" (полный текст читай через read_shelf)\n")
         }
         // Commander explicitly enabled full notification context for Ruri's cognition.
         // Only authentication credentials are withheld; ordinary personal content remains visible.
@@ -329,7 +326,7 @@ object Thinker {
                 val body = event.optString("text")
                 "- $source: $title — $body"
             } catch (_: Exception) { null }
-        }.take(20).asReversed().joinToString("\n")
+        }.let { all -> val recent = all.take(5).asReversed().toMutableList(); val older = all.size - 5; if (older > 0) recent.add("(ещё $older более старых уведомлений не показаны)"); recent.joinToString("\n") }
         val bodyEventText = FileManager.readLastLines(
             root, "memory/L0_raw.jsonl", maxLines = 1200, maxBytes = 1024 * 1024
         ).asReversed().mapNotNull { line ->
@@ -348,7 +345,7 @@ object Thinker {
                     else "Запрос: " + event.optString("query") + "\\n" + event.optString("text").take(5000)
                 }.getOrNull()
             }.take(4).asReversed().joinToString("\\n\\n")
-        val summary = readJson(root, "memory/L3_summary.json").optString("summary")
+        val summary = readJson(root, "memory/L3_summary.json").optString("summary").take(4000)
         val quiet = hoursSince(state.optLong("last_seen_commander"), System.currentTimeMillis())
         val outcomeDigest = OutcomeDigest.build(root)
         OutcomeDigest.clearPresentedCorrection(root)
@@ -378,7 +375,7 @@ object Thinker {
             "ТВОИ ФАКТЫ (L1):\n" + factText + "\n" +
             "ТВОЙ ДНЕВНИК (L2):\n" + diaryText + "\n" +
             "ТВОЯ АВТОБИОГРАФИЯ (L3):\n" + summary + "\n" +
-            "ПОСЛЕДНИЕ СОБЫТИЯ ТВОЕГО ТЕЛА (L0):\n" + bodyEventText + "\n" + notificationText + "\nМатериалы с полки:\n" + shelfText + "\n"
+            "ПОСЛЕДНИЕ СОБЫТИЯ ТВОЕГО ТЕЛА (L0):\n" + (if (initiative) bodyEventText + "\n" + notificationText + "\nМатериалы с полки:\n" + shelfText else bodyEventText + "\nМатериалы с полки (имена):\n" + shelfText) + "\n"
         val prompt = if (initiative) common +
             "\nСейчас ты сама решила написать Командиру после долгой тишины. Выбери форму и объём сообщения по полю length_policy и текущему настроению."
         else common +
