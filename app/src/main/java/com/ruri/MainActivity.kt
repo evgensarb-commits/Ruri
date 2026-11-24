@@ -237,6 +237,15 @@ class MainActivity : AppCompatActivity() {
         fun getDiagnostics(): String = Diagnostics.run(this@MainActivity)
 
         @JavascriptInterface
+        fun verifyRoutes(): String {
+            return try {
+                Diagnostics.verifyAll(this@MainActivity)
+            } catch (e: Exception) {
+                "{\"error\":" + JSONObject.quote(e.message ?: "verify failed") + "}"
+            }
+        }
+
+        @JavascriptInterface
         fun forceRefreshRoutes(): String {
             routeExecutor.execute {
                 runCatching {

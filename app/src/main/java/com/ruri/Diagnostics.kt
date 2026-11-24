@@ -22,6 +22,25 @@ object Diagnostics {
         return collect(root, config, NetState.online, NetState.vpn)
     }
 
+    /**
+     * Live diagnosis: performs one authenticated request per enabled route and reports
+     * what the provider answers now. Never returns remembered data for a route the
+     * config no longer contains.
+     */
+    fun verifyAll(ctx: Context): String {
+        val root = ctx.filesDir
+        NetState.refresh(ctx.applicationContext)
+        val config = runCatching { JSONObject(SecretStore.readRuntimeConfig(root)) }
+            .getOrDefault(JSONObject())
+        val models = config.optJSONArray("models") ?: JSONArray()
+        if (!NetState.online) {
+            return JSONObject().put("online", false)
+                .put("routes", JSONObject()).toString()
+        }
+        val report = Probe.verify(root, models)
+        return JSONObject().put("online", true).put("routes", report).toString()
+    }
+
     internal fun collect(
         root: File,
         runtimeConfig: String,
