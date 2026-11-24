@@ -22,6 +22,11 @@ object RouteSelector {
         else -> Task.CHAT
     }
 
+    fun detectTaskWithContext(text: String, hasImage: Boolean = false, estimatedTokens: Int = 0): Task {
+        val base = detectTask(text, hasImage)
+        return if (base != Task.VISION && estimatedTokens > 130000) Task.LONG else base
+    }
+
     fun nsfwWindow(root: File, now: Long = System.currentTimeMillis()): Boolean {
         val latest = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 300)
             .asReversed().asSequence().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
