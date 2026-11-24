@@ -80,6 +80,8 @@ class AutonomyPackageIntegrationTest {
         val thinker = source("src/main/java/com/ruri/Thinker.kt")
         assertTrue(thinker.contains("попытка останется в очереди"))
         assertTrue(thinker.contains("Diary.thoughtCount(root)"))
+        assertTrue(thinker.contains("val eventDrivenWake = originalReason.startsWith"))
+        assertTrue(thinker.contains("!eventDrivenWake && EmotionEngine.initiativeGate"))
     }
 
     @Test
