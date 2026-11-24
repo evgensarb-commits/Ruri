@@ -83,12 +83,8 @@ object Thinker {
             initiative = true
         }
 
-        if (originalReason.contains("drive_check") && !initiative) {
-            state.put("last_thought", now)
-            persistStatePreservingTurnInFlight(root, state, baselineState)
-            return
-        }
-
+        // A drive check that does not become a chat initiative still continues
+        // as an internal diary-thought cycle.
         appendEvent(root, "wake", JSONObject()
             .put("reason", reason)
             .put("battery", BatteryLevel.get(ctx))
