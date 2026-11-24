@@ -70,7 +70,7 @@ object Thinker {
 
         var reason = originalReason
         var initiative = false
-        if (!inFlight && EmotionEngine.initiativeGate(
+        if (!inFlight && !originalReason.contains("thought_check") && EmotionEngine.initiativeGate(
                 root, lastSeen, now, state.optBoolean("waiting_for_reply", false),
                 state.optLong("last_initiative", 0L)
             )) {
@@ -116,8 +116,8 @@ object Thinker {
         var followupRequests = 0
         for (index in order) {
             val model = models.optJSONObject(index) ?: continue
-            // All cognition routes must carry the full memory context.
-            if (model.optString("api_key").isBlank()) continue
+            // Keyless routes are valid when the provider explicitly marks credentials optional.
+            if (model.optString("api_key").isBlank() && !model.optBoolean("api_key_optional", false)) continue
             val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
             val requestNext: (JSONArray) -> String? = { nextMessages ->
                 if (followupRequests >= 8) {
