@@ -61,10 +61,10 @@ object Vision {
     }
 
     internal fun isEligibleVisionModel(model: JSONObject): Boolean =
-        model.optBoolean("free_tier", false) &&
+        (model.optBoolean("free_tier", false) || routeId(model).startsWith("routerapi-")) &&
             model.optBoolean("enabled", true) &&
             routeId(model).isNotBlank() &&
-            model.optString("api_key").isNotBlank() &&
+            (model.optString("api_key").isNotBlank() || model.optBoolean("api_key_optional", false)) &&
             model.optString("base_url").startsWith("https://", ignoreCase = true)
 
     private fun routeId(model: JSONObject): String = model.optString("id").ifBlank {
