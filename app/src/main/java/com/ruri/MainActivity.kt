@@ -41,6 +41,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         FileManager.init(filesDir)
+        RouterAPIMigration.ensure(filesDir)
         Notifier.init(this)
         pendingMessageId = intent?.getStringExtra("message_id")
 
