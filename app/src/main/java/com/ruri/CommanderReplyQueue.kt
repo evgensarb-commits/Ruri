@@ -66,6 +66,12 @@ object CommanderReplyQueue {
         }
     }
 
+    /** Exponential backoff with up to 20% positive jitter; Retry-After wins, capped at 24h. */
+    internal fun delayWithJitter(backoffMs: Long, retryAfterMs: Long, random: Double = Math.random()): Long {
+        val jitter = (backoffMs * 0.2 * random).toLong()
+        return maxOf(backoffMs + jitter, retryAfterMs.coerceAtLeast(0L)).coerceAtMost(24L * 60L * 60L * 1000L)
+    }
+
     /** Returns the durable delay until the next retry. No failure kind removes the message. */
     fun recordFailure(
         root: File,
@@ -79,8 +85,7 @@ object CommanderReplyQueue {
             val attempts = item.optInt("attempts", 1).coerceAtLeast(1)
             val exponent = (attempts - 1).coerceIn(0, 10)
             val backoff = min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * (2.0.pow(exponent.toDouble())).toLong())
-            val jitter = (backoff * 0.2 * Math.random()).toLong()
-            delay = maxOf(backoff + jitter, retryAfterMs.coerceAtLeast(0L)).coerceAtMost(24L * 60L * 60L * 1000L)
+            delay = delayWithJitter(backoff, retryAfterMs)
             item.put("next_attempt_at", now + delay)
                 .put("last_error_kind", kind.take(40))
                 .put("last_failed_at", now)

@@ -33,15 +33,21 @@ object ShelfWatcher {
         observer = null
     }
 
+    /** Signature gate: ingested once per size+mtime combination so modified files re-ingest. */
+    internal fun shouldIngest(seen: JSONObject, safe: String, sizeBytes: Long, lastModified: Long): Boolean {
+        val sig = sizeBytes.toString() + ":" + lastModified
+        if (seen.optBoolean(safe) && seen.optString("sig:" + safe) == sig) return false
+        seen.put("sig:" + safe, sig)
+        seen.put(safe, true)
+        return true
+    }
+
     fun markAdded(ctx: Context, name: String) = synchronized(lock) {
         val safe = safeName(name) ?: return
         val root = ctx.filesDir
         val seen = readSeen(root)
         val f = File(root, "shelf/" + safe)
-        val sig = f.length().toString() + ":" + f.lastModified()
-        if (seen.optBoolean(safe) && seen.optString("sig:" + safe) == sig) return
-        seen.put("sig:" + safe, sig)
-        seen.put(safe, true)
+        if (!shouldIngest(seen, safe, f.length(), f.lastModified())) return
         FileManager.write(root, SEEN, seen.toString(2))
         LifeScheduler.enqueueEvent(ctx.applicationContext, "shelf_file_added:" + safe)
     }

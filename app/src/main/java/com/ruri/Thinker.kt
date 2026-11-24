@@ -12,6 +12,28 @@ import java.util.concurrent.atomic.AtomicBoolean
 object Thinker {
     private val running = AtomicBoolean(false)
 
+    /** Chat gets the thought only when an initiative explicitly decided to write. */
+    internal fun publishesToChat(initiative: Boolean, effective: String): Boolean =
+        initiative && effective == "write"
+
+    /** Keeps the newest [keep] notification lines (oldest-first) and adds an overflow note. */
+    internal fun summarizedNotifications(newestFirst: List<String>, keep: Int = 5): String {
+        val recent = newestFirst.take(keep).asReversed().toMutableList()
+        val older = newestFirst.size - recent.size
+        if (older > 0) recent.add("(ещё $older более старых уведомлений не показаны)")
+        return recent.joinToString("\n")
+    }
+
+    /** Shelf contributes names only; full text is read on demand via read_shelf. */
+    internal fun shelfNamesBlock(names: List<String>, limit: Int = 8): String {
+        val text = StringBuilder()
+        for (i in 0 until minOf(names.size, limit)) {
+            val name = names[i]
+            if (name.isNotBlank()) text.append("- ").append(name).append(" (полный текст читай через read_shelf)\n")
+        }
+        return text.toString()
+    }
+
     /**
      * Records a durable wake reason and hands execution to WorkManager.
      * Repeated reasons are coalesced in the queue; every underlying event stays in L0.
@@ -232,7 +254,7 @@ object Thinker {
         }
 
         OutcomeDigest.verifyClaims(root, safeReply)
-        val notificationMessageId = if (initiative && effective == "write") {
+        val notificationMessageId = if (publishesToChat(initiative, effective)) {
             val messageId = appendChatMessage(root, "ruri", safeReply, now, ChatEngine.sourceUrlsSnapshot(), successfulRouteId)
             messageId
         } else {
@@ -307,11 +329,7 @@ object Thinker {
         val recallQuery = (reason + " " + recentCommanderContext).take(900)
         val recalledMemories = MemoryRetriever.recall(root, recallQuery, limit = 5)
         val shelfNames = try { JSONArray(FileManager.list(root, "shelf")) } catch (_: Exception) { JSONArray() }
-        val shelfText = StringBuilder()
-        for (i in 0 until minOf(shelfNames.length(), 8)) {
-            val name = shelfNames.optString(i)
-            if (name.isNotBlank()) shelfText.append("- ").append(name).append(" (полный текст читай через read_shelf)\n")
-        }
+        val shelfText = shelfNamesBlock((0 until shelfNames.length()).map { shelfNames.optString(it) })
         // Commander explicitly enabled full notification context for Ruri's cognition.
         // Only authentication credentials are withheld; ordinary personal content remains visible.
         val notificationLines = FileManager.readLastLines(
@@ -326,7 +344,7 @@ object Thinker {
                 val body = event.optString("text")
                 "- $source: $title — $body"
             } catch (_: Exception) { null }
-        }.let { all -> val recent = all.take(5).asReversed().toMutableList(); val older = all.size - 5; if (older > 0) recent.add("(ещё $older более старых уведомлений не показаны)"); recent.joinToString("\n") }
+        }.let { all -> summarizedNotifications(all) }
         val bodyEventText = FileManager.readLastLines(
             root, "memory/L0_raw.jsonl", maxLines = 1200, maxBytes = 1024 * 1024
         ).asReversed().mapNotNull { line ->
