@@ -57,7 +57,9 @@ class AutonomyPackageIntegrationTest {
         val routeSelector = source("src/main/java/com/ruri/RouteSelector.kt")
         assertTrue(fileManager.contains("routes_v3_no_minimax"))
         assertTrue(fileManager.contains("gemma-4-26b-a4b-it-meromero:free"))
-        assertFalse(fileManager.contains("minimax-m3.1-flash:free"))
+        // The filter string is required by the migration; the seed must not create a MiniMax route.
+        assertTrue(fileManager.contains("minimax-m3.1-flash:free"))
+        assertFalse(fileManager.contains("\"id\": \"routeway-minimax\""))
         assertTrue(fileManager.contains("free_only"))
         assertTrue(fileManager.contains("RouteMeta.pruneToConfiguredRoutes"))
         assertTrue(routeSelector.contains("compareBy<Int>"))
