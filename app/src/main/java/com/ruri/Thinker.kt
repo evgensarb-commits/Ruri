@@ -95,9 +95,7 @@ object Thinker {
         }
         val models = config.optJSONArray("models") ?: JSONArray()
         if (models.length() == 0) {
-            state.put("last_thought", now)
-            persistStatePreservingTurnInFlight(root, state, baselineState)
-            return
+            throw IllegalStateException("Нет настроенных моделей для автономного мышления; попытка останется в очереди")
         }
 
         val prompt = buildPrompt(ctx, root, state, reason, initiative)
@@ -106,9 +104,7 @@ object Thinker {
         val adult = RouteSelector.isAdultTopic(RouteSelector.latestCommanderText(root)) || RouteSelector.nsfwWindow(root)
         val order = RouteSelector.orderedIndices(root, models, current, task, adult = adult)
         if (order.isEmpty()) {
-            state.put("last_thought", now)
-            persistStatePreservingTurnInFlight(root, state, baselineState)
-            return
+            throw IllegalStateException("Нет подходящего маршрута для автономного мышления; попытка останется в очереди")
         }
         var reply: String? = null
         var successfulIndex = -1
@@ -187,9 +183,7 @@ object Thinker {
         }
 
         if (reply.isNullOrBlank()) {
-            state.put("last_thought", now)
-            persistStatePreservingTurnInFlight(root, state, baselineState)
-            return
+            throw IllegalStateException("Автономная мысль не получена ни от одного маршрута; попытка останется в очереди")
         }
         if (successfulIndex >= 0 && successfulIndex != current) {
             config.put("current", successfulIndex)
@@ -207,9 +201,7 @@ object Thinker {
             appendEvent(root, "thought_lost", JSONObject()
                 .put("reason", "truly_empty")
                 .put("route", successfulRouteId))
-            state.put("last_thought", now)
-            persistStatePreservingTurnInFlight(root, state, baselineState)
-            return
+            throw IllegalStateException("Модель вернула пустую мысль после очистки; попытка останется в очереди")
         }
 
         val drift = EmotionEngine.drift(root)
@@ -223,7 +215,12 @@ object Thinker {
         }
         if (initiative && effective != "write") {
             val body = safeReply.ifBlank { cleanedReply }
+            val duplicateBeforeAppend = Diary.isDuplicate(root, body, "thought")
+            val diaryCountBeforeAppend = Diary.thoughtCount(root)
             Diary.append(root, body, reason, emotion, "thought")
+            if (!duplicateBeforeAppend && Diary.thoughtCount(root) <= diaryCountBeforeAppend) {
+                throw IllegalStateException("Внутренняя мысль не записалась в дневник; попытка останется в очереди")
+            }
             if (effective == "veto") appendEvent(root, "initiative_vetoed",
                 JSONObject().put("reason", decision.ifBlank { "veto_without_reason" }))
             state.put("last_thought", now)
@@ -243,7 +240,11 @@ object Thinker {
                 persistStatePreservingTurnInFlight(root, state, baselineState)
                 return
             }
+            val diaryCountBeforeAppend = Diary.thoughtCount(root)
             Diary.append(root, safeReply, reason, emotion, "thought")
+            if (Diary.thoughtCount(root) <= diaryCountBeforeAppend) {
+                throw IllegalStateException("Внутренняя мысль не записалась в дневник; попытка останется в очереди")
+            }
             runCatching {
                 val entries = readJson(root, "memory/L2_diary.json").optJSONArray("entries") ?: JSONArray()
                 entries.optJSONObject(entries.length() - 1)?.optString("id")
