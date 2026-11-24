@@ -72,7 +72,14 @@ class AutonomyPackageIntegrationTest {
         assertTrue(diary.contains("fun lastThoughtAt"))
         assertTrue(scheduler.contains("thoughtCheckDue"))
         assertTrue(scheduler.contains("last_thought_check_at"))
-        assertTrue(emotion.contains("thought_interval_h"))
+        assertTrue(scheduler.contains("thought_interval_h", 2.0))
+        assertTrue(scheduler.contains("eventDriven = reason.startsWith"))
+        assertTrue(scheduler.contains("return driveCheckEvent || notificationEvent || explicitSelfTask || thoughtCheckEvent || eventDriven"))
+        assertTrue(emotion.contains("thought_interval_h", 2.0))
+        assertTrue(emotion.contains("thought_cadence_v2"))
+        val thinker = source("src/main/java/com/ruri/Thinker.kt")
+        assertTrue(thinker.contains("попытка останется в очереди"))
+        assertTrue(thinker.contains("Diary.thoughtCount(root)"))
     }
 
     @Test
