@@ -79,12 +79,18 @@ object CommanderReplyQueue {
             val attempts = item.optInt("attempts", 1).coerceAtLeast(1)
             val exponent = (attempts - 1).coerceIn(0, 10)
             val backoff = min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * (2.0.pow(exponent.toDouble())).toLong())
-            delay = maxOf(backoff, retryAfterMs.coerceAtLeast(0L)).coerceAtMost(24L * 60L * 60L * 1000L)
+            delay = maxOf(jitteredBackoff(backoff, Math.random()), retryAfterMs.coerceAtLeast(0L))
+                .coerceAtMost(24L * 60L * 60L * 1000L)
             item.put("next_attempt_at", now + delay)
                 .put("last_error_kind", kind.take(40))
                 .put("last_failed_at", now)
         }
         delay
+    }
+
+    internal fun jitteredBackoff(backoff: Long, randomUnit: Double): Long {
+        val jitter = (backoff * 0.2 * randomUnit.coerceIn(0.0, 1.0)).toLong()
+        return backoff + jitter
     }
 
     fun markAnswered(root: File, messageId: String, replyId: String = "", now: Long = System.currentTimeMillis()) =
