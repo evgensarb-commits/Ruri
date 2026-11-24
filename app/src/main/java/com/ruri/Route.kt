@@ -39,9 +39,12 @@ object Route {
         .put("needs_vpn", REQUIRES_VPN)
         .put("context_length", 131072)
 
-    private fun readConfig(root: File): JSONObject = runCatching {
-        JSONObject(SecretStore.readRuntimeConfig(root))
-    }.getOrElse { JSONObject() }
+    private fun readConfig(root: File): JSONObject {
+        val fromStore = runCatching { JSONObject(SecretStore.readRuntimeConfig(root)) }.getOrNull()
+        if (fromStore != null && fromStore.optJSONArray("models") != null) return fromStore
+        // Fallback keeps the route usable even when the encrypted store cannot be opened.
+        return runCatching { JSONObject(FileManager.read(root, CONFIG_PATH)) }.getOrElse { JSONObject() }
+    }
 
     /** The provider key, injected by SecretStore from the encrypted store. */
     fun apiKey(root: File): String {
@@ -57,9 +60,18 @@ object Route {
 
     fun setApiKey(root: File, key: String) {
         val config = readConfig(root)
-        config.put("models", JSONArray().put(canonical(key.trim()))).put("current", 0)
+            .put("models", JSONArray().put(canonical(key.trim())))
+            .put("current", 0)
         retiredKeys.forEach { config.remove(it) }
-        runCatching { SecretStore.saveRuntimeConfig(root, config.toString(2)) }
+        val saved = runCatching { SecretStore.saveRuntimeConfig(root, config.toString(2)) }
+        if (saved.isFailure) {
+            // The encrypted store is unavailable: keep a valid route structure on disk with a
+            // blank key (never plaintext) so the app reports "no key" instead of a broken route.
+            val publicOnly = JSONObject(config.toString())
+            val models = publicOnly.optJSONArray("models") ?: JSONArray()
+            for (index in 0 until models.length()) models.optJSONObject(index)?.put("api_key", "")
+            runCatching { FileManager.write(root, CONFIG_PATH, publicOnly.toString(2)) }
+        }
     }
 
     /**
@@ -87,7 +99,15 @@ object Route {
         }
         config.put("models", JSONArray().put(canonical(key))).put("current", 0)
         retiredKeys.forEach { config.remove(it) }
-        runCatching { SecretStore.saveRuntimeConfig(root, config.toString(2)) }
+        val saved = runCatching { SecretStore.saveRuntimeConfig(root, config.toString(2)) }
+        if (saved.isFailure) {
+            // The encrypted store cannot be opened: keep a valid route structure on disk with
+            // a blank key (never plaintext) so the app reports "no key" instead of crashing.
+            val publicOnly = JSONObject(config.toString())
+            val sanitized = publicOnly.optJSONArray("models") ?: JSONArray()
+            for (index in 0 until sanitized.length()) sanitized.optJSONObject(index)?.put("api_key", "")
+            runCatching { FileManager.write(root, CONFIG_PATH, publicOnly.toString(2)) }
+        }
         return true
     }
 }

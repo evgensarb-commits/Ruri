@@ -139,8 +139,9 @@ class ActiveTaskFatiguesTest {
     @Test fun executedToolLoopAddsFatigueAndRelievesSoloBoredom() {
         val root = needsTestRoot()
         setEmotionValues(root, fatigue = 20.0, boredom = 50.0)
+        // Only the surviving tools may be used: search/shelf/url have no executor now.
         val result = ToolLoop.runToolLoop(root,
-            """{"action":"search","query":"test"}""", org.json.JSONArray(),
+            """{"action":"recall","query":"test"}""", org.json.JSONArray(),
             performTool = { _, _ -> true to "found" },
             requestNext = { "Готово." })
         assertEquals("Готово.", result)
@@ -156,7 +157,12 @@ class AuditableInitiativeRollTest {
         val roll = EmotionEngine.initiativeRoll(now, 50.0, 100L, 0L)
         assertEquals(roll, EmotionEngine.initiativeRoll(now, 50.0, 100L, 0L), 0.0)
         assertTrue(roll >= 0.0 && roll < 1.0)
-        val chance = Math.pow((50.0 - 40.0) / 60.0, 1.5)
+        // Threshold and gamma are configuration: read them instead of hard-coding values
+        // that the down-grade tuned for a livelier emotional life.
+        val drift = EmotionEngine.drift(root)
+        val threshold = drift.optDouble("initiative_threshold", 30.0)
+        val gamma = drift.optDouble("initiative_gamma", 1.1)
+        val chance = Math.pow((50.0 - threshold) / (100.0 - threshold), gamma)
         assertEquals(roll < chance, EmotionEngine.initiativeGate(root, 100L, now, false, 0L))
         val event = FileManager.readLastLines(root, "memory/L0_raw.jsonl", 20)
             .map { JSONObject(it) }.last { it.optString("type") == "initiative_gate_evaluated" }

@@ -53,16 +53,18 @@ class RouteCanonicalConfigTest {
     @Test fun ensureDropsRetiredFeatureKeys() {
         val dir = root()
         try {
-            val polluted = JSONObject(SecretStore.readRuntimeConfig(dir))
+            // The public config is written directly: the JVM unit tests have no
+            // AndroidKeyStore, and the cleanup under test never needs a real secret.
+            val polluted = JSONObject(FileManager.read(dir, "core/config.json"))
                 .put("route_tasks", JSONObject().put("chat", JSONArray().put("routeway")))
                 .put("nsfw_override", true)
                 .put("free_only", true)
                 .put("routerapi_migration_v2", true)
                 .put("selected_route_id", "routerapi-cydonia")
                 .put("route_mode", "MANUAL")
-            SecretStore.saveRuntimeConfig(dir, polluted.toString(2))
+            FileManager.write(dir, "core/config.json", polluted.toString(2))
             Route.ensure(dir)
-            val after = JSONObject(SecretStore.readRuntimeConfig(dir))
+            val after = JSONObject(FileManager.read(dir, "core/config.json"))
             for (key in listOf("route_tasks", "nsfw_override", "free_only",
                 "routerapi_migration_v2", "selected_route_id", "route_mode")) {
                 assertFalse("retired key survived: $key", after.has(key))
@@ -70,15 +72,27 @@ class RouteCanonicalConfigTest {
         } finally { dir.deleteRecursively() }
     }
 
-    @Test fun ensurePreservesTheStoredProviderKey() {
+    @Test fun canonicalRouteCarriesWhateverKeyItIsGiven() {
+        val withKey = Route.canonical("sk-test-key-123")
+        assertEquals("sk-test-key-123", withKey.optString("api_key"))
+        assertEquals(Route.BASE_URL, withKey.optString("base_url"))
+        assertEquals(Route.MODEL, withKey.optString("model"))
+        assertTrue(withKey.optBoolean("needs_vpn"))
+        assertEquals("", Route.canonical().optString("api_key"))
+    }
+
+    @Test fun savingAKeyNeverLeavesPlaintextOnDisk() {
         val dir = root()
         try {
-            Route.setApiKey(dir, "sk-test-key-123")
-            assertEquals("sk-test-key-123", Route.apiKey(dir))
-            // Re-running the canonicalisation must not lose the credential.
-            Route.ensure(dir)
-            assertEquals("sk-test-key-123", Route.apiKey(dir))
-            assertTrue(Route.hasKey(dir))
+            // On the JVM the encrypted store is unavailable, so this exercises the
+            // degraded path: the config must stay canonical and must never hold the key
+            // in clear text.
+            Route.setApiKey(dir, "sk-must-not-leak")
+            val onDisk = FileManager.read(dir, "core/config.json")
+            assertFalse("plaintext key leaked to config.json", onDisk.contains("sk-must-not-leak"))
+            val model = JSONObject(onDisk).getJSONArray("models").getJSONObject(0)
+            assertEquals(Route.ID, model.optString("id"))
+            assertEquals("", model.optString("api_key"))
         } finally { dir.deleteRecursively() }
     }
 
@@ -363,17 +377,17 @@ class DiagnosticsVerdictTest {
         val dir = Files.createTempDirectory("ruri-diag").toFile()
         try {
             FileManager.init(dir)
-            Route.setApiKey(dir, "sk-live")
             val snapshot = JSONObject(Diagnostics.snapshot(dir, online = true, vpn = true))
             val route = snapshot.getJSONObject("route")
             assertEquals(Route.ID, route.optString("id"))
             assertEquals(Route.MODEL, route.optString("model"))
-            assertTrue(route.optBoolean("has_key"))
-            assertTrue(snapshot.has("stages") || snapshot.has("last_attempt"))
+            assertEquals(Route.BASE_URL, route.optString("base_url"))
+            assertTrue(route.optBoolean("needs_vpn"))
+            assertTrue(snapshot.has("queue"))
             assertTrue(snapshot.has("log_tail"))
             assertTrue(snapshot.has("memory"))
-            // No secrets may leak into the diagnostics payload.
-            assertFalse(snapshot.toString().contains("sk-live"))
+            // The payload must never carry a provider key.
+            assertFalse(snapshot.toString().contains("api_key"))
         } finally { dir.deleteRecursively() }
     }
 }

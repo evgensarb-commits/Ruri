@@ -51,19 +51,22 @@ object RouteSelector {
      */
     fun classify(code: Int?, error: Exception?, responseBody: String = ""): String {
         val body = responseBody.lowercase()
-        val quotaHint = listOf(
-            "quota", "token limit", "tokens per day", "daily limit", "limit reached",
-            "exhausted", "insufficient", "balance", "credits"
+        // Explicit quota wording is decisive; otherwise a rate-limit marker wins, so that
+        // "RPM limit reached" stays a per-minute limit rather than a daily quota.
+        val strongQuota = listOf(
+            "quota", "tokens per day", "daily limit", "token limit", "out of credits", "insufficient balance"
         ).any(body::contains)
+        val weakQuota = listOf("limit reached", "exhausted", "balance", "credits").any(body::contains)
         val rateHint = listOf("rate", "retry", "rpm", "per-minute", "per minute", "too many").any(body::contains)
         val regionHint = listOf(
             "region", "country", "location", "not available in your", "unsupported territory"
         ).any(body::contains)
         return when {
-            code == 429 && quotaHint -> "quota"
+            code == 429 && strongQuota -> "quota"
             code == 429 && rateHint -> "rate_limit"
+            code == 429 && weakQuota -> "quota"
             code == 429 -> "rate_limit"
-            (code == 403 || code == 451) && quotaHint -> "quota"
+            (code == 403 || code == 451) && (strongQuota || weakQuota) -> "quota"
             (code == 403 || code == 451) && regionHint -> "region"
             code == 451 -> "region"
             code == 403 -> "forbidden"

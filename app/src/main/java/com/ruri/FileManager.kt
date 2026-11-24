@@ -198,6 +198,9 @@ object FileManager {
         // Without it an existing installation would lose access to its provider key.
         SecretStore.migrateLegacyApiKeys(root)
 
+        // Shape upgrade only: existing goals and tasks are carried over untouched.
+        upgradeGoalShape(root)
+
         Capabilities.ensure(root)
 
         put(root, "memory/L4_state.json", """
@@ -562,8 +565,31 @@ object FileManager {
         if (!f.exists()) atomicWrite(f, content)
     }
 
-    private fun atomicWrite(file: File, content: String) {
-        val parent = file.parentFile ?: throw IllegalArgumentException("Data file has no parent")
+    /**
+     * Brings `memory/goals.json` to the current shape without losing anything.
+     *
+     * This is a data-shape upgrade, not a feature flag: existing goals and tasks are copied
+     * as-is, only the two task arrays and the version number are added when missing.
+     */
+    private fun upgradeGoalShape(root: File) {
+        val file = safe(root, "memory/goals.json") ?: return
+        if (!file.isFile) return
+        try {
+            val goals = JSONObject(file.readText(Charsets.UTF_8))
+            if (goals.optInt("schema_version", 1) >= 2 &&
+                goals.has("active_tasks") && goals.has("completed_tasks")) return
+            goals.put("schema_version", 2)
+            if (!goals.has("active")) goals.put("active", JSONArray())
+            if (!goals.has("completed")) goals.put("completed", JSONArray())
+            if (!goals.has("active_tasks")) goals.put("active_tasks", JSONArray())
+            if (!goals.has("completed_tasks")) goals.put("completed_tasks", JSONArray())
+            atomicWrite(file, goals.toString(2))
+        } catch (_: Exception) {
+            // A malformed goal store is left exactly as it is.
+        }
+    }
+
+    private fun atomicWrite(file: File, content: String) {        val parent = file.parentFile ?: throw IllegalArgumentException("Data file has no parent")
         if (!parent.exists() && !parent.mkdirs()) throw IllegalStateException("Cannot create data directory")
         val temp = File(parent, file.name + ".tmp-" + UUID.randomUUID())
         try {
