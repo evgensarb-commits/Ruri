@@ -52,17 +52,20 @@ class AutonomyPackageIntegrationTest {
     }
 
     @Test
-    fun runtimeMigrationKeepsOnlyMeroMeroAndMiniMaxFree() {
+    fun runtimeMigrationKeepsMeroMeroAndAddsRouterApiTaskRoutes() {
         val fileManager = source("src/main/java/com/ruri/FileManager.kt")
         val routeSelector = source("src/main/java/com/ruri/RouteSelector.kt")
-        assertTrue(fileManager.contains("two_route_migration_v1"))
+        assertTrue(fileManager.contains("routerapi_migration_v2"))
         assertTrue(fileManager.contains("gemma-4-26b-a4b-it-meromero:free"))
-        assertTrue(fileManager.contains("minimax-m3.1-flash:free"))
-        assertTrue(fileManager.contains("free_only"))
-        assertTrue(fileManager.contains("RouteMeta.pruneToConfiguredRoutes"))
-        assertTrue(routeSelector.contains("compareBy<Int>"))
+        assertTrue(fileManager.contains("z-ai/glm-5.3-flash"))
+        assertTrue(fileManager.contains("thedrummer/cydonia-24b-v4.1"))
+        assertTrue(fileManager.contains("thedrummer/unslopnemo-12b"))
+        assertTrue(fileManager.contains("deepseek/deepseek-v4-pro-0813"))
+        assertTrue(fileManager.contains("https://routerai.ru/api/v1"))
+        assertTrue(routeSelector.contains("routeTaskKey"))
         assertTrue(routeSelector.contains("nsfw_override"))
         assertTrue(routeSelector.contains("Task.VISION"))
-        assertFalse(fileManager.contains("Requesty · Google Gemma 4 Free"))
+        assertTrue(routeSelector.contains("Task.CODE"))
+        assertFalse(fileManager.contains("routerapi_key"))
     }
 }
