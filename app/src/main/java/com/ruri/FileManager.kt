@@ -282,7 +282,6 @@ object FileManager {
         ): JSONObject {
             val previous = (0 until existing.length()).mapNotNull { existing.optJSONObject(it) }
                 .firstOrNull { it.optString("id") == id }
-            val keyPresent = previous?.optString("api_key").orEmpty().isNotBlank()
             return JSONObject()
                 .put("id", id)
                 .put("name", name)
