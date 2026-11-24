@@ -117,7 +117,7 @@ class OnlyTwoRoutesTest {
             assertEquals("routerapi-cydonia", models.getJSONObject(2).getString("id"))
             assertEquals("routerapi-unslop", models.getJSONObject(3).getString("id"))
             assertEquals("routerapi-deepseek", models.getJSONObject(4).getString("id"))
-            assertFalse(models.getJSONObject(1).getBoolean("enabled"))
+            assertTrue(models.getJSONObject(1).getBoolean("enabled"))
             assertFalse(models.getJSONObject(1).getBoolean("free_tier"))
             assertTrue(migrated.getBoolean("nsfw_override"))
             assertEquals("routeway", migrated.getString("selected_route_id"))
