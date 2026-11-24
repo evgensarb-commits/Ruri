@@ -303,6 +303,7 @@ class RuriLifeWorker(
         val explicitSelfTask = reason.contains("research_task") || reason.contains("capability_gap")
         val driveCheckEvent = reason.contains("drive_check")
         val thoughtCheckEvent = reason.contains("thought_check")
+        val eventDriven = reason.startsWith("обработка_событий:")
 
         if (!driveCheckEvent) {
             val drift = EmotionEngine.drift(root)
@@ -321,8 +322,8 @@ class RuriLifeWorker(
             // Diary thoughts have their own quiet cadence, independent of the
             // probabilistic Commander-initiative gate. Failed attempts are retried
             // only after the same interval; no provider/quota preflight is added.
-            if (!notificationEvent && !explicitSelfTask && !thoughtCheckEvent) {
-                val intervalHours = drift.optDouble("thought_interval_h", 6.0)
+            if (!notificationEvent && !explicitSelfTask && !thoughtCheckEvent && !eventDriven) {
+                val intervalHours = drift.optDouble("thought_interval_h", 2.0)
                 var thoughtCheckClaimed = false
                 FileManager.updateL4State(root) { latest ->
                     if (LifeScheduler.thoughtCheckDue(
@@ -339,13 +340,9 @@ class RuriLifeWorker(
             }
         }
 
-        if (!driveCheckEvent && !notificationEvent && !explicitSelfTask && !thoughtCheckEvent) return false
-
-        val config = try { JSONObject(SecretStore.readRuntimeConfig(root)) } catch (_: Exception) { return false }
-        val models = config.optJSONArray("models") ?: return false
-        val task = if (driveCheckEvent) Task.WARMTH else if (explicitSelfTask) Task.TOOLS else Task.REASON
-        return FreeModelRouter.orderedIndices(
-            root, models, config.optInt("current", 0), task
-        ).isNotEmpty()
+        // Any durable event is a cognition trigger after higher-priority Commander
+        // replies have been drained. Do not preflight routes, credentials, quota,
+        // connectivity, or battery here; provider/model failures are retried by WorkManager.
+        return driveCheckEvent || notificationEvent || explicitSelfTask || thoughtCheckEvent || eventDriven
     }
 }
