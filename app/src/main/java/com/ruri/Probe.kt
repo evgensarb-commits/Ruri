@@ -112,6 +112,12 @@ object Probe {
             if (key.isBlank()) {
                 entry.put("result", "no_key").put("http_status", JSONObject.NULL)
                 report.put(id, entry)
+                // A missing key is a diagnosis worth remembering: the diagnostics
+                // screen must show why a route never gets called.
+                RouteMeta.update(root, id) { meta ->
+                    meta.put("last_verify_at", now)
+                    meta.put("last_verify_result", "no_key")
+                }
                 continue
             }
             val outcome = authenticatedStatus("$base/models", key)
