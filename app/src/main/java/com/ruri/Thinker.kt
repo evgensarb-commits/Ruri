@@ -332,7 +332,7 @@ object Thinker {
                     if (event.optString("type") != "web_research_result") null
                     else "Запрос: " + event.optString("query") + "\\n" + event.optString("text").take(1800)
                 }.getOrNull()
-            }.take(4).asReversed().joinToString("\\n\\n")
+            }.take(2).asReversed().joinToString("\\n\\n")
         val summary = readJson(root, "memory/L3_summary.json").optString("summary").take(4000)
         val quiet = hoursSince(state.optLong("last_seen_commander"), System.currentTimeMillis())
         val outcomeDigest = OutcomeDigest.build(root)
