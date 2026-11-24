@@ -12,6 +12,28 @@ import java.util.concurrent.atomic.AtomicBoolean
 object Thinker {
     private val running = AtomicBoolean(false)
 
+    /** Chat gets the thought only when an initiative explicitly decided to write. */
+    internal fun publishesToChat(initiative: Boolean, effective: String): Boolean =
+        initiative && effective == "write"
+
+    /** Keeps the newest [keep] notification lines (oldest-first) and adds an overflow note. */
+    internal fun summarizedNotifications(newestFirst: List<String>, keep: Int = 5): String {
+        val recent = newestFirst.take(keep).asReversed().toMutableList()
+        val older = newestFirst.size - recent.size
+        if (older > 0) recent.add("(ещё $older более старых уведомлений не показаны)")
+        return recent.joinToString("\n")
+    }
+
+    /** Shelf contributes names only; full text is read on demand via read_shelf. */
+    internal fun shelfNamesBlock(names: List<String>, limit: Int = 8): String {
+        val text = StringBuilder()
+        for (i in 0 until minOf(names.size, limit)) {
+            val name = names[i]
+            if (name.isNotBlank()) text.append("- ").append(name).append(" (полный текст читай через read_shelf)\n")
+        }
+        return text.toString()
+    }
+
     /**
      * Records a durable wake reason and hands execution to WorkManager.
      * Repeated reasons are coalesced in the queue; every underlying event stays in L0.
@@ -232,7 +254,7 @@ object Thinker {
         }
 
         OutcomeDigest.verifyClaims(root, safeReply)
-        val notificationMessageId = if (initiative) {
+        val notificationMessageId = if (publishesToChat(initiative, effective)) {
             val messageId = appendChatMessage(root, "ruri", safeReply, now, ChatEngine.sourceUrlsSnapshot(), successfulRouteId)
             messageId
         } else {
@@ -307,14 +329,7 @@ object Thinker {
         val recallQuery = (reason + " " + recentCommanderContext).take(900)
         val recalledMemories = MemoryRetriever.recall(root, recallQuery, limit = 5)
         val shelfNames = try { JSONArray(FileManager.list(root, "shelf")) } catch (_: Exception) { JSONArray() }
-        val shelfText = StringBuilder()
-        for (i in 0 until minOf(shelfNames.length(), 6)) {
-            val name = shelfNames.optString(i)
-            if (name.isNotBlank()) {
-                shelfText.append("\n--- ").append(name).append(" ---\n")
-                    .append(shelfContextText(root, name))
-            }
-        }
+        val shelfText = shelfNamesBlock((0 until shelfNames.length()).map { shelfNames.optString(it) })
         // Commander explicitly enabled full notification context for Ruri's cognition.
         // Only authentication credentials are withheld; ordinary personal content remains visible.
         val notificationLines = FileManager.readLastLines(
@@ -329,7 +344,7 @@ object Thinker {
                 val body = event.optString("text")
                 "- $source: $title — $body"
             } catch (_: Exception) { null }
-        }.take(20).asReversed().joinToString("\n")
+        }.let { all -> summarizedNotifications(all) }
         val bodyEventText = FileManager.readLastLines(
             root, "memory/L0_raw.jsonl", maxLines = 1200, maxBytes = 1024 * 1024
         ).asReversed().mapNotNull { line ->
@@ -348,7 +363,7 @@ object Thinker {
                     else "Запрос: " + event.optString("query") + "\\n" + event.optString("text").take(5000)
                 }.getOrNull()
             }.take(4).asReversed().joinToString("\\n\\n")
-        val summary = readJson(root, "memory/L3_summary.json").optString("summary")
+        val summary = readJson(root, "memory/L3_summary.json").optString("summary").take(4000)
         val quiet = hoursSince(state.optLong("last_seen_commander"), System.currentTimeMillis())
         val outcomeDigest = OutcomeDigest.build(root)
         OutcomeDigest.clearPresentedCorrection(root)
@@ -378,7 +393,7 @@ object Thinker {
             "ТВОИ ФАКТЫ (L1):\n" + factText + "\n" +
             "ТВОЙ ДНЕВНИК (L2):\n" + diaryText + "\n" +
             "ТВОЯ АВТОБИОГРАФИЯ (L3):\n" + summary + "\n" +
-            "ПОСЛЕДНИЕ СОБЫТИЯ ТВОЕГО ТЕЛА (L0):\n" + bodyEventText + "\n" + notificationText + "\nМатериалы с полки:\n" + shelfText + "\n"
+            "ПОСЛЕДНИЕ СОБЫТИЯ ТВОЕГО ТЕЛА (L0):\n" + (if (initiative) bodyEventText + "\n" + notificationText + "\nМатериалы с полки:\n" + shelfText else bodyEventText + "\nМатериалы с полки (имена):\n" + shelfText) + "\n"
         val prompt = if (initiative) common +
             "\nСейчас ты сама решила написать Командиру после долгой тишины. Выбери форму и объём сообщения по полю length_policy и текущему настроению."
         else common +

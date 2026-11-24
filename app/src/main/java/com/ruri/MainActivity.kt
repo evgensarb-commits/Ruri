@@ -41,6 +41,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         FileManager.init(filesDir)
+        RouterAPIMigration.ensure(filesDir)
         Notifier.init(this)
         pendingMessageId = intent?.getStringExtra("message_id")
 
@@ -519,6 +520,37 @@ class MainActivity : AppCompatActivity() {
                 "OK"
             } catch (e: Exception) { "ERROR: " + (e.message ?: "route order save failed") }
         }
+
+        @JavascriptInterface
+        fun saveRouterAPIKey(key: String): String {
+            return try {
+                val cfg = JSONObject(SecretStore.readRuntimeConfig(filesDir))
+                cfg.put("routerapi_key", key.trim())
+                val ms = cfg.optJSONArray("models") ?: JSONArray()
+                for (i in 0 until ms.length()) {
+                    val m = ms.optJSONObject(i) ?: continue
+                    if (m.optString("id").startsWith("routerapi-")) {
+                        m.put("api_key", key.trim()).put("enabled", key.isNotBlank())
+                    }
+                }
+                SecretStore.saveRuntimeConfig(filesDir, cfg.toString(2))
+                "ok"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "routerapi key save failed") }
+        }
+
+        @JavascriptInterface
+        fun saveRouteTasks(json: String): String {
+            return try {
+                val cfg = JSONObject(SecretStore.readRuntimeConfig(filesDir))
+                cfg.put("route_tasks", JSONObject(json))
+                SecretStore.saveRuntimeConfig(filesDir, cfg.toString(2))
+                "ok"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "route tasks save failed") }
+        }
+
+        @JavascriptInterface
+        fun readRouteTasks(): String =
+            runCatching { JSONObject(SecretStore.readRuntimeConfig(filesDir)).optJSONObject("route_tasks")?.toString() ?: "{}" }.getOrDefault("{}")
 
         @JavascriptInterface
         fun appendEvent(eventJson: String): String {

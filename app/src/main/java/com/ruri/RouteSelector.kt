@@ -8,17 +8,23 @@ import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import javax.net.ssl.SSLException
 
-enum class Task { CHAT, WARMTH, REASON, CREATIVE, VISION, TOOLS }
+enum class Task { CHAT, WARMTH, REASON, CREATIVE, VISION, TOOLS, CODE, LONG }
 
 /** Selects enabled free routes by manual priority, with explicit NSFW and vision overrides. */
 object RouteSelector {
     fun detectTask(text: String, hasImage: Boolean = false): Task = when {
         hasImage -> Task.VISION
+        Regex("(?i)(напиши|почини|пофикси|перепиши|отрефакторь)\\s+(код|функцию|класс|скрипт|метод)|\\.(kt|py|js|ts|java)\\b|kotlin|gradle|stacktrace").containsMatchIn(text) -> Task.CODE
         Regex("(?i)(код|функци|докажи|реши|интеграл|алгоритм|debug|ошибк|тест)").containsMatchIn(text) -> Task.REASON
         Regex("(?i)(напиши сцен|рассказ|стих|роль|отыгра|истори)").containsMatchIn(text) -> Task.CREATIVE
         Regex("(?i)(плохо|тяжело|больно|устал|хуев|грустно|обними|рядом|одиноко)").containsMatchIn(text) -> Task.WARMTH
         Regex("(?i)(найди в интернет|погугли|search|инструмент|tool)").containsMatchIn(text) -> Task.TOOLS
         else -> Task.CHAT
+    }
+
+    fun detectTaskWithContext(text: String, hasImage: Boolean = false, estimatedTokens: Int = 0): Task {
+        val base = detectTask(text, hasImage)
+        return if (base != Task.VISION && estimatedTokens > 130000) Task.LONG else base
     }
 
     fun nsfwWindow(root: File, now: Long = System.currentTimeMillis()): Boolean {
@@ -79,6 +85,15 @@ object RouteSelector {
             JSONObject(SecretStore.readRuntimeConfig(root))
         }.getOrElse {
             runCatching { JSONObject(FileManager.read(root, "core/config.json")) }.getOrElse { JSONObject() }
+        }
+        val taskKey = when (task) {
+            Task.VISION -> "vision"; Task.WARMTH -> "warmth"; Task.CODE -> "code"
+            Task.LONG -> "long"; Task.REASON -> "thought"; else -> "chat"
+        }
+        val seq = config.optJSONObject("route_tasks")?.optJSONArray(taskKey)
+        if (seq != null) {
+            fun pos(id: String): Int { for (i in 0 until seq.length()) if (seq.optString(i) == id) return i; return 99 }
+            order = order.sortedBy { pos(models.optJSONObject(it)?.optString("id").orEmpty()) }
         }
         if (task == Task.VISION) {
             order = order.filter { models.optJSONObject(it)?.optBoolean("vision", false) == true }

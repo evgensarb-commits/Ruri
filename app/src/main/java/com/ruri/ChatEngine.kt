@@ -194,7 +194,7 @@ object ChatEngine {
             val value = entry.optString("text").trim()
             if (value.isNotBlank()) diaryContext.append("- ").append(value.take(500)).append("\n")
         }
-        val summary = readJson(root, "memory/L3_summary.json").optString("summary").take(5000)
+        val summary = readJson(root, "memory/L3_summary.json").optString("summary").take(4000)
         val notificationContext = FileManager.readLastLines(
             root, "memory/L0_raw.jsonl", maxLines = 6000, maxBytes = 4 * 1024 * 1024
         ).asReversed().mapNotNull { line ->
@@ -205,7 +205,7 @@ object ChatEngine {
                     event.optString("title") + " — " +
                     event.optString("text")
             } catch (_: Exception) { null }
-        }.take(10).asReversed().joinToString("\n")
+        }.let { all -> val recent = all.take(5).asReversed().toMutableList(); val older = all.size - 5; if (older > 0) recent.add("(ещё $older более старых уведомлений не показаны)"); recent.joinToString("\n") }
         val bodyEventContext = FileManager.readLastLines(
             root, "memory/L0_raw.jsonl", maxLines = 1200, maxBytes = 1024 * 1024
         ).asReversed().mapNotNull { line ->
@@ -264,13 +264,14 @@ object ChatEngine {
             throw IllegalStateException("Сообщение Командира не найдено в L0; оно осталось в очереди")
         }
         val history = (if (targetPosition >= 0) newestFirstHistory.drop(targetPosition) else newestFirstHistory)
-            .take(14).reversed()
+            .take(8).reversed()
         if (history.isEmpty() || history.last().optString("role") != "user") {
             throw IllegalStateException("Не найдено последнее сообщение командира")
         }
         val commanderText = history.last().optString("content")
         EmotionEngine.onCommanderMessage(root, commanderText, history.last().optString("_ruri_event_id"))
-        val task = RouteSelector.detectTask(commanderText)
+        val est = (system.length + history.sumOf { it.optString("content").length }) / 3
+        val task = RouteSelector.detectTaskWithContext(commanderText, estimatedTokens = est)
         val adult = RouteSelector.isAdultTopic(commanderText) || RouteSelector.nsfwWindow(root)
         fun selectOrder(online: Boolean): List<Int> = RouteSelector.orderedIndices(root, models, current, task, online, NetState.vpn, adult)
         var order = selectOrder(NetState.online || assumeReachable)
@@ -817,12 +818,32 @@ object ChatEngine {
         return "Факт записан в твою L1-память с confidence 0.6."
     }
 
+    internal fun leanFollowup(messages: JSONArray): JSONArray {
+        val out = JSONArray()
+        if (messages.length() > 0) out.put(messages.optJSONObject(0))
+        var lastCommander: JSONObject? = null
+        val toolResults = mutableListOf<JSONObject>()
+        for (i in 1 until messages.length()) {
+            val m = messages.optJSONObject(i) ?: continue
+            val role = m.optString("role"); val content = m.optString("content")
+            if (role == "user" && !content.startsWith("[ИНСТРУМЕНТ")) lastCommander = m
+            if (role == "user" && content.startsWith("[ИНСТРУМЕНТ")) toolResults.add(m)
+        }
+        if (lastCommander != null) out.put(lastCommander)
+        toolResults.takeLast(6).forEach { out.put(it) }
+        return out
+    }
+
     internal fun requestToolFollowup(model: JSONObject, messages: JSONArray, root: File? = null, routeId: String = "", task: Task? = null): String? {
         val base = model.optString("base_url").trimEnd('/')
         if (!base.startsWith("https://", ignoreCase = true)) {
             throw ModelRequestFailure("Provider endpoint must use HTTPS", 0L, "invalid_endpoint")
         }
-        val safeMessages = providerMessagesWithFullMemory(messages)
+        val hasToolResult = (0 until messages.length()).any {
+            messages.optJSONObject(it)?.optString("content")?.startsWith("[ИНСТРУМЕНТ") == true
+        }
+        val effectiveMessages = if (hasToolResult) leanFollowup(messages) else messages
+        val safeMessages = providerMessagesWithFullMemory(effectiveMessages)
             ?: throw ModelRequestFailure("Не удалось собрать полный контекст памяти для продолжения ответа", 0L, "context_error")
         var connection: HttpURLConnection? = null
         try {
