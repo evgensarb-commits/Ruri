@@ -8,7 +8,7 @@ import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import javax.net.ssl.SSLException
 
-enum class Task { CHAT, WARMTH, REASON, CREATIVE, VISION, TOOLS }
+enum class Task { CHAT, WARMTH, REASON, CREATIVE, VISION, TOOLS, CODE }
 
 /** Selects enabled free routes by manual priority, with explicit NSFW and vision overrides. */
 object RouteSelector {
@@ -65,11 +65,12 @@ object RouteSelector {
         task: Task,
         online: Boolean = NetState.online,
         vpn: Boolean = NetState.vpn,
-        adult: Boolean = false
+        adult: Boolean = false,
+        routeTaskKey: String? = null
     ): List<Int> {
         val eligible = (0 until models.length()).filter { index ->
             val model = models.optJSONObject(index) ?: return@filter false
-            model.optBoolean("free_tier", true) && model.optBoolean("enabled", true)
+            (model.optBoolean("free_tier", true) || model.optString("id").startsWith("routerapi-")) && model.optBoolean("enabled", true)
         }
         var order = eligible.sortedWith(
             compareBy<Int> { models.optJSONObject(it)?.optInt("priority", 99) ?: 99 }
@@ -80,6 +81,23 @@ object RouteSelector {
         }.getOrElse {
             runCatching { JSONObject(FileManager.read(root, "core/config.json")) }.getOrElse { JSONObject() }
         }
+        val taskKey = routeTaskKey?.takeIf { it.isNotBlank() } ?: when (task) {
+            Task.VISION -> "vision"
+            Task.WARMTH -> "warmth"
+            Task.CODE -> "code"
+            else -> "chat"
+        }
+        val taskSequence = config.optJSONObject("route_tasks")?.optJSONArray(taskKey)
+        if (taskSequence != null) {
+            fun taskPosition(id: String): Int {
+                for (position in 0 until taskSequence.length()) {
+                    if (taskSequence.optString(position) == id) return position
+                }
+                return 99
+            }
+            order = order.sortedBy { index -> taskPosition(models.optJSONObject(index)?.optString("id").orEmpty()) }
+        }
+
         if (task == Task.VISION) {
             order = order.filter { models.optJSONObject(it)?.optBoolean("vision", false) == true }
         } else if (adult && config.optBoolean("nsfw_override", true)) {
@@ -103,6 +121,26 @@ object RouteSelector {
             }
             else -> order // AUTO: manual priority order, then fallback on actual request failure.
         }
+    }
+
+    internal fun applyRouteTasks(config: JSONObject, payload: JSONObject) {
+        val models = config.optJSONArray("models") ?: JSONArray()
+        val knownIds = (0 until models.length()).mapNotNull { models.optJSONObject(it)?.optString("id") }
+            .filter { it.isNotBlank() }.toSet()
+        val allowedTasks = listOf("chat", "warmth", "thought", "code", "vision", "long")
+        val supplied = payload.optJSONObject("route_tasks") ?: payload
+        val result = JSONObject()
+        for (taskKey in allowedTasks) {
+            val source = supplied.optJSONArray(taskKey) ?: continue
+            val sequence = JSONArray()
+            val seen = mutableSetOf<String>()
+            for (index in 0 until source.length()) {
+                val id = source.optString(index).trim()
+                if (id in knownIds && seen.add(id)) sequence.put(id)
+            }
+            result.put(taskKey, sequence)
+        }
+        config.put("route_tasks", result)
     }
 
     internal fun applyManualRouteOrder(config: JSONObject, payload: JSONObject) {
