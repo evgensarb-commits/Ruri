@@ -14,6 +14,7 @@ enum class Task { CHAT, WARMTH, REASON, CREATIVE, VISION, TOOLS, CODE, LONG }
 object RouteSelector {
     fun detectTask(text: String, hasImage: Boolean = false): Task = when {
         hasImage -> Task.VISION
+        Regex("(?i)(напиши|почини|пофикси|перепиши|отрефакторь)\\s+(код|функцию|класс|скрипт|метод)|\\.(kt|py|js|ts|java)\\b|kotlin|gradle|stacktrace").containsMatchIn(text) -> Task.CODE
         Regex("(?i)(код|функци|докажи|реши|интеграл|алгоритм|debug|ошибк|тест)").containsMatchIn(text) -> Task.REASON
         Regex("(?i)(напиши сцен|рассказ|стих|роль|отыгра|истори)").containsMatchIn(text) -> Task.CREATIVE
         Regex("(?i)(плохо|тяжело|больно|устал|хуев|грустно|обними|рядом|одиноко)").containsMatchIn(text) -> Task.WARMTH
