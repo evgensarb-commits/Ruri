@@ -213,17 +213,7 @@ object ChatEngine {
             if (value.isNotBlank()) diaryContext.append("- ").append(value.take(500)).append("\n")
         }
         val summary = readJson(root, "memory/L3_summary.json").optString("summary").take(5000)
-        val notificationContext = FileManager.readLastLines(
-            root, "memory/L0_raw.jsonl", maxLines = 6000, maxBytes = 4 * 1024 * 1024
-        ).asReversed().mapNotNull { line ->
-            try {
-                val event = JSONObject(line)
-                if (event.optString("type") != "phone_notification") return@mapNotNull null
-                "- ${event.optString("package")}: " +
-                    event.optString("title") + " — " +
-                    event.optString("text")
-            } catch (_: Exception) { null }
-        }.take(10).asReversed().joinToString("\n")
+        val notificationContext = notificationContext(root, 5)
         val bodyEventContext = FileManager.readLastLines(
             root, "memory/L0_raw.jsonl", maxLines = 1200, maxBytes = 1024 * 1024
         ).asReversed().mapNotNull { line ->
@@ -282,7 +272,7 @@ object ChatEngine {
             throw IllegalStateException("Сообщение Командира не найдено в L0; оно осталось в очереди")
         }
         val history = (if (targetPosition >= 0) newestFirstHistory.drop(targetPosition) else newestFirstHistory)
-            .take(14).reversed()
+            .take(8).reversed()
         if (history.isEmpty() || history.last().optString("role") != "user") {
             throw IllegalStateException("Не найдено последнее сообщение командира")
         }
@@ -501,7 +491,7 @@ object ChatEngine {
                 val initialDiaryText = ToolLoop.diaryActionText(initialReply)
                 val rawReply = if (initialDiaryText != null) "" else
                     ToolLoop.unwrapDiaryReply(root, initialReply, messages, meta) { nextMessages ->
-                        requestNext(nextMessages)
+                        requestNext(leanFollowup(nextMessages))
                     }
                 val (replyWithoutDecision, _) = EmotionEngine.parseInitiativeDecision(rawReply)
                 val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(replyWithoutDecision)
@@ -519,7 +509,7 @@ object ChatEngine {
                         FileManager.appendEvent(root, SecretRedactor.redactEvent(JSONObject().put("type", "tool_result").put("action", name).put("ok", toolResult.first).put("text", toolResult.second.take(4000))))
                         messages.put(JSONObject().put("role", "user").put("content", "[ИНСТРУМЕНТ $name]: ${toolResult.second.take(if (name == "read_shelf") 7600 else 4000)}"))
                     }
-                    finalReply = requestNext(messages) ?: clean
+                    finalReply = requestNext(leanFollowup(messages)) ?: clean
                     guard++
                 }
                 val (cleanFinal, tailDiary, _) = ToolLoop.stripActions(finalReply)
