@@ -300,6 +300,7 @@ object FileManager {
                 .put("base_url", base)
                 .put("model", model)
                 .put("api_key", previous?.optString("api_key").orEmpty())
+                .put("priority", when (id) { "routerapi-glm" -> 2; "routerapi-cydonia" -> 3; "routerapi-unslop" -> 4; else -> 5 })
                 .put("free_tier", false)
                 .put("enabled", keyPresent)
                 .put("nsfw", nsfw)
@@ -324,6 +325,13 @@ object FileManager {
             val alreadyKept = (0 until kept.length()).any { kept.optJSONObject(it)?.optString("id") == id }
             if (!alreadyKept) kept.put(model)
             retiredIds.remove(id)
+        }
+
+        val selectedId = config.optString("selected_route_id")
+        val selectedStillExists = (0 until kept.length()).any { kept.optJSONObject(it)?.optString("id") == selectedId }
+        if (!selectedStillExists) {
+            config.put("selected_route_id", kept.optJSONObject(0)?.optString("id").orEmpty())
+            config.put("current", 0)
         }
 
         config.put("models", kept)
