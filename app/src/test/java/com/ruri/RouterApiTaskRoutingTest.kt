@@ -182,3 +182,149 @@ class NoPreflightBanTest {
         assertFalse(classifier.contains("NetState.online"))
     }
 }
+
+class ThoughtNotInChatOnVetoTest {
+    @Test fun vetoIsRecordedAsThoughtAndNotSentToChat() {
+        val source = testSource("src/main/java/com/ruri/Thinker.kt")
+        assertTrue(source.contains("if (initiative && effective != \"write\")"))
+        assertTrue(source.contains("Diary.append(root, body, reason, emotion, \"thought\")"))
+        assertTrue(source.contains("initiative_vetoed"))
+    }
+}
+
+class ThoughtNotInChatOnThinkTest {
+    @Test fun thinkDecisionUsesInternalDiaryBranch() {
+        val source = testSource("src/main/java/com/ruri/Thinker.kt")
+        assertTrue(source.contains("decision.startsWith(\"think\")"))
+        assertTrue(source.contains("if (initiative && effective == \"write\")"))
+    }
+}
+
+class DiarySaidFlagGatedTest {
+    @Test fun saidEntriesAreIgnoredUntilMirrorFlagIsEnabled() {
+        val root = routerApiTestRoot()
+        try {
+            FileManager.init(root)
+            FileManager.write(root, "core/config.json", JSONObject().toString(2))
+            Diary.append(root, "said one", "test", null, "said")
+            var entries = JSONObject(FileManager.read(root, "memory/L2_diary.json")).getJSONArray("entries")
+            assertEquals(0, entries.length())
+            FileManager.write(root, "core/config.json", JSONObject().put("diary_mirror_said", true).toString(2))
+            Diary.append(root, "said two", "test", null, "said")
+            entries = JSONObject(FileManager.read(root, "memory/L2_diary.json")).getJSONArray("entries")
+            assertEquals("said", entries.getJSONObject(0).getString("kind"))
+        } finally { root.deleteRecursively() }
+    }
+}
+
+class BackoffJitterTest {
+    @Test fun jitterIsBoundedToTwentyPercent() {
+        assertEquals(100L, CommanderReplyQueue.jitteredBackoff(100L, 0.0))
+        assertEquals(110L, CommanderReplyQueue.jitteredBackoff(100L, 0.5))
+        assertEquals(120L, CommanderReplyQueue.jitteredBackoff(100L, 1.0))
+    }
+}
+
+class ShelfReingestOnModifyTest {
+    @Test fun watcherComparesStoredSizeAndModificationSignature() {
+        val source = testSource("src/main/java/com/ruri/ShelfWatcher.kt")
+        assertTrue(source.contains("file.length().toString() + \":\" + file.lastModified()"))
+        assertTrue(source.contains("seen.optString(\"sig:\" + safe) == signature"))
+    }
+}
+
+class NoDeadSaidRenderTest {
+    @Test fun diaryUiShowsSaidOnlyWhenMirrorFlagIsSet() {
+        val source = testSource("src/main/assets/index.html")
+        assertTrue(source.contains("kind==='thought'||(kind==='said'&&mirrorSaid)"))
+    }
+}
+
+class FollowupLeanNoHistoryResendTest {
+    @Test fun toolFollowupKeepsSystemAndToolResultsButDropsOldHistory() {
+        val full = JSONArray()
+            .put(JSONObject().put("role", "system").put("content", "L0 L1 L2 L3 recall"))
+            .put(JSONObject().put("role", "user").put("content", "old chat history"))
+            .put(JSONObject().put("role", "assistant").put("content", "tool call"))
+            .put(JSONObject().put("role", "user").put("content", "[ИНСТРУМЕНТ read_shelf]: result"))
+            .put(JSONObject().put("role", "user").put("content", "latest question"))
+        val lean = ChatEngine.leanFollowup(full)
+        assertEquals(3, lean.length())
+        assertTrue(lean.getJSONObject(0).optString("content").contains("L0"))
+        assertTrue(lean.getJSONObject(1).optString("content").startsWith("[ИНСТРУМЕНТ"))
+        assertEquals("latest question", lean.getJSONObject(2).optString("content"))
+        assertFalse(lean.toString().contains("old chat history"))
+    }
+}
+
+class FullMemoryGuardPassesTest {
+    @Test fun leanFollowupRetainsSystemMemoryForProviderGuard() {
+        val messages = JSONArray()
+            .put(JSONObject().put("role", "system").put("content", "L0 L1 L2 L3 recall"))
+            .put(JSONObject().put("role", "user").put("content", "[ИНСТРУМЕНТ search]: result"))
+        val lean = ChatEngine.leanFollowup(messages)
+        assertTrue(ChatEngine.hasFullMemoryContext(lean))
+        assertTrue(ChatEngine.providerMessagesWithFullMemory(lean) != null)
+    }
+}
+
+class AutonomousCompactTest {
+    @Test fun autonomousPromptOmitsNotificationResearchAndShelfBlocks() {
+        val source = testSource("src/main/java/com/ruri/Thinker.kt")
+        assertTrue(source.contains("val notificationText = if (initiative)"))
+        assertTrue(source.contains("val shelfText = if (!initiative) \"\" else"))
+        assertTrue(source.contains("(if (initiative) \"УВЕДОМЛЕНИЯ И СВОДКА:"))
+    }
+}
+
+class Notifications5SummaryTest {
+    @Test fun keepsFiveNewestAndSummarizesOlderTopics() {
+        val root = routerApiTestRoot()
+        try {
+            FileManager.init(root)
+            for (i in 0 until 7) FileManager.appendEvent(root, JSONObject()
+                .put("type", "phone_notification").put("package", "app$i")
+                .put("title", "topic$i").put("text", "body$i"))
+            val context = ChatEngine.notificationContext(root, 5)
+            assertTrue(context.contains("+2 более старых уведомлений"))
+            assertTrue(context.contains("topic0"))
+            assertTrue(context.contains("topic1"))
+            assertFalse(context.contains("body0"))
+            assertFalse(context.contains("body1"))
+            assertTrue(context.contains("body2"))
+            assertTrue(context.contains("body6"))
+        } finally { root.deleteRecursively() }
+    }
+}
+
+class History8Test {
+    @Test fun chatContextIsCappedAtEightMessages() {
+        val source = testSource("src/main/java/com/ruri/ChatEngine.kt")
+        assertTrue(source.contains(".take(8).reversed()"))
+    }
+}
+
+class L3CapTest {
+    @Test fun autonomousL3SummaryIsCappedAtFourThousandCharacters() {
+        val source = testSource("src/main/java/com/ruri/Thinker.kt")
+        assertTrue(source.contains("optString(\"summary\").take(4000)"))
+    }
+}
+
+class ShelfNamesOnlyTest {
+    @Test fun autonomousPromptDoesNotInlineShelfFileContents() {
+        val source = testSource("src/main/java/com/ruri/Thinker.kt")
+        val start = source.indexOf("val shelfNames =")
+        val end = source.indexOf("val notificationText =", start)
+        val shelfBlock = source.substring(start, end)
+        assertTrue(shelfBlock.contains("substringAfterLast"))
+        assertFalse(shelfBlock.contains("shelfContextText(root, name)"))
+    }
+}
+
+class ExemplarsInPromptTest {
+    @Test fun openingExemplarsRemainInThinkerPrompt() {
+        val source = testSource("src/main/java/com/ruri/Thinker.kt")
+        assertTrue(source.contains("opening_exemplars"))
+    }
+}
