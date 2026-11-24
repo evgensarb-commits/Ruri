@@ -97,7 +97,7 @@ class PureAutonomyDecidesTest {
 class ReflectionCadenceTest {
     @Test fun diaryThoughtsHaveAnIndependentTwoHourCadence() {
         val now = 100_000_000L
-        assertTrue(LifeScheduler.thoughtCheckDue(now, 0L, 0L, 6.0))
+        assertTrue(LifeScheduler.thoughtCheckDue(now, 0L, 0L, 2.0))
         assertFalse(LifeScheduler.thoughtCheckDue(now, now - 1L * 3_600_000L, 0L, 2.0))
         assertTrue(LifeScheduler.thoughtCheckDue(now, now - 2L * 3_600_000L, 0L, 2.0))
         assertFalse(LifeScheduler.thoughtCheckDue(now, now - 12L * 3_600_000L, now - 1L * 3_600_000L, 2.0))
