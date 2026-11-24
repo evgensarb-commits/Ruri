@@ -325,15 +325,15 @@ object Thinker {
                 else "- $type: " + event.optString("text").take(260)
             }.getOrNull()
         }.take(12).asReversed().joinToString("\n")
-        val researchText = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 1200, maxBytes = 1024 * 1024)
+        val researchText = if (initiative) FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 1200, maxBytes = 1024 * 1024)
             .asReversed().mapNotNull { line ->
                 runCatching {
                     val event = JSONObject(line)
                     if (event.optString("type") != "web_research_result") null
-                    else "Запрос: " + event.optString("query") + "\\n" + event.optString("text").take(5000)
+                    else "Запрос: " + event.optString("query") + "\\n" + event.optString("text").take(1800)
                 }.getOrNull()
             }.take(4).asReversed().joinToString("\\n\\n")
-        val summary = readJson(root, "memory/L3_summary.json").optString("summary")
+        val summary = readJson(root, "memory/L3_summary.json").optString("summary").take(4000)
         val quiet = hoursSince(state.optLong("last_seen_commander"), System.currentTimeMillis())
         val outcomeDigest = OutcomeDigest.build(root)
         OutcomeDigest.clearPresentedCorrection(root)
@@ -363,7 +363,8 @@ object Thinker {
             "ТВОИ ФАКТЫ (L1):\n" + factText + "\n" +
             "ТВОЙ ДНЕВНИК (L2):\n" + diaryText + "\n" +
             "ТВОЯ АВТОБИОГРАФИЯ (L3):\n" + summary + "\n" +
-            "ПОСЛЕДНИЕ СОБЫТИЯ ТВОЕГО ТЕЛА (L0):\n" + bodyEventText + "\n" + notificationText + "\nМатериалы с полки:\n" + shelfText + "\n"
+            "ПОСЛЕДНИЕ СОБЫТИЯ ТВОЕГО ТЕЛА (L0):\n" + bodyEventText + "\n" +
+            (if (initiative) "УВЕДОМЛЕНИЯ И СВОДКА:\n" + notificationText + "\nИССЛЕДОВАНИЯ:\n" + researchText + "\nФАЙЛЫ НА ПОЛКЕ (содержимое читать по запросу read_shelf):\n" + shelfText + "\n" else "")
         val prompt = if (initiative) common +
             "\nСейчас ты сама решила написать Командиру после долгой тишины. Выбери форму и объём сообщения по полю length_policy и текущему настроению."
         else common +
