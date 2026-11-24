@@ -510,6 +510,39 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
+        fun saveRouterAPIKey(key: String): String {
+            return try {
+                require(key.length <= 1024) { "Ключ слишком длинный" }
+                val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
+                val models = config.optJSONArray("models") ?: org.json.JSONArray()
+                var found = false
+                for (index in 0 until models.length()) {
+                    val model = models.optJSONObject(index) ?: continue
+                    if (!model.optString("id").startsWith("routerapi-")) continue
+                    found = true
+                    if (key.isBlank()) {
+                        model.put("api_key", "").put("clear_api_key", true).put("enabled", false)
+                    } else {
+                        model.put("api_key", key.trim()).remove("clear_api_key").put("enabled", true)
+                    }
+                }
+                require(found) { "Маршруты RouterAPI ещё не созданы; перезапусти приложение после обновления" }
+                SecretStore.saveRuntimeConfig(filesDir, config.toString(2))
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "RouterAPI key save failed") }
+        }
+
+        @JavascriptInterface
+        fun saveRouteTasks(json: String): String {
+            return try {
+                val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
+                RouteSelector.applyRouteTasks(config, JSONObject(json))
+                SecretStore.saveRuntimeConfig(filesDir, config.toString(2))
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "route task save failed") }
+        }
+
+        @JavascriptInterface
         fun saveRouteOrder(json: String): String {
             return try {
                 val payload = JSONObject(json)
