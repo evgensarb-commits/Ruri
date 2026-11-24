@@ -208,6 +208,7 @@ object FileManager {
         SecretStore.migrateLegacyApiKeys(root)
         SecretStore.migrateLegacySearchKey(root)
         migrateModelConfig(root)
+        migrateRouterApiRoutes(root)
         val configuredModels = runCatching {
             JSONObject(read(root, CONFIG_PATH)).optJSONArray("models")
         }.getOrNull()
@@ -256,6 +257,88 @@ object FileManager {
             emotionState.put("last_tick_at", baseline)
             write(root, "memory/emotions.json", emotionState.toString(2))
         }
+    }
+
+    private fun migrateRouterApiRoutes(root: File) {
+        val config = runCatching { JSONObject(SecretStore.readRuntimeConfig(root)) }.getOrElse { return }
+        if (config.optBoolean("routerapi_migration_v2", false)) return
+
+        val base = config.optString("routerapi_base", "https://routerai.ru/api/v1")
+            .trim().trimEnd('/').ifBlank { "https://routerai.ru/api/v1" }
+        val existing = config.optJSONArray("models") ?: JSONArray()
+        val kept = JSONArray()
+        val retiredIds = mutableListOf<String>()
+
+        for (index in 0 until existing.length()) {
+            val model = existing.optJSONObject(index) ?: continue
+            val id = model.optString("id")
+            if (model.optString("model").contains("meromero", ignoreCase = true)) {
+                model.put("priority", 1)
+                    .put("nsfw", true)
+                    .put("vision", true)
+                    .put("enabled", true)
+                kept.put(model)
+            } else if (id.isNotBlank()) {
+                retiredIds.add(id)
+            }
+        }
+
+        fun routerModel(
+            id: String,
+            name: String,
+            model: String,
+            nsfw: Boolean,
+            vision: Boolean,
+            contextLength: Int
+        ): JSONObject {
+            val previous = (0 until existing.length()).mapNotNull { existing.optJSONObject(it) }
+                .firstOrNull { it.optString("id") == id }
+            val keyPresent = previous?.optString("api_key").orEmpty().isNotBlank()
+            return JSONObject()
+                .put("id", id)
+                .put("name", name)
+                .put("base_url", base)
+                .put("model", model)
+                .put("api_key", previous?.optString("api_key").orEmpty())
+                .put("free_tier", false)
+                .put("enabled", keyPresent)
+                .put("nsfw", nsfw)
+                .put("vision", vision)
+                .put("context_length", contextLength)
+                .put("rpd", 0)
+                .put("tokens_per_day", 0)
+                .put("reset_hour_utc", 0)
+                .put("needs_vpn", false)
+                .put("ru_reachable", true)
+        }
+
+        val wanted = listOf(
+            routerModel("routerapi-glm", "GLM 5.3 Flash (RF)", "z-ai/glm-5.3-flash", false, true, 1000000),
+            routerModel("routerapi-cydonia", "Cydonia 24B V4.1", "thedrummer/cydonia-24b-v4.1", true, false, 131000),
+            routerModel("routerapi-unslop", "UnslopNemo 12B", "thedrummer/unslopnemo-12b", true, false, 1000000),
+            routerModel("routerapi-deepseek", "DeepSeek V4 Pro 0813", "deepseek/deepseek-v4-pro-0813", false, false, 1000000)
+        )
+
+        for (model in wanted) {
+            val id = model.optString("id")
+            val alreadyKept = (0 until kept.length()).any { kept.optJSONObject(it)?.optString("id") == id }
+            if (!alreadyKept) kept.put(model)
+            retiredIds.remove(id)
+        }
+
+        config.put("models", kept)
+            .put("routerapi_base", base)
+            .put("route_tasks", JSONObject()
+                .put("chat", JSONArray().put("routeway").put("routerapi-glm").put("routerapi-cydonia"))
+                .put("warmth", JSONArray().put("routeway").put("routerapi-cydonia").put("routerapi-unslop"))
+                .put("thought", JSONArray().put("routeway").put("routerapi-cydonia"))
+                .put("code", JSONArray().put("routerapi-glm").put("routerapi-deepseek").put("routeway"))
+                .put("vision", JSONArray().put("routeway").put("routerapi-glm"))
+                .put("long", JSONArray().put("routerapi-unslop").put("routerapi-cydonia")))
+            .put("routerapi_migration_v2", true)
+
+        SecretStore.saveRuntimeConfig(root, config.toString(2))
+        retiredIds.distinct().forEach { SecretStore.removeModelKey(root, it) }
     }
 
     fun read(root: File, path: String): String {
