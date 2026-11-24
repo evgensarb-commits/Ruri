@@ -70,7 +70,12 @@ object Thinker {
 
         var reason = originalReason
         var initiative = false
-        if (!inFlight && !originalReason.contains("thought_check") && EmotionEngine.initiativeGate(
+        // Chat/notification/phone events request an internal diary thought, not
+        // an unsolicited Commander message. Only the explicit drive-check path
+        // may still turn a cycle into a proactive chat initiative.
+        val eventDrivenWake = originalReason.startsWith("обработка_событий:") &&
+            !originalReason.contains("drive_check")
+        if (!inFlight && !originalReason.contains("thought_check") && !eventDrivenWake && EmotionEngine.initiativeGate(
                 root, lastSeen, now, state.optBoolean("waiting_for_reply", false),
                 state.optLong("last_initiative", 0L)
             )) {
