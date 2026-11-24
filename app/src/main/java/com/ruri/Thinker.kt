@@ -232,7 +232,7 @@ object Thinker {
         }
 
         OutcomeDigest.verifyClaims(root, safeReply)
-        val notificationMessageId = if (initiative) {
+        val notificationMessageId = if (initiative && effective == "write") {
             val messageId = appendChatMessage(root, "ruri", safeReply, now, ChatEngine.sourceUrlsSnapshot(), successfulRouteId)
             messageId
         } else {
