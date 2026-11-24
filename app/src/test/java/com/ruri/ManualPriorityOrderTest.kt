@@ -13,7 +13,7 @@ class ManualPriorityOrderTest {
         .put(JSONObject().put("id", "routeway").put("model", "gemma-meromero:free")
             .put("free_tier", true).put("enabled", true).put("api_key", "set")
             .put("priority", 2).put("nsfw", true).put("vision", true))
-        .put(JSONObject().put("id", "routeway-minimax").put("model", "minimax-m3.1-flash:free")
+        .put(JSONObject().put("id", "routerapi-glm").put("model", "z-ai/glm-5.3-flash")
             .put("free_tier", true).put("enabled", true).put("api_key", "set")
             .put("priority", 1).put("nsfw", false).put("vision", false))
 
@@ -84,7 +84,7 @@ class ManualPriorityOrderTest {
         val config = JSONObject().put("models", models())
         val payload = JSONObject().put("nsfw_override", false).put("routes", JSONArray()
             .put(JSONObject().put("id", "routeway").put("priority", 7).put("nsfw", false).put("vision", false))
-            .put(JSONObject().put("id", "routeway-minimax").put("priority", 1).put("nsfw", true).put("vision", true)))
+            .put(JSONObject().put("id", "routerapi-glm").put("priority", 1).put("nsfw", true).put("vision", true)))
         RouteSelector.applyManualRouteOrder(config, payload)
         val updated = config.getJSONArray("models")
         assertEquals(7, updated.getJSONObject(0).getInt("priority"))
@@ -133,7 +133,7 @@ class ManualPriorityOrderTest {
         val root = root()
         try {
             val config = JSONObject(FileManager.read(root, "core/config.json"))
-                .put("route_mode", "MANUAL").put("selected_route_id", "routeway-minimax")
+                .put("route_mode", "MANUAL").put("selected_route_id", "routerapi-glm")
             FileManager.write(root, "core/config.json", config.toString(2))
             assertEquals(emptyList<Int>(), RouteSelector.orderedIndices(root, models(), 1, Task.VISION))
         } finally { root.deleteRecursively() }

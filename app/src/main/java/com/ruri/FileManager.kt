@@ -170,8 +170,7 @@ object FileManager {
         put(root, CONFIG_PATH, """
             {
               "models": [
-                { "id": "routeway", "name": "Routeway · Gemma MeroMero Free", "base_url": "https://api.routeway.ai/v1", "api_key": "", "model": "gemma-4-26b-a4b-it-meromero:free", "priority": 1, "tokens_per_day": 400000, "free_tier": true, "enabled": true },
-                { "id": "routeway-minimax", "name": "MiniMax M3.1 Flash Free", "base_url": "https://api.routeway.ai/v1", "api_key": "", "model": "minimax-m3.1-flash:free", "priority": 2, "free_tier": true, "enabled": true }
+                { "id": "routeway", "name": "Routeway · Gemma MeroMero Free", "base_url": "https://api.routeway.ai/v1", "api_key": "", "model": "gemma-4-26b-a4b-it-meromero:free", "priority": 1, "tokens_per_day": 400000, "free_tier": true, "enabled": true }
               ],
               "current": 0,
               "free_only": true,
@@ -208,17 +207,7 @@ object FileManager {
         SecretStore.migrateLegacyApiKeys(root)
         SecretStore.migrateLegacySearchKey(root)
         migrateModelConfig(root)
-        val configuredModels = runCatching {
-            JSONObject(read(root, CONFIG_PATH)).optJSONArray("models")
-        }.getOrNull()
-        val hasMeroRoute = configuredModels?.let { models ->
-            (0 until models.length()).any { index ->
-                models.optJSONObject(index)?.optString("model")?.contains("meromero", ignoreCase = true) == true
-            }
-        } == true
-        if (hasMeroRoute) {
-            SecretStore.migrateRoutewayFallbackKey(root, "routeway", "routeway-minimax")
-        }
+        SecretStore.removeModelKey(root, "routeway-minimax")
         SecretStore.removeModelKey(root, "routeway-darksoul")
         RouteMeta.pruneToConfiguredRoutes(root)
         RouteMeta.migrateLegacyNsfwFlags(root)
@@ -791,72 +780,52 @@ object FileManager {
             val config = JSONObject(raw)
             val sourceModels = mergeModelsById(config.optJSONArray("models") ?: JSONArray())
 
-            val meromeroSource = (0 until sourceModels.length()).mapNotNull { sourceModels.optJSONObject(it) }
-                .firstOrNull {
-                    it.optString("model").contains("meromero", ignoreCase = true) ||
-                        it.optString("id").contains("meromero", ignoreCase = true)
-                }
-            val meromero = meromeroSource?.let { JSONObject(it.toString()) } ?: JSONObject()
-            val sourceMeromeroId = meromero.optString("id").ifBlank { "routeway" }
-            if (sourceMeromeroId != "routeway") {
-                SecretStore.migrateRoutewayFallbackKey(root, sourceMeromeroId, "routeway")
+            // v3: MiniMax and known-dead legacy routes are dropped; every other
+            // configured route is preserved untouched (including user-disabled ones)
+            // so manual priorities keep their meaning.
+            val legacyDeadIds = setOf("routeway-minimax", "requesty", "groq", "routeway-darksoul")
+            val kept = JSONArray()
+            var hasMeromero = false
+            for (i in 0 until sourceModels.length()) {
+                val model = sourceModels.optJSONObject(i) ?: continue
+                val modelId = model.optString("id")
+                val modelValue = model.optString("model")
+                if (modelId in legacyDeadIds || modelValue == "minimax-m3.1-flash:free") continue
+                if (modelValue.contains("meromero", ignoreCase = true) ||
+                    modelId.contains("meromero", ignoreCase = true)) hasMeromero = true
+                kept.put(model)
             }
-            val meromeroId = "routeway"
-            if (!meromero.optString("model").contains("meromero", ignoreCase = true)) {
-                meromero.put("model", "gemma-4-26b-a4b-it-meromero:free")
+            // Fresh installs must still get the MeroMero route; upgraded installs
+            // keep exactly what the Commander configured (it may be removed on purpose).
+            val isFreshInstall = sourceModels.length() == 0
+            if (!hasMeromero && isFreshInstall) {
+                kept.put(JSONObject()
+                    .put("id", "routeway").put("name", "Routeway · Gemma MeroMero Free")
+                    .put("base_url", "https://api.routeway.ai/v1").put("api_key", "")
+                    .put("model", "gemma-4-26b-a4b-it-meromero:free")
+                    .put("priority", 1).put("nsfw", true).put("vision", true)
+                    .put("tokens_per_day", 400000L).put("free_tier", true).put("enabled", true))
             }
-            val manualOrderMigration = !config.optBoolean("manual_route_order_v1", false)
-            meromero.put("id", meromeroId)
-                .put("name", "Routeway · Gemma MeroMero Free")
-                .put("base_url", "https://api.routeway.ai/v1")
-                .put("api_key", "")
-                .put("free_tier", true)
-                .put("enabled", true)
-            if (manualOrderMigration) {
-                meromero.put("priority", 2).put("nsfw", true).put("vision", true)
-            } else {
-                if (!meromero.has("priority")) meromero.put("priority", 2)
-                if (!meromero.has("nsfw")) meromero.put("nsfw", true)
-                if (!meromero.has("vision")) meromero.put("vision", true)
-            }
-            if (meromero.optLong("tokens_per_day", 0L) <= 0L) {
-                meromero.put("tokens_per_day", 400000L)
-            }
-
-            val minimaxSource = (0 until sourceModels.length()).mapNotNull { sourceModels.optJSONObject(it) }
-                .firstOrNull { it.optString("model") == "minimax-m3.1-flash:free" }
-            val minimax = minimaxSource?.let { JSONObject(it.toString()) } ?: JSONObject()
-            minimax.put("id", "routeway-minimax")
-                .put("name", "MiniMax M3.1 Flash Free")
-                .put("base_url", "https://api.routeway.ai/v1")
-                .put("api_key", "")
-                .put("model", "minimax-m3.1-flash:free")
-                .put("free_tier", true)
-                .put("enabled", true)
-            if (manualOrderMigration) {
-                minimax.put("priority", 1).put("nsfw", false).put("vision", false)
-            } else {
-                if (!minimax.has("priority")) minimax.put("priority", 1)
-                if (!minimax.has("nsfw")) minimax.put("nsfw", false)
-                if (!minimax.has("vision")) minimax.put("vision", false)
-            }
-
-            val kept = JSONArray().put(meromero).put(minimax)
             val selectedId = config.optString("selected_route_id")
-            val selectedIndex = (0 until kept.length()).firstOrNull { index ->
+            var selectedIndex = (0 until kept.length()).firstOrNull { index ->
                 kept.optJSONObject(index)?.optString("id") == selectedId
             }
-            val selectedCurrent = selectedIndex ?: config.optInt("current", 0).coerceIn(0, 1)
+            if (selectedIndex == null) {
+                val rawCurrent = config.optInt("current", 0)
+                selectedIndex = if (kept.length() == 0) null else rawCurrent.coerceIn(0, kept.length() - 1)
+            }
             config.put("models", kept)
-                .put("current", selectedCurrent)
+                .put("current", selectedIndex ?: 0)
                 .put("free_only", true)
                 .put("two_route_migration_v1", true)
                 .put("manual_route_order_v1", true)
+                .put("routes_v3_no_minimax", true)
             if (!config.has("nsfw_override")) config.put("nsfw_override", true)
             if (!config.has("route_mode")) config.put("route_mode", "AUTO")
-            if (selectedIndex == null) {
-                val selected = kept.optJSONObject(selectedCurrent)
-                config.put("selected_route_id", selected?.optString("id") ?: "routeway")
+            if (selectedIndex != null) {
+                config.put("selected_route_id", kept.optJSONObject(selectedIndex)?.optString("id").orEmpty())
+            } else {
+                config.put("selected_route_id", "")
             }
 
             val normalized = config.toString(2)

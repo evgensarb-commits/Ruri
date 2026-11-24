@@ -133,6 +133,9 @@ object RouteSelector {
                     model.put("priority", route.optInt("priority", 99).coerceAtLeast(1))
                     model.put("nsfw", route.optBoolean("nsfw", false))
                     model.put("vision", route.optBoolean("vision", false))
+                    // Explicitly provided only by the unified routes UI; older callers
+                    // that omit the field never change the enabled state.
+                    if (route.has("enabled")) model.put("enabled", route.optBoolean("enabled", true))
                 }
             }
         }
