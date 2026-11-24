@@ -95,6 +95,7 @@ class OnlyTwoRoutesTest {
             config.put("models", oldModels).put("current", 2)
                 .put("route_mode", "MANUAL")
                 .put("selected_route_id", "routeway-darksoul")
+                .put("routerapi_migration_v2", false)
             FileManager.write(root, "core/config.json", config.toString(2))
             FileManager.write(root, RouteMeta.PATH, JSONObject()
                 .put("routeway", JSONObject().put("day_count", 1))
@@ -106,18 +107,22 @@ class OnlyTwoRoutesTest {
 
             val migrated = JSONObject(FileManager.read(root, "core/config.json"))
             val models = migrated.getJSONArray("models")
-            assertEquals(2, models.length())
+            assertEquals(5, models.length())
             assertTrue(models.getJSONObject(0).getString("model").contains("meromero"))
-            assertEquals("minimax-m3.1-flash:free", models.getJSONObject(1).getString("model"))
-            assertEquals(2, models.getJSONObject(0).getInt("priority"))
+            assertEquals("routeway", models.getJSONObject(0).getString("id"))
+            assertEquals(1, models.getJSONObject(0).getInt("priority"))
             assertTrue(models.getJSONObject(0).getBoolean("nsfw"))
             assertTrue(models.getJSONObject(0).getBoolean("vision"))
-            assertEquals(1, models.getJSONObject(1).getInt("priority"))
-            assertFalse(models.getJSONObject(1).getBoolean("nsfw"))
-            assertFalse(models.getJSONObject(1).getBoolean("vision"))
+            assertEquals("routerapi-glm", models.getJSONObject(1).getString("id"))
+            assertEquals("routerapi-cydonia", models.getJSONObject(2).getString("id"))
+            assertEquals("routerapi-unslop", models.getJSONObject(3).getString("id"))
+            assertEquals("routerapi-deepseek", models.getJSONObject(4).getString("id"))
+            assertFalse(models.getJSONObject(1).getBoolean("enabled"))
+            assertFalse(models.getJSONObject(1).getBoolean("free_tier"))
             assertTrue(migrated.getBoolean("nsfw_override"))
-            assertEquals("routeway-minimax", migrated.getString("selected_route_id"))
-            assertEquals(1, migrated.getInt("current"))
+            assertEquals("routeway", migrated.getString("selected_route_id"))
+            assertEquals(0, migrated.getInt("current"))
+            assertEquals("routerapi-cydonia", migrated.getJSONObject("route_tasks").getJSONArray("thought").getString(1))
             val metadata = RouteMeta.load(root)
             assertTrue(metadata.has("routeway"))
             assertFalse(metadata.has("requesty"))
@@ -129,16 +134,21 @@ class OnlyTwoRoutesTest {
     }
 }
 
-class MinimaxFreeIdTest {
-    @Test fun configUsesOnlyTheExplicitFreeMiniMaxModelId() {
-        val root = Files.createTempDirectory("ruri-minimax-free-id").toFile()
+class RouterApiMigrationTest {
+    @Test fun migrationAddsFourRouterApiRoutesWithoutEmbeddingCredentials() {
+        val root = Files.createTempDirectory("ruri-routerapi-migration").toFile()
         try {
             FileManager.init(root)
-            val models = JSONObject(FileManager.read(root, "core/config.json")).getJSONArray("models")
-            val minimax = (0 until models.length()).map { models.getJSONObject(it) }
-                .first { it.optString("id") == "routeway-minimax" }
-            assertEquals("minimax-m3.1-flash:free", minimax.getString("model"))
-            assertFalse(minimax.getString("model") == "minimax-m3.1-flash")
+            val config = JSONObject(FileManager.read(root, "core/config.json"))
+            val models = config.getJSONArray("models")
+            assertEquals(5, models.length())
+            val routerModels = (0 until models.length()).map { models.getJSONObject(it) }
+                .filter { it.optString("id").startsWith("routerapi-") }
+            assertEquals(4, routerModels.size)
+            assertTrue(routerModels.all { !it.optBoolean("enabled") && it.optString("api_key").isBlank() })
+            assertTrue(routerModels.all { !it.optBoolean("free_tier") })
+            assertEquals("https://routerai.ru/api/v1", routerModels.first().getString("base_url"))
+            assertTrue(config.getBoolean("routerapi_migration_v2"))
         } finally {
             root.deleteRecursively()
         }
@@ -195,5 +205,35 @@ class QuotaOrderTest {
         } finally {
             root.deleteRecursively()
         }
+    }
+}
+
+class TaskRouteSequenceTest {
+    @Test fun codeTaskUsesConfiguredRouterApiOrderAndIncludesNonFreeRouterApiModels() {
+        val root = Files.createTempDirectory("ruri-task-route-code").toFile()
+        try {
+            FileManager.init(root)
+            val config = JSONObject(FileManager.read(root, "core/config.json"))
+            val models = config.getJSONArray("models")
+            val order = RouteSelector.orderedIndices(
+                root, models, 0, Task.CODE, online = true, vpn = false, routeTaskKey = "code"
+            )
+            assertEquals(listOf("routerapi-glm", "routerapi-deepseek", "routeway"),
+                order.map { models.getJSONObject(it).getString("id") })
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test fun sixTaskSequencesAreSavedOnlyForKnownRouteIds() {
+        val config = JSONObject().put("models", JSONArray()
+            .put(JSONObject().put("id", "routeway"))
+            .put(JSONObject().put("id", "routerapi-glm")))
+        RouteSelector.applyRouteTasks(config, JSONObject().put("route_tasks",
+            JSONObject().put("code", JSONArray().put("routerapi-glm").put("unknown").put("routeway"))))
+        val saved = config.getJSONObject("route_tasks").getJSONArray("code")
+        assertEquals(2, saved.length())
+        assertEquals("routerapi-glm", saved.getString(0))
+        assertEquals("routeway", saved.getString(1))
     }
 }
