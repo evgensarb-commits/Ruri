@@ -86,6 +86,15 @@ object RouteSelector {
         }.getOrElse {
             runCatching { JSONObject(FileManager.read(root, "core/config.json")) }.getOrElse { JSONObject() }
         }
+        val taskKey = when (task) {
+            Task.VISION -> "vision"; Task.WARMTH -> "warmth"; Task.CODE -> "code"
+            Task.LONG -> "long"; Task.REASON -> "thought"; else -> "chat"
+        }
+        val seq = config.optJSONObject("route_tasks")?.optJSONArray(taskKey)
+        if (seq != null) {
+            fun pos(id: String): Int { for (i in 0 until seq.length()) if (seq.optString(i) == id) return i; return 99 }
+            order = order.sortedBy { pos(models.optJSONObject(it)?.optString("id").orEmpty()) }
+        }
         if (task == Task.VISION) {
             order = order.filter { models.optJSONObject(it)?.optBoolean("vision", false) == true }
         } else if (adult && config.optBoolean("nsfw_override", true)) {
