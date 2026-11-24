@@ -10,178 +10,197 @@ import java.util.Locale
 import java.util.TimeZone
 
 /**
- * Read-only, privacy-safe snapshot for the in-app diagnostics screen.
- * Provider keys are read only to determine whether a key exists and are never returned.
+ * Diagnostics are diagnostic: they perform a real request, show every connection stage,
+ * and explain in plain language what is wrong with the model and why there is no reply.
+ *
+ * Provider keys are read only to decide whether one exists; they are never returned.
  */
 object Diagnostics {
+    private const val LOG_PATH = "memory/network_diagnostics.jsonl"
+
+    /** Snapshot of the current state. No network access, safe to call on every screen open. */
     fun run(ctx: Context): String {
         val root = ctx.filesDir
         NetState.refresh(ctx.applicationContext)
-        val config = runCatching { SecretStore.readRuntimeConfig(root) }
-            .getOrDefault("{}")
-        return collect(root, config, NetState.online, NetState.vpn)
+        return snapshot(root, online = NetState.online, vpn = NetState.vpn)
     }
 
     /**
-     * Live diagnosis: performs one authenticated request per enabled route and reports
-     * what the provider answers now. Never returns remembered data for a route the
-     * config no longer contains.
+     * Live diagnosis: one authenticated `GET /models`. This is what answers
+     * «почему нет подключения» — it separates DNS, TLS, HTTP status and provider verdict.
      */
-    fun verifyAll(ctx: Context): String {
+    fun runLive(ctx: Context): String {
         val root = ctx.filesDir
         NetState.refresh(ctx.applicationContext)
-        val config = runCatching { JSONObject(SecretStore.readRuntimeConfig(root)) }
-            .getOrDefault(JSONObject())
-        val models = config.optJSONArray("models") ?: JSONArray()
-        if (!NetState.online) {
-            return JSONObject().put("online", false)
-                .put("routes", JSONObject()).toString()
+        val apiKey = Route.apiKey(root)
+        val result = Transport.probe(apiKey)
+        val record = JSONObject()
+            .put("ok", result is Transport.Result.Success)
+            .put("network", JSONObject().put("online", NetState.online).put("vpn", NetState.vpn))
+            .put("route", routeInfo(root))
+            .put("stages", result.stages)
+            .put("total_ms", result.totalMs)
+            .put("log_tail", logTail(root, 10))
+        when (result) {
+            is Transport.Result.Success -> {
+                record.put("http_status", result.httpStatus)
+                    .put("error_kind", "ok")
+                    .put("verdict", verdict("ok", result.httpStatus, "", NetState.online, NetState.vpn, apiKey))
+                // A successful probe is worth remembering: it is evidence, not a guess.
+                runCatching {
+                    NetworkDiagnostics.record(root, JSONObject()
+                        .put("timestamp", System.currentTimeMillis())
+                        .put("provider", Route.DISPLAY_NAME)
+                        .put("model", Route.MODEL)
+                        .put("base_url", Route.BASE_URL)
+                        .put("vpn", NetState.vpn)
+                        .put("online", NetState.online)
+                        .put("result", "ok")
+                        .put("error_kind", "ok")
+                        .put("stage", "PROBE_COMPLETE")
+                        .put("http_status", result.httpStatus)
+                        .put("failure_message", "проверка вручную: соединение установлено")
+                        .put("explanation", RetryPolicy.explain("ok"))
+                        .put("stages", result.stages))
+                }
+            }
+            is Transport.Result.Failure -> {
+                record.put("http_status", result.httpStatus ?: JSONObject.NULL)
+                    .put("error_kind", result.kind)
+                    .put("detail", result.detail)
+                    .put("verdict", verdict(result.kind, result.httpStatus, result.detail,
+                        NetState.online, NetState.vpn, apiKey))
+                runCatching {
+                    NetworkDiagnostics.record(root, JSONObject()
+                        .put("timestamp", System.currentTimeMillis())
+                        .put("provider", Route.DISPLAY_NAME)
+                        .put("model", Route.MODEL)
+                        .put("base_url", Route.BASE_URL)
+                        .put("vpn", NetState.vpn)
+                        .put("online", NetState.online)
+                        .put("result", result.kind)
+                        .put("error_kind", result.kind)
+                        .put("stage", "PROBE_" + ((0 until result.stages.length())
+                            .lastOrNull()
+                            ?.let { result.stages.optJSONObject(it)?.optString("name") } ?: "UNKNOWN"))
+                        .put("http_status", result.httpStatus ?: JSONObject.NULL)
+                        .put("failure_message", result.detail.take(300))
+                        .put("explanation", RetryPolicy.explain(result.kind, result.httpStatus, result.detail))
+                        .put("stages", result.stages))
+                }
+            }
         }
-        val report = Probe.verify(root, models)
-        return JSONObject().put("online", true).put("routes", report).toString()
+        return record.toString(2)
     }
 
-    internal fun collect(
-        root: File,
-        runtimeConfig: String,
-        online: Boolean,
-        vpn: Boolean,
-        now: Long = System.currentTimeMillis()
-    ): String {
+    /** Log lines for the diagnostics pane, newest last. */
+    fun readLog(ctx: Context): String = logTail(ctx.filesDir, 40).toString()
+
+    internal fun logTail(root: File, limit: Int): JSONArray {
+        val out = JSONArray()
+        val lines = runCatching { File(root, LOG_PATH).readLines(Charsets.UTF_8) }
+            .getOrDefault(emptyList())
+            .filter { it.isNotBlank() }
+            .takeLast(limit.coerceIn(1, 200))
+        for (line in lines) {
+            val entry = runCatching { JSONObject(line) }.getOrNull() ?: continue
+            out.put(formatLogLine(entry))
+        }
+        return out
+    }
+
+    private fun formatLogLine(entry: JSONObject): String {
+        val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+            .format(Date(entry.optLong("timestamp", 0L)))
+        val kind = entry.optString("error_kind").ifBlank { entry.optString("result") }
+        val status = entry.opt("http_status")?.takeIf { it != JSONObject.NULL }
+        val parts = mutableListOf(stamp)
+        if (status != null) parts += "HTTP $status"
+        parts += (kind.ifBlank { "—" }) + " · " + RetryPolicy.label(kind)
+        val detail = entry.optString("failure_message")
+        if (detail.isNotBlank()) parts += detail.take(160)
+        return parts.joinToString(" · ")
+    }
+
+    internal fun snapshot(root: File, online: Boolean, vpn: Boolean): String {
         val result = JSONObject()
-        result.put("generated_at", now)
-        result.put("network", JSONObject()
-            .put("online", online)
-            .put("vpn_active", vpn))
-        result.put("offline_pending", OfflineQueue.hasPending(root))
+            .put("generated_at", System.currentTimeMillis())
+            .put("network", JSONObject().put("online", online).put("vpn", vpn))
+            .put("route", routeInfo(root))
+            .put("queue", CommanderReplyQueue.status(root))
+            .put("last_attempt", lastAttempt(root))
+            .put("memory", memoryInfo(root))
+            .put("backups", backupInfo(root))
+            .put("log_tail", logTail(root, 20))
+        return result.toString(2)
+    }
 
-        val config = runCatching { JSONObject(runtimeConfig) }.getOrDefault(JSONObject())
-        val models = config.optJSONArray("models") ?: JSONArray()
-        val routeMetadata = RouteMeta.load(root)
-        val routes = JSONObject()
-        val utcDay = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }.format(Date(now))
+    private fun routeInfo(root: File): JSONObject = JSONObject()
+        .put("id", Route.ID)
+        .put("name", Route.DISPLAY_NAME)
+        .put("base_url", Route.BASE_URL)
+        .put("model", Route.MODEL)
+        .put("has_key", Route.hasKey(root))
+        .put("needs_vpn", Route.REQUIRES_VPN)
 
-        for (index in 0 until models.length()) {
-            val model = models.optJSONObject(index) ?: continue
-            val id = model.optString("id")
-                .ifBlank { model.optString("name").ifBlank { "route_$index" } }
-            val meta = routeMetadata.optJSONObject(id) ?: JSONObject()
-            val sameDay = meta.optString("day_key") == utcDay
-            val dayCount = if (sameDay) meta.optInt("day_count", 0) else 0
-            val route = JSONObject()
-                .put("name", model.optString("name", id))
-                .put("model", model.optString("model"))
-                .put("enabled", model.optBoolean("enabled", true))
-                .put("free_tier", model.optBoolean("free_tier", false))
-                .put("has_key", model.optString("api_key").isNotBlank())
-                .put("api_key_configured", model.optString("api_key").isNotBlank())
-                .put("reachable", meta.optBoolean("reachable", true))
-                .put("needs_vpn", meta.optBoolean("needs_vpn", model.optBoolean("needs_vpn", false)))
-                .put("in_cooldown", meta.optLong("cooldown_until", 0L) > now)
-                .put("cooldown_until", meta.optLong("cooldown_until", 0L))
-                .put("requests_today", dayCount)
-                .put("requests_lifetime", maxOf(meta.optLong("lifetime_requests", dayCount.toLong()), dayCount.toLong()))
-                .put("successes_today", if (sameDay) meta.optInt("successes_today", 0) else 0)
-                .put("failures_today", if (sameDay) meta.optInt("failures_today", 0) else 0)
-                .put("rate_limits_today", if (sameDay) meta.optInt("rate_limits_today", 0) else 0)
-                .put("network_errors_today", if (sameDay) meta.optInt("network_errors_today", 0) else 0)
-                .put("region_restrictions_today", if (sameDay) meta.optInt("region_restrictions_today", 0) else 0)
-                .put("timeouts_today", if (sameDay) meta.optInt("timeouts_today", 0) else 0)
-                .put("http_responses_today", if (sameDay) meta.optInt("http_responses_today", 0) else 0)
-                .put("http_4xx_today", if (sameDay) meta.optInt("http_4xx_today", 0) else 0)
-                .put("http_5xx_today", if (sameDay) meta.optInt("http_5xx_today", 0) else 0)
-                .put("last_http_status", if (meta.has("last_http_status")) meta.opt("last_http_status") else JSONObject.NULL)
-                .put("last_failure_kind", meta.optString("last_failure_kind"))
-                .put("requests_per_day", model.optInt("rpd", 200))
-                .put("quota_remaining", (model.optInt("rpd", 200) - dayCount).coerceAtLeast(0))
-                .put("last_reachability_at", meta.optLong("last_reachability_at", 0L))
-                .put("chat_score", RouteSelector.score(meta, Task.CHAT))
-                .put("last_attempt", meta.optLong("last_attempt", 0L))
-                .put("last_success", meta.optLong("last_ok", 0L))
-            routes.put(id, route)
-        }
-        var requestsTodayTotal = 0
-        var requestsLifetimeTotal = 0L
-        var successesTodayTotal = 0
-        var failuresTodayTotal = 0
-        var rateLimitsTodayTotal = 0
-        var networkErrorsTodayTotal = 0
-        var regionRestrictionsTodayTotal = 0
-        var timeoutsTodayTotal = 0
-        var http4xxTodayTotal = 0
-        var http5xxTodayTotal = 0
-        val routeIds = routes.keys()
-        while (routeIds.hasNext()) {
-            val route = routes.optJSONObject(routeIds.next()) ?: continue
-            requestsTodayTotal += route.optInt("requests_today", 0)
-            requestsLifetimeTotal += route.optLong("requests_lifetime", 0L)
-            successesTodayTotal += route.optInt("successes_today", 0)
-            failuresTodayTotal += route.optInt("failures_today", 0)
-            rateLimitsTodayTotal += route.optInt("rate_limits_today", 0)
-            networkErrorsTodayTotal += route.optInt("network_errors_today", 0)
-            regionRestrictionsTodayTotal += route.optInt("region_restrictions_today", 0)
-            timeoutsTodayTotal += route.optInt("timeouts_today", 0)
-            http4xxTodayTotal += route.optInt("http_4xx_today", 0)
-            http5xxTodayTotal += route.optInt("http_5xx_today", 0)
-        }
-        result.put("model_requests", JSONObject()
-            .put("today_total", requestsTodayTotal)
-            .put("lifetime_total", requestsLifetimeTotal)
-            .put("successes_today", successesTodayTotal)
-            .put("failures_today", failuresTodayTotal)
-            .put("rate_limits_429_today", rateLimitsTodayTotal)
-            .put("network_errors_today", networkErrorsTodayTotal)
-            .put("region_restrictions_today", regionRestrictionsTodayTotal)
-            .put("timeouts_today", timeoutsTodayTotal)
-            .put("http_4xx_today", http4xxTodayTotal)
-            .put("http_5xx_today", http5xxTodayTotal))
-        result.put("routes", routes)
-        result.put("current_route", config.optInt("current", -1))
-        result.put("exclusive_route", config.optBoolean("exclusive_route", false))
-        val latestNetwork = runCatching { JSONObject(NetworkDiagnostics.latest(root)) }.getOrDefault(JSONObject())
-        result.put("last_provider", latestNetwork.optString("provider"))
-        result.put("last_error", if (latestNetwork.optBoolean("available", false)) {
-            JSONObject().put("provider", latestNetwork.optString("provider"))
-                .put("message", latestNetwork.optString("failure_message"))
-                .put("stage", latestNetwork.optString("stage"))
-                .put("http_status", latestNetwork.opt("http_status") ?: JSONObject.NULL)
-                .put("error_type", latestNetwork.optString("error_type"))
-                .put("result", latestNetwork.optString("result"))
-        } else JSONObject())
+    private fun lastAttempt(root: File): JSONObject {
+        val raw = runCatching { NetworkDiagnostics.latest(root) }.getOrDefault("{}")
+        val entry = runCatching { JSONObject(raw) }.getOrElse { JSONObject() }
+        if (!entry.optBoolean("available", false)) return JSONObject()
+        val kind = entry.optString("error_kind").ifBlank { entry.optString("result") }
+        return JSONObject()
+            .put("at", entry.optLong("timestamp", 0L))
+            .put("result", entry.optString("result"))
+            .put("error_kind", kind)
+            .put("http_status", entry.opt("http_status") ?: JSONObject.NULL)
+            .put("stage", entry.optString("stage"))
+            .put("vpn", entry.optBoolean("vpn", false))
+            .put("online", entry.optBoolean("online", true))
+            .put("message", entry.optString("failure_message"))
+            .put("explanation", entry.optString("explanation").ifBlank { RetryPolicy.explain(kind) })
+            .put("stages", entry.optJSONArray("stages") ?: JSONArray())
+    }
 
-        val rollingDir = File(root, "backup/rolling")
-        val rollingFiles = rollingDir.listFiles()?.filter { it.isFile && it.name.endsWith(".json") }
-            ?: emptyList()
-        val checkpoint = File(root, "backup/checkpoints/L4_state.json")
-        val automaticStatus = runCatching { LocalBackupManager.status(root) }.getOrDefault(JSONObject())
-        val automatic = automaticStatus.optJSONArray("backups") ?: JSONArray()
-        result.put("backups", JSONObject()
-            .put("rolling_count", rollingFiles.size)
-            .put("rolling_latest_at", rollingFiles.maxOfOrNull { it.lastModified() } ?: 0L)
-            .put("l4_checkpoint_exists", checkpoint.isFile)
-            .put("l4_checkpoint_at", if (checkpoint.isFile) checkpoint.lastModified() else 0L)
-            .put("automatic_count", automaticStatus.optInt("count", 0))
-            .put("automatic_maximum", automaticStatus.optInt("maximum", 14))
-            .put("automatic_latest_file", automaticStatus.opt("latest_file") ?: JSONObject.NULL)
-            .put("automatic_latest_at", automaticStatus.optLong("latest_at", 0L))
-            .put("latest_copy_at", maxOf(
-                rollingFiles.maxOfOrNull { it.lastModified() } ?: 0L,
-                automaticStatus.optLong("latest_at", 0L)
-            )))
-
+    private fun memoryInfo(root: File): JSONObject {
         val l0 = File(root, "memory/L0_raw.jsonl")
-        val l4 = File(root, "memory/L4_state.json")
-        result.put("memory", JSONObject()
-            .put("l0_size_bytes", if (l0.isFile) l0.length() else 0L)
+        return JSONObject()
             .put("l0_size_kb", if (l0.isFile) l0.length() / 1024L else 0L)
             .put("l0_last_append_at", FileManager.lastAppendTimestamp(root))
             .put("l1_facts_count", runCatching {
                 JSONObject(FileManager.read(root, "memory/L1_facts.json")).optJSONArray("facts")?.length() ?: 0
             }.getOrDefault(0))
-            .put("l4_exists", l4.isFile)
-            .put("route_meta_exists", File(root, RouteMeta.PATH).isFile))
-        return result.toString(2)
+    }
+
+    private fun backupInfo(root: File): JSONObject {
+        val status = runCatching { LocalBackupManager.status(root) }.getOrDefault(JSONObject())
+        return JSONObject()
+            .put("automatic_count", status.optInt("count", 0))
+            .put("maximum", status.optInt("maximum", 14))
+            .put("latest_file", status.opt("latest_file") ?: JSONObject.NULL)
+            .put("latest_at", status.optLong("latest_at", 0L))
+    }
+
+    /**
+     * The one-sentence answer the Commander actually reads: what is wrong and what to do.
+     */
+    internal fun verdict(
+        kind: String,
+        httpStatus: Int?,
+        detail: String,
+        online: Boolean,
+        vpn: Boolean,
+        apiKey: String
+    ): String = when {
+        !online ->
+            "Нет интернета: Android не видит активную сеть. Проверь Wi-Fi/мобильные данные."
+        apiKey.isBlank() ->
+            "Ключ Routeway не задан. Настройки → Подключение → вставь ключ и сохрани."
+        !vpn && Route.REQUIRES_VPN && kind != "ok" ->
+            "VPN не обнаружен, а Gemma MeroMero работает только через VPN. " +
+                RetryPolicy.explain(kind, httpStatus, detail)
+        kind == "ok" ->
+            "Соединение работает: DNS, TLS и HTTP в порядке, ключ принят провайдером" +
+                (if (httpStatus != null) " (HTTP $httpStatus)." else ".")
+        else -> RetryPolicy.explain(kind, httpStatus, detail)
     }
 }

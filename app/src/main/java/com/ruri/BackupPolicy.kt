@@ -106,7 +106,6 @@ object BackupPolicy {
                 }
                 val content = when (relative) {
                     "core/config.json" -> SecretStore.configForBackup(FileManager.read(root, relative))
-                    "core/search.json" -> SecretStore.searchConfigForBackup(FileManager.read(root, relative))
                     else -> FileManager.read(root, relative)
                 }
                 if (content.isNotBlank()) snapshot.put(relative, content)

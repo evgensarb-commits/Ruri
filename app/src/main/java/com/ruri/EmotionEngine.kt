@@ -24,12 +24,12 @@ object EmotionEngine {
         .put("drift", JSONObject()
             .put("activity_fatigue", 3).put("activity_boredom_relief", 6)
             .put("cycle_fatigue", 2).put("cycle_boredom_relief", 4)
-            .put("idle_fatigue_relief_per_h", 2).put("idle_boredom_per_h", 2)
-            .put("silence_longing_per_h", 3).put("silence_longing_after_h", 2)
+            .put("idle_fatigue_relief_per_h", 2).put("idle_boredom_per_h", 4)
+            .put("silence_longing_per_h", 5).put("silence_longing_after_h", 1.5)
             .put("fatigue_recovery_h", 7).put("silence_growth_h", 9).put("messages_to_satisfy", 8)
-            .put("initiative_threshold", 40).put("initiative_gamma", 1.5).put("guarantee_at_100", true)
-            .put("veto_allowed", true).put("initiative_mode", "drive_chance").put("drive_check_interval_min", 45)
-            .put("initiative_cooldown_min", 30).put("activity_fatigue_message", 4).put("activity_fatigue_task", 6)
+            .put("initiative_threshold", 30).put("initiative_gamma", 1.1).put("guarantee_at_100", true)
+            .put("veto_allowed", true).put("initiative_mode", "drive_chance").put("drive_check_interval_min", 0)
+            .put("initiative_cooldown_min", 10).put("activity_fatigue_message", 4).put("activity_fatigue_task", 6)
             .put("boredom_solo_relief", 4)
             .put("reply_longing_relief", 20).put("message_longing_relief", 10)
             .put("shelf_interest", 10).put("search_ok_interest", 8).put("search_ok_joy", 4)
@@ -38,7 +38,8 @@ object EmotionEngine {
             .put("reply_anger_relief", 8).put("reply_sadness_relief", 6).put("reply_joy", 5)
             .put("desire_flirt_commander", 12).put("desire_evening_per_h", 1.5)
             .put("desire_from_affection_per_h", 1).put("desire_nsfw_window", 10)
-            .put("base_initiative_h", 3.5).put("base_cooldown_h", 3))
+            .put("base_initiative_h", 3.5).put("base_cooldown_h", 3)
+            .put("thought_threshold", 18).put("thought_gamma", 0.9).put("thought_cooldown_min", 12))
         .put("lexicon", JSONObject()
             .put("sadness", JSONArray().put("груст").put("плохо").put("тоска").put("тяжело").put("печал"))
             .put("joy", JSONArray().put("рад").put("счаст").put("весел").put("круто").put("кайф"))
@@ -219,7 +220,7 @@ object EmotionEngine {
                 break
             }
         }
-        if (RouteSelector.nsfwWindow(root)) {
+        if (RouteSelector.isAdultTopic(text)) {
             delta.put("desire", delta.optDouble("desire", 0.0) + d.optDouble("desire_nsfw_window", 10.0))
         }
         val satisfaction = 100.0 / d.optDouble("messages_to_satisfy", 8.0)
@@ -283,27 +284,78 @@ object EmotionEngine {
         if (waiting) return false
         val d = drift(root)
         val p = pressure(root)
-        val threshold = d.optDouble("initiative_threshold", 40.0)
+        val threshold = d.optDouble("initiative_threshold", 30.0)
         if (p < threshold) return false
-        val cooldown = d.optDouble("initiative_cooldown_min", 30.0) * 60000.0
+        val cooldown = initiativeCooldownMs(d, p, threshold)
         if (lastInitiative > 0L && now - lastInitiative < cooldown) return false
         val mode = d.optString("initiative_mode", "drive_chance")
         if (mode == "strict_guarantee") return p >= 100.0
         if (mode == "pure_autonomy") return true
         if (p >= 100.0 && d.optBoolean("guarantee_at_100", true)) return true
         val chance = Math.pow(((p - threshold) / (100.0 - threshold)).coerceIn(0.0, 1.0),
-            d.optDouble("initiative_gamma", 1.5))
+            d.optDouble("initiative_gamma", 1.1))
         val roll = initiativeRoll(now, p, lastSeen, lastInitiative)
         val passed = roll < chance
         FileManager.appendEvent(root, JSONObject()
             .put("type", "initiative_gate_evaluated")
             .put("pressure", p)
             .put("threshold", threshold)
+            .put("cooldown_sec", cooldown / 1000L)
             .put("chance", chance)
             .put("roll", roll)
             .put("passed", passed)
             .put("ts", now))
         return passed
+    }
+
+    /**
+     * The pause after her last initiative is emotional, not a scheduler: the more boredom
+     * and longing she feels, the shorter it becomes. At full pressure it nearly disappears.
+     */
+    internal fun initiativeCooldownMs(drift: JSONObject, pressure: Double, threshold: Double): Double {
+        val baseMinutes = drift.optDouble("initiative_cooldown_min", 10.0).coerceAtLeast(1.0)
+        val span = (100.0 - threshold).coerceAtLeast(1.0)
+        val heat = ((pressure - threshold) / span).coerceIn(0.0, 1.0)
+        val factor = 1.0 - heat * 0.85
+        return baseMinutes * factor * 60_000.0
+    }
+
+    /**
+     * A thought turn has its own, softer gate than an initiative.
+     *
+     * Writing an entry to her diary needs less pressure than addressing the Commander, so
+     * she keeps an inner life while she is not yet ready to message him. Both gates are
+     * driven purely by emotion: no interval decides anything.
+     */
+    fun thoughtGate(root: File, now: Long, lastThoughtTurn: Long): Boolean {
+        val d = drift(root)
+        val p = pressure(root)
+        val threshold = d.optDouble("thought_threshold", 18.0)
+        if (p < threshold) return false
+        val cooldown = thoughtCooldownMs(d, p, threshold)
+        if (lastThoughtTurn > 0L && now - lastThoughtTurn < cooldown) return false
+        val span = (100.0 - threshold).coerceAtLeast(1.0)
+        val chance = Math.pow(((p - threshold) / span).coerceIn(0.0, 1.0),
+            d.optDouble("thought_gamma", 0.9))
+        val roll = initiativeRoll(now, p, lastThoughtTurn, 0L)
+        val passed = roll < chance
+        FileManager.appendEvent(root, JSONObject()
+            .put("type", "thought_gate_evaluated")
+            .put("pressure", p)
+            .put("threshold", threshold)
+            .put("cooldown_sec", (cooldown / 1000L).toLong())
+            .put("chance", chance)
+            .put("roll", roll)
+            .put("passed", passed)
+            .put("ts", now))
+        return passed
+    }
+
+    internal fun thoughtCooldownMs(drift: JSONObject, pressure: Double, threshold: Double): Double {
+        val baseMinutes = drift.optDouble("thought_cooldown_min", 12.0).coerceAtLeast(1.0)
+        val span = (100.0 - threshold).coerceAtLeast(1.0)
+        val heat = ((pressure - threshold) / span).coerceIn(0.0, 1.0)
+        return baseMinutes * (1.0 - heat * 0.9) * 60_000.0
     }
 
     internal fun initiativeRoll(now: Long, pressure: Double, lastSeen: Long, lastInitiative: Long): Double {

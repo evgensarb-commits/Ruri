@@ -284,8 +284,8 @@ object MemoryConsolidator {
         val config = try { JSONObject(SecretStore.readRuntimeConfig(root)) } catch (_: Exception) { return null }
         val models = config.optJSONArray("models") ?: return null
         if (models.length() == 0) return null
-        val current = config.optInt("current", 0)
-        val order = FreeModelRouter.orderedIndices(root, models, current, Task.REASON)
+        // One route only: index 0 or nothing.
+        val order: List<Int> = if (models.length() > 0) listOf(0) else emptyList()
         for (index in order) {
             val model = models.optJSONObject(index) ?: continue
             // L1/L2/L3 content is personal memory; minimal-context routes are ineligible here.

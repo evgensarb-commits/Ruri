@@ -52,11 +52,62 @@ object CommanderReplyQueue {
     }
 
     fun nextDue(root: File, now: Long = System.currentTimeMillis()): JSONObject? =
-        firstPending(root)?.takeIf { it.optLong("next_attempt_at", 0L) <= now }
+        firstPending(root)?.takeIf {
+            !it.optBoolean("manual_retry", false) && it.optLong("next_attempt_at", 0L) <= now
+        }
 
     fun nextDelayMs(root: File, now: Long = System.currentTimeMillis()): Long? = synchronized(lock) {
         val first = readState(root).optJSONArray("pending")?.optJSONObject(0) ?: return@synchronized null
+        // A terminal failure waits for the Commander's button; nothing is scheduled.
+        if (first.optBoolean("manual_retry", false)) return@synchronized null
         (first.optLong("next_attempt_at", now) - now).coerceAtLeast(0L)
+    }
+
+    /** True when the head of the queue failed terminally and waits for the retry button. */
+    fun needsManualRetry(root: File): Boolean = synchronized(lock) {
+        val first = readState(root).optJSONArray("pending")?.optJSONObject(0) ?: return@synchronized false
+        first.optBoolean("manual_retry", false)
+    }
+
+    /** The Commander pressed «ПОВТОРИТЬ»: make the head message due immediately. */
+    fun manualRetry(root: File, now: Long = System.currentTimeMillis()) = synchronized(lock) {
+        val state = readState(root)
+        val pending = state.optJSONArray("pending") ?: return@synchronized
+        val first = pending.optJSONObject(0) ?: return@synchronized
+        first.put("manual_retry", false)
+            .put("next_attempt_at", now)
+            .put("attempts", 0)
+        state.put("pending", pending).put("updated_at", now)
+        writeState(root, state)
+        Unit
+    }
+
+    /** Snapshot for the chat UI. */
+    fun status(root: File, now: Long = System.currentTimeMillis()): JSONObject = synchronized(lock) {
+        val state = readState(root)
+        val pending = state.optJSONArray("pending") ?: JSONArray()
+        val first = pending.optJSONObject(0)
+        if (first == null) {
+            return@synchronized JSONObject()
+                .put("pending", 0)
+                .put("manual_retry", false)
+                .put("next_attempt_at", 0L)
+                .put("attempts", 0)
+                .put("last_error_kind", "")
+                .put("last_error_text", "")
+        }
+        val manual = first.optBoolean("manual_retry", false)
+        val next = first.optLong("next_attempt_at", 0L)
+        val kind = first.optString("last_error_kind")
+        JSONObject()
+            .put("pending", pending.length())
+            .put("manual_retry", manual)
+            .put("next_attempt_at", if (manual) 0L else next)
+            .put("attempts", first.optInt("attempts", 0))
+            .put("last_error_kind", kind)
+            .put("last_error_label", RetryPolicy.label(kind))
+            .put("last_error_text", first.optString("last_error_text"))
+            .put("explanation", if (kind.isBlank()) "" else RetryPolicy.explain(kind))
     }
 
     fun recordAttempt(root: File, messageId: String, now: Long = System.currentTimeMillis()) = synchronized(lock) {
@@ -72,7 +123,13 @@ object CommanderReplyQueue {
         return maxOf(backoffMs + jitter, retryAfterMs.coerceAtLeast(0L)).coerceAtMost(24L * 60L * 60L * 1000L)
     }
 
-    /** Returns the durable delay until the next retry. No failure kind removes the message. */
+    /**
+     * Records a failed attempt and schedules the next one.
+     *
+     * Transient failures are retried every ten seconds ([RetryPolicy.AUTO_RETRY_DELAY_MS]).
+     * Terminal failures (no VPN, exhausted token quota, rejected key, no credits) set
+     * `manual_retry`, so nothing is scheduled: only the «ПОВТОРИТЬ» button resumes the turn.
+     */
     fun recordFailure(
         root: File,
         messageId: String,
@@ -80,15 +137,21 @@ object CommanderReplyQueue {
         retryAfterMs: Long = 0L,
         now: Long = System.currentTimeMillis()
     ): Long = synchronized(lock) {
-        var delay = BASE_BACKOFF_MS
+        var delay = 0L
         updatePending(root, messageId) { item ->
             val attempts = item.optInt("attempts", 1).coerceAtLeast(1)
-            val exponent = (attempts - 1).coerceIn(0, 10)
-            val backoff = min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * (2.0.pow(exponent.toDouble())).toLong())
-            delay = delayWithJitter(backoff, retryAfterMs)
-            item.put("next_attempt_at", now + delay)
-                .put("last_error_kind", kind.take(40))
+            val auto = RetryPolicy.autoDelayMs(kind, attempts)
+            delay = when {
+                auto <= 0L -> 0L
+                retryAfterMs > 0L -> maxOf(auto, retryAfterMs.coerceAtMost(MAX_BACKOFF_MS))
+                else -> auto
+            }
+            val manual = delay == 0L
+            item.put("last_error_kind", kind.take(40))
                 .put("last_failed_at", now)
+                .put("manual_retry", manual)
+                .put("next_attempt_at", if (manual) now else now + delay)
+            if (manual) item.put("manual_retry_at", now)
         }
         delay
     }

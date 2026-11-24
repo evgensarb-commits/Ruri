@@ -181,18 +181,6 @@ class DiaryDedupTest {
     }
 }
 
-class CapabilitiesHandsTest {
-    @Test fun capabilitiesSeparateToolsFromLocalAutonomy() {
-        val root = bTestRoot("ruri-capabilities-hands")
-        try {
-            FileManager.init(root)
-            val prompt = Capabilities.bodySection(root)
-            assertTrue(prompt.contains("РУКИ 1: ВНЕШНИЕ ИНСТРУМЕНТЫ"))
-            assertTrue(prompt.contains("РУКИ 2: ЛОКАЛЬНАЯ АВТОНОМИЯ"))
-            assertTrue(prompt.contains("tool_result"))
-            assertTrue(prompt.contains("один JSON-объект"))
-        } finally { root.deleteRecursively() }
-    }
 class L4AtomicUpdateTest {
     @Test fun concurrentFieldUpdatesAreNotLost() {
         val root = bTestRoot("ruri-l4-atomic")
@@ -252,4 +240,3 @@ class PerMessageReplyAssociationTest {
     }
 }
 
-}

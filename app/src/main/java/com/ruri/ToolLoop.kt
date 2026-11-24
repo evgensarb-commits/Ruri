@@ -6,7 +6,7 @@ import java.io.File
 
 /** Shared action protocol and prose guard for interactive and autonomous model turns. */
 object ToolLoop {
-    private val allowed = setOf("search", "list_shelf", "read_shelf", "recall", "remember_fact", "read_url", "self_check")
+    private val allowed = setOf("recall", "remember_fact", "self_check")
 
     private fun extractJsonObjects(text: String): List<String> {
         val out = mutableListOf<String>()
@@ -58,7 +58,7 @@ object ToolLoop {
             cleaned = cleaned.replace(objectText, "")
             when (action.optString("action")) {
                 "write_diary", "diary" -> action.optString("text").trim().takeIf { it.isNotBlank() }?.let(diary::add)
-                "search", "list_shelf", "read_shelf", "recall", "remember_fact", "read_url", "self_check" -> tools.add(action)
+                "recall", "remember_fact", "self_check" -> tools.add(action)
                 else -> Unit
             }
         }
@@ -82,8 +82,7 @@ object ToolLoop {
         while (true) {
             val action = ChatEngine.parseAction(current) ?: return finish(current)
             if (hops >= 64) return finish(
-                "Не удалось завершить чтение: достигнут лимит 64 последовательных действий. " +
-                    "Файл прочитан не полностью; я не буду утверждать обратное."
+                "Не удалось завершить цепочку действий: достигнут лимит 64 последовательных вызовов."
             )
             val name = action.optString("action")
             val params = JSONObject(action.toString()).apply { remove("action") }
@@ -91,26 +90,7 @@ object ToolLoop {
                 JSONObject().put("type", "tool_call").put("action", name).put("params", params)
             ))
             val result = performTool?.invoke(name, params) ?: executeTool(root, name, params)
-            if (name == "search") {
-                ChatEngine.captureSearchUrls(result.second)
-                if (meta != null) {
-                    val urls = JSONArray()
-                    runCatching {
-                        val results = JSONObject(result.second).optJSONArray("results") ?: JSONArray()
-                        val seen = LinkedHashSet<String>()
-                        for (i in 0 until results.length()) {
-                            val url = results.optJSONObject(i)?.optString("url").orEmpty()
-                            if ((url.startsWith("https://") || url.startsWith("http://")) && seen.add(url)) {
-                                urls.put(url)
-                                if (urls.length() >= 20) break
-                            }
-                        }
-                    }
-                    meta.put("search_ok", result.first)
-                    meta.put("source_urls", urls)
-                }
-            }
-            val safeText = SecretRedactor.redactText(result.second).take(if (name == "read_shelf") 7600 else 4000)
+            val safeText = SecretRedactor.redactText(result.second).take(4000)
             FileManager.appendEvent(root, SecretRedactor.redactEvent(
                 JSONObject().put("type", "tool_result").put("action", name)
                     .put("ok", result.first).put("text", safeText)
@@ -144,7 +124,6 @@ object ToolLoop {
         meta: JSONObject? = null,
         requestNext: (JSONArray) -> String?
     ): String {
-        ChatEngine.clearSourceUrls()
         var reply = initialReply
         var checks = 0
         var toolLoopRun = false

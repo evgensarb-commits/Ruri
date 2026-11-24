@@ -18,97 +18,18 @@ object RouteMeta {
 
     @Synchronized
     fun load(root: File): JSONObject {
-        val all = try {
+        return try {
             val raw = FileManager.read(root, PATH)
             if (raw.isBlank()) JSONObject() else JSONObject(raw)
         } catch (e: Exception) {
             android.util.Log.w("Ruri", "Route metadata could not be read; starting with empty metadata", e)
             JSONObject()
         }
-        var migrated = false
-        val ids = all.keys()
-        while (ids.hasNext()) {
-            val route = all.optJSONObject(ids.next()) ?: continue
-            listOf("nsfw_capable", "nsfw_tested_at", "nsfw_probe_status", "nsfw").forEach { key ->
-                if (route.has(key)) {
-                    route.remove(key)
-                    migrated = true
-                }
-            }
-            val caps = route.optJSONObject("caps")
-            if (caps?.has("nsfw") == true) {
-                caps.remove("nsfw")
-                route.put("caps", caps)
-                migrated = true
-            }
-        }
-        if (migrated) FileManager.write(root, PATH, all.toString(2))
-        return all
-    }
-
-    /** One-time cleanup for legacy model-config and route-metadata NSFW capability flags. */
-    fun migrateLegacyNsfwFlags(root: File) {
-        load(root) // Route metadata caps.nsfw is migrated and rewritten by load().
-
-        fun stripLegacyFlags(config: JSONObject): Boolean {
-            var changed = false
-            val models = config.optJSONArray("models") ?: return false
-            for (index in 0 until models.length()) {
-                val model = models.optJSONObject(index) ?: continue
-                listOf("nsfw_capable", "nsfw_tested_at", "nsfw_probe_status").forEach { key ->
-                    if (model.has(key)) {
-                        model.remove(key)
-                        changed = true
-                    }
-                }
-            }
-            return changed
-        }
-
-        runCatching {
-            val runtime = JSONObject(SecretStore.readRuntimeConfig(root))
-            if (stripLegacyFlags(runtime)) SecretStore.saveRuntimeConfig(root, runtime.toString(2))
-        }
-
-        runCatching {
-            val legacyFile = File(root, "core/config.json")
-            if (!legacyFile.isFile) return@runCatching
-            val legacy = JSONObject(legacyFile.readText(Charsets.UTF_8))
-            if (stripLegacyFlags(legacy)) FileManager.write(root, "core/config.json", legacy.toString(2))
-        }
-    }
-
-    /** Remove telemetry for providers that are no longer present in runtime config. */
-    @Synchronized
-    fun pruneToConfiguredRoutes(root: File) {
-        val config = runCatching { JSONObject(FileManager.read(root, "core/config.json")) }.getOrNull() ?: return
-        val models = config.optJSONArray("models") ?: return
-        val configuredIds = (0 until models.length()).mapNotNull { index ->
-            val model = models.optJSONObject(index) ?: return@mapNotNull null
-            model.optString("id").ifBlank { model.optString("name").ifBlank { "route_$index" } }
-                .takeIf { it.isNotBlank() }
-        }.toSet()
-        val all = load(root)
-        val staleIds = all.keys().asSequence().filter { it !in configuredIds }.toList()
-        if (staleIds.isNotEmpty()) {
-            staleIds.forEach { all.remove(it) }
-            save(root, all)
-        }
     }
 
     @Synchronized
     fun save(root: File, value: JSONObject) {
-        val sanitized = JSONObject(value.toString())
-        val ids = sanitized.keys()
-        while (ids.hasNext()) {
-            val route = sanitized.optJSONObject(ids.next()) ?: continue
-            listOf("nsfw_capable", "nsfw_tested_at", "nsfw_probe_status", "nsfw").forEach { key -> route.remove(key) }
-            route.optJSONObject("caps")?.let { caps ->
-                caps.remove("nsfw")
-                route.put("caps", caps)
-            }
-        }
-        FileManager.write(root, PATH, sanitized.toString(2))
+        FileManager.write(root, PATH, JSONObject(value.toString()).toString(2))
     }
 
     private fun defaultRoute(): JSONObject {

@@ -11,11 +11,10 @@ import java.io.File
 object OutcomeDigest {
     private const val L0_PATH = "memory/L0_raw.jsonl"
     private const val STATE_PATH = "memory/L4_state.json"
-    private const val SELF_PATH = "memory/self_model.json"
     private const val MAX_FAILURES = 5
 
     private val failureTypes = setOf(
-        "model_error", "shelf_image_unreadable", "nsfw_refusal", "thinker_error"
+        "model_error", "nsfw_refusal", "thinker_error"
     )
 
     private fun readEvents(root: File): List<JSONObject> =
@@ -36,7 +35,6 @@ object OutcomeDigest {
     private fun isFailure(event: JSONObject): Boolean {
         val type = event.optString("type")
         if (type == "tool_result") return string(event, "ok").equals("false", true)
-        if (type == "vision_probe_result") return string(event, "capable").equals("false", true)
         return type in failureTypes
     }
 
@@ -77,14 +75,6 @@ object OutcomeDigest {
         val toolResults = turnEvents.filter { it.optString("type") == "tool_result" }
         val successfulTools = toolResults.count { string(it, "ok").equals("true", true) }
         val failedTools = toolResults.size - successfulTools
-        val visionEvent = turnEvents.lastOrNull { it.optString("type") == "vision_probe_result" }
-            ?: events.asReversed().firstOrNull { it.optString("type") == "vision_probe_result" }
-        val visionText = when {
-            visionEvent == null -> "не проверялось"
-            string(visionEvent, "capable").equals("true", true) ->
-                "поддерживается маршрутом " + string(visionEvent, "route")
-            else -> "не подтверждено маршрутом " + string(visionEvent, "route")
-        }
         val correction = runCatching {
             JSONObject(FileManager.read(root, STATE_PATH)).optJSONObject("pending_correction")
         }.getOrNull()
@@ -98,7 +88,7 @@ object OutcomeDigest {
                     .append(", ts=").append(timestamp(previousReply))
                     .append("; инструменты ok=").append(successfulTools)
                     .append(", failed=").append(failedTools)
-                    .append("; vision=").append(visionText).append(".\n")
+                    .append(".\n")
             }
             append("Последние ошибки L0 (не более пяти):\n")
             if (failures.isEmpty()) append("- не найдено\n")
@@ -108,7 +98,7 @@ object OutcomeDigest {
                     .append(SecretRedactor.redactText(correction.optString("message")).take(500))
                     .append('\n')
             }
-            append("Не заявляй о выполненном поиске, чтении или просмотре изображения без подтверждающих событий L0.")
+            append("Не заявляй о том, чего у тебя нет: ни поиска в интернете, ни чтения документов, ни просмотра изображений.")
         }
     }
 
@@ -120,8 +110,9 @@ object OutcomeDigest {
     }
 
     /**
-     * Compare factual action claims with events recorded after the current Commander message.
-     * A mismatch is persisted in L4 so the next model prompt can correct the record.
+     * Compares capability claims with what the app can actually do. The single-route
+     * build has no external tools at all, so any claim of searching, reading documents
+     * or looking at images is a hallucination that must be corrected in the next prompt.
      */
     fun verifyClaims(root: File, reply: String): JSONObject? {
         val lower = reply.lowercase()
@@ -133,49 +124,15 @@ object OutcomeDigest {
             .containsMatchIn(lower)
         if (!claimsSearch && !claimsRead && !claimsVision) return null
 
-        val events = readEvents(root)
-        val commanderIndex = events.indexOfLast {
-            it.optString("type") == "message" && it.optString("who") == "commander"
-        }
-        val latestWakeIndex = events.indexOfLast { it.optString("type") == "wake" }
-        val turnStart = if (latestWakeIndex > commanderIndex) latestWakeIndex + 1 else commanderIndex + 1
-        val currentTurn = events.drop(turnStart.coerceAtLeast(0))
-        val successfulActions = currentTurn.filter {
-            it.optString("type") == "tool_result" && string(it, "ok").equals("true", true)
-        }.map { string(it, "action") }.toSet()
         val mismatches = mutableListOf<String>()
-        if (claimsSearch && "search" !in successfulActions) {
-            mismatches += "Ответ утверждал, что поиск выполнен, но в L0 нет успешного результата инструмента search."
+        if (claimsSearch) {
+            mismatches += "Ответ утверждал, что поиск выполнен, но внешнего поиска у меня нет: в этой сборке нет ни одного инструмента."
         }
-        if (claimsRead && "read_shelf" !in successfulActions && "read_url" !in successfulActions) {
-            mismatches += "Ответ утверждал, что файл/страница прочитаны, но в L0 нет успешного read_shelf или read_url."
+        if (claimsRead) {
+            mismatches += "Ответ утверждал, что документ прочитан, но доступа к документам у меня нет: в этой сборке нет ни одного инструмента."
         }
         if (claimsVision) {
-            val probeOrDescription = currentTurn.any {
-                val type = it.optString("type")
-                (type == "shelf_image_described" || type == "vision_description_result") &&
-                    !string(it, "ok").equals("false", true)
-            }
-            val imageSidecarRead = "read_shelf" in successfulActions && currentTurn
-                .filter { it.optString("type") == "tool_call" && string(it, "action") == "read_shelf" }
-                .mapNotNull { it.optJSONObject("params")?.optString("name") }
-                .any { name ->
-                    val safe = ShelfWatcher.safeName(name) ?: return@any false
-                    val file = File(root, "shelf/" + safe)
-                    val image = file.isFile && file.length() in 1..(8L * 1024L * 1024L) &&
-                        runCatching {
-                            file.inputStream().use { input ->
-                                val header = ByteArray(16)
-                                val count = input.read(header)
-                                count > 0 && Vision.mimeOf(header.copyOf(count)) != null
-                            }
-                        }.getOrDefault(false)
-                    val description = FileManager.read(root, "shelf/.desc/" + safe + ".txt")
-                    image && description.isNotBlank()
-                }
-            if (!probeOrDescription && !imageSidecarRead) {
-                mismatches += "Ответ утверждал, что изображение просмотрено, но L0/sidecar не подтверждает успешное vision-описание изображения."
-            }
+            mismatches += "Ответ утверждал, что изображение просмотрено, но я не получаю изображений: в этой сборке нет ни одного инструмента."
         }
         if (mismatches.isEmpty()) return null
 
@@ -194,25 +151,5 @@ object OutcomeDigest {
             .put("mismatch_count", mismatches.size)
             .put("ts", System.currentTimeMillis()))
         return correction
-    }
-
-    /** Update self-model limitations from each explicit vision capability probe. */
-    fun recordVisionProbe(root: File, route: String, capable: Boolean, snippet: String) {
-        val raw = FileManager.read(root, SELF_PATH)
-        val self = runCatching { JSONObject(raw) }.getOrElse { JSONObject() }
-        val limitations = self.optJSONArray("limitations") ?: JSONArray()
-        val retained = JSONArray()
-        for (i in 0 until limitations.length()) {
-            val item = limitations.optString(i)
-            if (!item.startsWith("vision_probe:")) retained.put(item)
-        }
-        if (!capable) retained.put("vision_probe: vision не подтверждён последней проверкой маршрута " + route)
-        self.put("limitations", retained)
-        self.put("vision_capability", JSONObject()
-            .put("route", route)
-            .put("capable", capable)
-            .put("checked_at", System.currentTimeMillis())
-            .put("snippet", SecretRedactor.redactText(snippet).take(160)))
-        FileManager.write(root, SELF_PATH, self.toString(2))
     }
 }

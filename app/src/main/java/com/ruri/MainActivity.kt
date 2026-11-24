@@ -5,13 +5,11 @@ import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
-import android.provider.Settings
-import android.content.pm.PackageManager
 import android.os.Build
-import android.util.Base64
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -29,21 +27,25 @@ import java.util.concurrent.Executors
 class MainActivity : AppCompatActivity() {
     private lateinit var web: WebView
     private val chatExecutor = Executors.newSingleThreadExecutor()
-    private val routeExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var importFileCallback: ValueCallback<Array<Uri>>? = null
     @Volatile private var activityResumed = false
-    @Volatile private var visionStatusProbeQueued = false
     private var pendingMessageId: String? = null
     private val importFileRequestCode = 2002
+
+    /** Foreground retry timer. Nothing is retried while the screen is off (see onPause). */
+    private val autoRetry = Runnable { attemptPendingTurn() }
+    private var retryScheduled = false
 
     @SuppressLint("SetJavaScriptEnabled", "AddJavascriptInterface")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         FileManager.init(filesDir)
-        RouterAPIMigration.ensure(filesDir)
+        // Single route, canonical provider section. Never touches memory files.
+        Route.ensure(filesDir)
         Notifier.init(this)
         pendingMessageId = intent?.getStringExtra("message_id")
+        NetState.register(this)
 
         web = WebView(this)
         setContentView(web)
@@ -80,6 +82,7 @@ class MainActivity : AppCompatActivity() {
                 if (!isTrustedLocalAsset(url)) return
                 super.onPageFinished(view, url)
                 web.evaluateJavascript("window.startOnboarding && window.startOnboarding()", null)
+                pushQueueState()
                 openPendingMessageIfReady()
             }
         }
@@ -89,10 +92,8 @@ class MainActivity : AppCompatActivity() {
                 filePathCallback: ValueCallback<Array<Uri>>?,
                 fileChooserParams: FileChooserParams?
             ): Boolean {
-                if (this@MainActivity.importFileCallback != null) {
-                    this@MainActivity.importFileCallback?.onReceiveValue(null)
-                }
-                this@MainActivity.importFileCallback = filePathCallback
+                importFileCallback?.onReceiveValue(null)
+                importFileCallback = filePathCallback
                 return try {
                     val intent = fileChooserParams?.createIntent()
                         ?: Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -106,8 +107,8 @@ class MainActivity : AppCompatActivity() {
                     startActivityForResult(intent, importFileRequestCode)
                     true
                 } catch (e: Exception) {
-                    this@MainActivity.importFileCallback?.onReceiveValue(null)
-                    this@MainActivity.importFileCallback = null
+                    importFileCallback?.onReceiveValue(null)
+                    importFileCallback = null
                     Toast.makeText(this@MainActivity, "Не удалось открыть выбор файла: ${e.message}", Toast.LENGTH_LONG).show()
                     false
                 }
@@ -120,21 +121,12 @@ class MainActivity : AppCompatActivity() {
             JSONObject(FileManager.read(filesDir, "memory/L4_state.json")).optBoolean("onboarding_done", false)
         }.getOrDefault(false)
         if (!onboardingDone) requestNotificationPermission()
-        routeExecutor.execute {
-            runCatching {
-                val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
-                if (Probe.claimStartupRefresh(filesDir)) {
-                    Probe.refreshReachability(filesDir, config.optJSONArray("models") ?: org.json.JSONArray(), topOnly = false, force = true)
-                }
-            }.onFailure { android.util.Log.w("Ruri", "Activity startup route refresh failed", it) }
-        }
         try { LifeScheduler.ensurePeriodic(this) }
         catch (e: Exception) { android.util.Log.e("Ruri", "Could not schedule periodic life", e) }
         startRuriService()
         web.loadUrl("file:///android_asset/index.html")
     }
 
-    @Deprecated("Deprecated in Android API; retained for WebView file chooser compatibility")
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -169,20 +161,28 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         activityResumed = true
         NetState.refresh(this)
-        if (OfflineQueue.hasPending(filesDir) || CommanderReplyQueue.hasPending(filesDir)) {
-            LifeScheduler.enqueueEvent(this, "commander_reply_resume")
-        }
         if (::web.isInitialized) {
-            try { Bridge().markCommanderSeen() } catch (_: Exception) {}
+            runCatching { Bridge().markCommanderSeen() }
             web.evaluateJavascript("window.refreshOnboarding && window.refreshOnboarding()", null)
         }
+        if (CommanderReplyQueue.hasPending(filesDir)) attemptPendingTurn()
+        pushQueueState()
     }
 
     override fun onPause() {
         activityResumed = false
+        // Do not retry while the screen is off or the app is in the background.
+        mainHandler.removeCallbacks(autoRetry)
+        retryScheduled = false
         try { BackupPolicy.maybeRolling(this, "pause") }
         catch (e: Exception) { android.util.Log.w("Ruri", "Pause rolling backup failed", e) }
         super.onPause()
+    }
+
+    override fun onDestroy() {
+        mainHandler.removeCallbacks(autoRetry)
+        NetState.unregister()
+        super.onDestroy()
     }
 
     private fun requestNotificationPermission() {
@@ -201,35 +201,80 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun refreshVisionStatusAsync() {
-        synchronized(this) {
-            if (visionStatusProbeQueued) return
-            visionStatusProbeQueued = true
+    // ------------------------------------------------------------ retry plumbing
+
+    /**
+     * Runs the queued turn. Transient failures schedule another attempt in ten seconds;
+     * terminal failures stop here and wait for the «ПОВТОРИТЬ» button.
+     */
+    private fun attemptPendingTurn() {
+        retryScheduled = false
+        if (!activityResumed) return
+        if (!CommanderReplyQueue.hasPending(filesDir)) {
+            pushQueueState()
+            return
         }
-        routeExecutor.execute {
-            try {
-                NetState.refresh(applicationContext)
-                if (NetState.online) Vision.visionRoute(filesDir)
-            } catch (e: Exception) {
-                android.util.Log.w("Ruri", "Vision route status refresh failed", e)
-            } finally {
-                visionStatusProbeQueued = false
+        chatExecutor.execute {
+            val outcome = runCatching { ChatEngine.respond(filesDir, null) }
+            outcome.onSuccess { reply ->
+                val messageId = ChatEngine.lastSavedReplyId()
+                mainHandler.post {
+                    if (!activityResumed && !messageId.isNullOrBlank()) {
+                        Notifier.thought(this, reply, messageId)
+                    }
+                    if (::web.isInitialized) web.evaluateJavascript(
+                        "window.onNativeChatResult && window.onNativeChatResult(" +
+                            JSONObject.quote("auto") + "," + JSONObject.quote(reply) + ",null)", null
+                    )
+                }
             }
-            val status = when {
-                !NetState.online -> "нет сети"
-                else -> Vision.cachedVisionRoute(filesDir)
-                    ?.let { it.optString("name").ifBlank { it.optString("id") } }
-                    ?.takeIf { it.isNotBlank() } ?: "none"
-            }
-            mainHandler.post {
-                if (::web.isInitialized) {
-                    web.evaluateJavascript(
-                        "window.setVisionStatus && window.setVisionStatus(" + JSONObject.quote(status) + ")",
+            outcome.onFailure { error ->
+                val failure = error as? ChatEngine.ModelRequestFailure
+                val kind = failure?.failureKind ?: "unexpected"
+                scheduleRetryIfNeeded(kind)
+                mainHandler.post {
+                    if (::web.isInitialized) web.evaluateJavascript(
+                        "window.onNativeChatError && window.onNativeChatError(" +
+                            JSONObject.quote("auto") + "," + errorPayload(kind, error.message.orEmpty()) + ")",
                         null
                     )
                 }
             }
+            mainHandler.post { pushQueueState() }
         }
+    }
+
+    private fun scheduleRetryIfNeeded(kind: String) {
+        if (!RetryPolicy.isRetryable(kind)) return
+        val delay = CommanderReplyQueue.nextDelayMs(filesDir) ?: return
+        if (!activityResumed) return
+        synchronized(this) {
+            if (retryScheduled) return
+            retryScheduled = true
+        }
+        mainHandler.postDelayed(autoRetry, delay.coerceAtLeast(1_000L))
+    }
+
+    private fun errorPayload(kind: String, message: String): String {
+        val status = CommanderReplyQueue.status(filesDir)
+        return JSONObject()
+            .put("kind", kind)
+            .put("retryable", RetryPolicy.isRetryable(kind))
+            .put("label", RetryPolicy.label(kind))
+            .put("message", message)
+            .put("explanation", RetryPolicy.explain(kind))
+            .put("next_retry_at", status.optLong("next_attempt_at", 0L))
+            .put("attempt", status.optInt("attempts", 0))
+            .toString()
+    }
+
+    private fun pushQueueState() {
+        if (!::web.isInitialized) return
+        val status = CommanderReplyQueue.status(filesDir)
+        web.evaluateJavascript(
+            "window.onNativeQueueState && window.onNativeQueueState(" + JSONObject.quote(status.toString()) + ")",
+            null
+        )
     }
 
     inner class Bridge {
@@ -237,24 +282,61 @@ class MainActivity : AppCompatActivity() {
         fun getDiagnostics(): String = Diagnostics.run(this@MainActivity)
 
         @JavascriptInterface
-        fun verifyRoutes(): String {
-            return try {
-                Diagnostics.verifyAll(this@MainActivity)
-            } catch (e: Exception) {
-                "{\"error\":" + JSONObject.quote(e.message ?: "verify failed") + "}"
-            }
+        fun runDiagnostics(): String {
+            return try { Diagnostics.runLive(this@MainActivity) }
+            catch (e: Exception) { "{\"ok\":false,\"verdict\":" + JSONObject.quote(e.message ?: "diagnostics failed") + "}" }
         }
 
         @JavascriptInterface
-        fun forceRefreshRoutes(): String {
-            routeExecutor.execute {
-                runCatching {
-                    NetState.refresh(applicationContext)
-                    val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
-                    val models = config.optJSONArray("models") ?: org.json.JSONArray()
-                    Probe.refreshReachability(filesDir, models, topOnly = false, force = true)
-                    mainHandler.post { if (::web.isInitialized) web.evaluateJavascript("window.refreshRouteCards && window.refreshRouteCards()", null) }
-                }.onFailure { android.util.Log.w("Ruri", "Manual route refresh failed", it) }
+        fun readDiagnosticsLog(): String = Diagnostics.readLog(this@MainActivity)
+
+        @JavascriptInterface
+        fun queueStatus(): String = CommanderReplyQueue.status(filesDir).toString()
+
+        @JavascriptInterface
+        fun retryPending(): String {
+            return try {
+                CommanderReplyQueue.manualRetry(filesDir)
+                mainHandler.post { attemptPendingTurn() }
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "retry failed") }
+        }
+
+        @JavascriptInterface
+        fun completeChat(callbackId: String, commanderMessageId: String): String {
+            if (!callbackId.matches(Regex("[A-Za-z0-9_-]{1,80}"))) return "ERROR: invalid callback"
+            if (!commanderMessageId.matches(Regex("[A-Za-z0-9_-]{1,200}"))) return "ERROR: invalid message id"
+            if (!ChatEngine.isCommanderMessage(filesDir, commanderMessageId)) {
+                return "ERROR: Commander message not found in L0"
+            }
+            chatExecutor.execute {
+                runCatching { CommanderReplyQueue.enqueue(filesDir, commanderMessageId) }
+                val outcome = runCatching { ChatEngine.respond(filesDir, commanderMessageId) }
+                outcome.onSuccess { reply ->
+                    val messageId = ChatEngine.lastSavedReplyId()
+                    mainHandler.post {
+                        if (!activityResumed && !messageId.isNullOrBlank()) {
+                            Notifier.thought(this@MainActivity, reply, messageId)
+                        }
+                        if (::web.isInitialized) web.evaluateJavascript(
+                            "window.onNativeChatResult && window.onNativeChatResult(" +
+                                JSONObject.quote(callbackId) + "," + JSONObject.quote(reply) + ",null)", null
+                        )
+                    }
+                }
+                outcome.onFailure { error ->
+                    val failure = error as? ChatEngine.ModelRequestFailure
+                    val kind = failure?.failureKind ?: "unexpected"
+                    scheduleRetryIfNeeded(kind)
+                    mainHandler.post {
+                        if (::web.isInitialized) web.evaluateJavascript(
+                            "window.onNativeChatError && window.onNativeChatError(" +
+                                JSONObject.quote(callbackId) + "," + errorPayload(kind, error.message.orEmpty()) + ")",
+                            null
+                        )
+                    }
+                }
+                mainHandler.post { pushQueueState() }
             }
             return "OK"
         }
@@ -270,71 +352,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
-        fun hasNotificationAccess(): Boolean =
-            (Settings.Secure.getString(contentResolver, "enabled_notification_listeners") ?: "").contains(packageName)
-
-        @JavascriptInterface
-        fun saveShelfFile(name: String, base64: String): String {
-            return try {
-                val safe = name.substringAfterLast('/').substringAfterLast('\\')
-                    .replace(Regex("[^A-Za-z0-9._ -]"), "_").take(100)
-                require(safe.isNotBlank() && safe != "." && safe != "..") { "Invalid file name" }
-                require(base64.length <= 12 * 1024 * 1024) { "File is too large" }
-                val bytes = Base64.decode(base64, Base64.DEFAULT)
-                require(bytes.size <= 8 * 1024 * 1024) { "File is too large" }
-                val dir = File(filesDir, "shelf").apply { mkdirs() }
-                File(dir, safe).writeBytes(bytes)
-                ShelfWatcher.markAdded(this@MainActivity, safe)
-                "OK"
-            } catch (e: Exception) { "ERROR: " + (e.message ?: "shelf save failed") }
-        }
-
-        @JavascriptInterface
-        fun completeChat(callbackId: String, commanderMessageId: String): String {
-            if (!callbackId.matches(Regex("[A-Za-z0-9_-]{1,80}"))) return "ERROR: invalid callback"
-            if (!commanderMessageId.matches(Regex("[A-Za-z0-9_-]{1,200}"))) return "ERROR: invalid message id"
-            if (!ChatEngine.isCommanderMessage(filesDir, commanderMessageId)) return "ERROR: Commander message not found in L0"
-            chatExecutor.execute {
-                try {
-                    CommanderReplyQueue.enqueue(filesDir, commanderMessageId)
-                    val reply = ChatEngine.respond(filesDir, commanderMessageId)
-                    if (!CommanderReplyQueue.isAnswered(filesDir, commanderMessageId)) {
-                        throw IllegalStateException("Ответ не сохранён; сообщение осталось в очереди")
-                    }
-                    val messageId = ChatEngine.lastSavedReplyId()
-                    mainHandler.post {
-                        if (!activityResumed && !messageId.isNullOrBlank()) {
-                            Notifier.thought(this@MainActivity, reply, messageId)
-                        }
-                        if (::web.isInitialized) web.evaluateJavascript(
-                            "window.onNativeChatResult(" + JSONObject.quote(callbackId) + "," +
-                                JSONObject.quote(reply) + ",null)", null
-                        )
-                    }
-                } catch (e: Exception) {
-                    val error = e.message ?: "Ошибка ответа модели"
-                    runCatching { CommanderReplyQueue.enqueue(filesDir, commanderMessageId) }
-                    runCatching {
-                        LifeScheduler.scheduleCommanderReplyRetry(
-                            this@MainActivity,
-                            CommanderReplyQueue.nextDelayMs(filesDir) ?: 30_000L
-                        )
-                    }
-                    mainHandler.post {
-                        if (::web.isInitialized) web.evaluateJavascript(
-                            "window.onNativeChatResult(" + JSONObject.quote(callbackId) + ",null," +
-                                JSONObject.quote(error) + ")", null
-                        )
-                    }
-                }
-            }
-            return "OK"
-        }
-
-        @JavascriptInterface
         fun read(path: String): String = when (path.replace('\\', '/').trimStart('/')) {
             "core/config.json" -> readPublicRuntimeConfig()
-            "core/search.json" -> readPublicSearchConfig()
             "core/secrets.enc.json" -> ""
             else -> FileManager.read(filesDir, path)
         }
@@ -385,80 +404,26 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun quotaSummary(): String {
             return runCatching {
-                val models = JSONObject(SecretStore.readRuntimeConfig(filesDir)).optJSONArray("models") ?: org.json.JSONArray()
-                (0 until models.length()).mapNotNull { i ->
-                    val model = models.optJSONObject(i) ?: return@mapNotNull null
-                    if (!model.optBoolean("free_tier", false)) return@mapNotNull null
-                    val id = model.optString("id").ifBlank { model.optString("name") }
-                    val meta = RouteMeta.route(filesDir, id)
-                    val requests = meta.optInt("day_count", 0)
-                    val tokens = RouteMeta.tokensToday(filesDir, id)
-                    val limit = model.optLong("token_limit_daily", model.optLong("tokens_per_day", 0L))
-                    val until = meta.optLong("quota_exhausted_until", 0L)
-                    val tokenText = if (limit > 0) " · токены $tokens/$limit" else " · токены $tokens/лимит не задан"
-                    val exhausted = if (until > System.currentTimeMillis()) " · exhausted до " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(until)) else ""
-                    model.optString("name", id) + ": запросы $requests/200" + tokenText + exhausted
-                }.joinToString(" · ")
-            }.getOrDefault("")
-        }
-
-        @JavascriptInterface
-        fun visionStatus(): String {
-            refreshVisionStatusAsync()
-            return Vision.cachedVisionRoute(filesDir)
-                ?.let { it.optString("name").ifBlank { it.optString("id") } }
-                ?.takeIf { it.isNotBlank() } ?: "проверяю…"
-        }
-
-        @JavascriptInterface
-        fun reprobeVision(): String {
-            routeExecutor.execute {
-                runCatching {
-                    val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
-                    val models = config.optJSONArray("models") ?: org.json.JSONArray()
-                    for (index in 0 until models.length()) {
-                        val model = models.optJSONObject(index) ?: continue
-                        val id = model.optString("id").ifBlank { model.optString("name") }
-                        if (id.isBlank()) continue
-                        RouteMeta.update(filesDir, id) { route ->
-                            val caps = route.optJSONObject("caps") ?: JSONObject()
-                            caps.remove("vision")
-                            route.put("caps", caps)
-                            route.remove("vision_probe_at")
-                        }
-                    }
-                    NetState.refresh(applicationContext)
-                    val selected = Vision.visionRoute(filesDir)
-                    val status = selected?.optString("name")?.ifBlank { selected.optString("id") }
-                        ?: if (NetState.online) "none" else "нет сети"
-                    mainHandler.post {
-                        if (::web.isInitialized) web.evaluateJavascript(
-                            "window.setVisionStatus && window.setVisionStatus(" + JSONObject.quote(status) + ")", null
-                        )
-                    }
-                }.onFailure { error ->
-                    android.util.Log.w("Ruri", "Manual vision probe failed", error)
-                    mainHandler.post {
-                        if (::web.isInitialized) web.evaluateJavascript(
-                            "window.setVisionStatus && window.setVisionStatus(" +
-                                JSONObject.quote("ошибка: " + (error.message ?: "vision probe")) + ")", null
-                        )
-                    }
+                if (!Route.hasKey(filesDir)) return@runCatching "Ключ Routeway не задан"
+                val state = CommanderReplyQueue.status(filesDir)
+                when {
+                    state.optInt("pending", 0) == 0 -> Route.DISPLAY_NAME
+                    state.optBoolean("manual_retry", false) ->
+                        Route.DISPLAY_NAME + " · " + RetryPolicy.label(state.optString("last_error_kind"))
+                    else -> Route.DISPLAY_NAME + " · ждёт повтора"
                 }
-            }
-            return "OK"
+            }.getOrDefault(Route.DISPLAY_NAME)
         }
-
-        @JavascriptInterface
-        fun readNetworkDiagnostics(): String = NetworkDiagnostics.latest(filesDir)
 
         @JavascriptInterface
         fun readAutomaticBackupStatus(): String = LocalBackupManager.status(filesDir).toString()
 
         @JavascriptInterface
         fun createAutomaticBackupNow(): String {
-            return try { JSONObject().put("created", true).put("file", LocalBackupManager.createSnapshot(filesDir).name).toString() }
-            catch (e: Exception) { "ERROR: " + (e.message ?: "backup failed") }
+            return try {
+                JSONObject().put("created", true)
+                    .put("file", LocalBackupManager.createSnapshot(filesDir).name).toString()
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "backup failed") }
         }
 
         @JavascriptInterface
@@ -502,64 +467,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
-        fun readPublicSearchConfig(): String {
-            return try { SecretStore.readPublicSearchConfig(filesDir) }
-            catch (e: Exception) { android.util.Log.e("Ruri", "Cannot read public search config", e); "{}" }
-        }
-
-        @JavascriptInterface
-        fun saveSearchConfig(raw: String): String {
-            return try { SecretStore.saveSearchConfig(filesDir, raw); "OK" }
-            catch (e: Exception) { "ERROR: " + (e.message ?: "search config save failed") }
-        }
-
-        @JavascriptInterface
         fun saveRuntimeConfig(content: String): String {
             return try { SecretStore.saveRuntimeConfig(filesDir, content); "OK" }
             catch (e: Exception) { "ERROR: " + (e.message ?: "config save failed") }
         }
-
-        @JavascriptInterface
-        fun saveRouteOrder(json: String): String {
-            return try {
-                val payload = JSONObject(json)
-                val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
-                RouteSelector.applyManualRouteOrder(config, payload)
-                SecretStore.saveRuntimeConfig(filesDir, config.toString(2))
-                "OK"
-            } catch (e: Exception) { "ERROR: " + (e.message ?: "route order save failed") }
-        }
-
-        @JavascriptInterface
-        fun saveRouterAPIKey(key: String): String {
-            return try {
-                val cfg = JSONObject(SecretStore.readRuntimeConfig(filesDir))
-                cfg.put("routerapi_key", key.trim())
-                val ms = cfg.optJSONArray("models") ?: JSONArray()
-                for (i in 0 until ms.length()) {
-                    val m = ms.optJSONObject(i) ?: continue
-                    if (m.optString("id").startsWith("routerapi-")) {
-                        m.put("api_key", key.trim()).put("enabled", key.isNotBlank())
-                    }
-                }
-                SecretStore.saveRuntimeConfig(filesDir, cfg.toString(2))
-                "ok"
-            } catch (e: Exception) { "ERROR: " + (e.message ?: "routerapi key save failed") }
-        }
-
-        @JavascriptInterface
-        fun saveRouteTasks(json: String): String {
-            return try {
-                val cfg = JSONObject(SecretStore.readRuntimeConfig(filesDir))
-                cfg.put("route_tasks", JSONObject(json))
-                SecretStore.saveRuntimeConfig(filesDir, cfg.toString(2))
-                "ok"
-            } catch (e: Exception) { "ERROR: " + (e.message ?: "route tasks save failed") }
-        }
-
-        @JavascriptInterface
-        fun readRouteTasks(): String =
-            runCatching { JSONObject(SecretStore.readRuntimeConfig(filesDir)).optJSONObject("route_tasks")?.toString() ?: "{}" }.getOrDefault("{}")
 
         @JavascriptInterface
         fun appendEvent(eventJson: String): String {
@@ -573,15 +484,11 @@ class MainActivity : AppCompatActivity() {
                     "Invalid Commander message id"
                 }
                 val saved = JSONObject(FileManager.appendEvent(filesDir, event))
-                if (event.optString("type") == "message" && event.optString("who") == "commander") {
-                    val messageId = saved.optString("id")
-                    runCatching { CommanderReplyQueue.enqueue(filesDir, messageId) }
-                    runCatching { Receipts.delivered(filesDir, messageId) }
-                    runCatching { OfflineQueue.markPending(filesDir, messageId) }
-                    runCatching {
-                        LifeScheduler.enqueueEvent(this@MainActivity, "commander_messages_pending")
-                    }
-                }
+                val messageId = saved.optString("id")
+                runCatching { CommanderReplyQueue.enqueue(filesDir, messageId) }
+                runCatching { Receipts.delivered(filesDir, messageId) }
+                runCatching { OfflineQueue.markPending(filesDir, messageId) }
+                mainHandler.post { pushQueueState() }
                 "OK"
             } catch (e: Exception) { "ERROR: " + (e.message ?: "event append failed") }
         }
@@ -605,9 +512,6 @@ class MainActivity : AppCompatActivity() {
                 "OK"
             } catch (e: Exception) { "ERROR: " + (e.message ?: "receipt update failed") }
         }
-
-        @JavascriptInterface
-        fun searchWeb(query: String): String = WebSearch.search(filesDir, query)
 
         @JavascriptInterface
         fun openNotificationAccessSettings(): String {
@@ -643,7 +547,7 @@ class MainActivity : AppCompatActivity() {
             return try {
                 val archive = JSONObject(json)
                 LocalBackupManager.createSnapshot(filesDir)
-                val allowedRoots = listOf("core/", "memory/", "shelf/", "research/", "skills/", "proposals/")
+                val allowedRoots = listOf("core/", "memory/")
                 val keys = archive.keys()
                 while (keys.hasNext()) {
                     val path = keys.next()
@@ -677,7 +581,9 @@ class MainActivity : AppCompatActivity() {
                 }
                 runOnUiThread {
                     try { startActivity(Intent.createChooser(intent, "Сохранить архив Рури")) }
-                    catch (e: Exception) { Toast.makeText(this@MainActivity, "Не удалось открыть экспорт", Toast.LENGTH_LONG).show() }
+                    catch (e: Exception) {
+                        Toast.makeText(this@MainActivity, "Не удалось открыть экспорт", Toast.LENGTH_LONG).show()
+                    }
                 }
                 "OK"
             } catch (e: Exception) { "ERROR: " + (e.message ?: "export failed") }
