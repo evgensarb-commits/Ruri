@@ -521,7 +521,7 @@ class MainActivity : AppCompatActivity() {
                     if (!model.optString("id").startsWith("routerapi-")) continue
                     found = true
                     if (key.isBlank()) {
-                        model.put("api_key", "").put("clear_api_key", true).put("enabled", false)
+                        model.put("api_key", "").put("clear_api_key", true).put("enabled", true)
                     } else {
                         model.put("api_key", key.trim()).remove("clear_api_key").put("enabled", true)
                     }
