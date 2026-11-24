@@ -225,7 +225,23 @@ class MigrationPrunesDeadRoutesTest {
             val models = cfg.getJSONArray("models")
             val ids = (0 until models.length()).map { models.getJSONObject(it).optString("id") }
             assertTrue(ids.containsAll(listOf("routerapi-glm", "routerapi-cydonia", "routerapi-unslop", "routerapi-deepseek")))
-            // Broken MANUAL selection must fall back to a talkative state.
+            // The commander's choice is valid again after repair: MANUAL + cydonia stays.
+            assertEquals("routerapi-cydonia", cfg.optString("selected_route_id"))
+            assertEquals("MANUAL", cfg.optString("route_mode"))
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun repairResetsSelectionPointingAtVanishedRoute() {
+        val root = Files.createTempDirectory("ruri-routerapi-ghost").toFile()
+        try {
+            FileManager.init(root)
+            val cfg = JSONObject(FileManager.read(root, "core/config.json"))
+            cfg.put("models", JSONArray().put(JSONObject()
+                .put("id", "routeway").put("model", "gemma-4-26b-a4b-it-meromero:free")
+                .put("free_tier", true).put("enabled", true)))
+            // Selection points at a route that no longer exists anywhere.
+            cfg.put("selected_route_id", "ghost-route").put("route_mode", "MANUAL")
+            RouterAPIMigration.applyMigration(cfg)
             assertEquals("routeway", cfg.optString("selected_route_id"))
             assertEquals("AUTO", cfg.optString("route_mode"))
         } finally { root.deleteRecursively() }
