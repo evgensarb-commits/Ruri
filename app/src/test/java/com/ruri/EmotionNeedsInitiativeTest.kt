@@ -94,17 +94,19 @@ class PureAutonomyDecidesTest {
     }
 }
 
-class NoReflectionTimerTest {
-    @Test fun schedulerExposesOnlyDriveCheckCadence() {
+class ReflectionCadenceTest {
+    @Test fun diaryThoughtsHaveAnIndependentSixHourCadence() {
+        val now = 20_000_000L
+        assertFalse(LifeScheduler.thoughtCheckDue(now, now - 5L * 3_600_000L, 0L, 6.0))
+        assertTrue(LifeScheduler.thoughtCheckDue(now, now - 6L * 3_600_000L, 0L, 6.0))
+        assertFalse(LifeScheduler.thoughtCheckDue(now, now - 12L * 3_600_000L, now - 1L * 3_600_000L, 6.0))
+        assertTrue(LifeScheduler.thoughtCheckDue(now, now - 12L * 3_600_000L, now - 6L * 3_600_000L, 6.0))
+        assertFalse(LifeScheduler.thoughtCheckDue(now, now - 12L * 3_600_000L, 0L, 0.0))
+    }
+
+    @Test fun schedulerRetainsTheSeparateDriveCheckCadence() {
         assertFalse(LifeScheduler.driveCheckDue(1000000L + 44L * 60000L, 1000000L, 45.0))
         assertTrue(LifeScheduler.driveCheckDue(1000000L + 45L * 60000L, 1000000L, 45.0))
-        val candidates = listOf(java.io.File("src/main/java/com/ruri/LifeScheduler.kt"),
-            java.io.File("app/src/main/java/com/ruri/LifeScheduler.kt"))
-        val source = candidates.firstOrNull { it.isFile }?.readText()
-            ?: throw AssertionError("LifeScheduler source not found")
-        assertFalse(source.contains("reflectionDue"))
-        assertFalse(source.contains("reflection_h"))
-        assertTrue(source.contains("driveCheckDue"))
     }
 }
 
