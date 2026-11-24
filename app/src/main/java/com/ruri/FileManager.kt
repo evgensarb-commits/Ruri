@@ -869,7 +869,10 @@ object FileManager {
         try {
             val raw = file.readText(Charsets.UTF_8)
             val config = JSONObject(raw)
+            if (config.optBoolean("routerapi_migration_v2", false)) return
             val sourceModels = mergeModelsById(config.optJSONArray("models") ?: JSONArray())
+            val retiredRouteIds = (0 until sourceModels.length()).mapNotNull { sourceModels.optJSONObject(it)?.optString("id") }
+                .filter { it.isNotBlank() && it !in setOf("routeway", "routeway-minimax") }
 
             val meromeroSource = (0 until sourceModels.length()).mapNotNull { sourceModels.optJSONObject(it) }
                 .firstOrNull {
@@ -941,6 +944,7 @@ object FileManager {
 
             val normalized = config.toString(2)
             if (normalized != raw) atomicWrite(file, normalized)
+            retiredRouteIds.distinct().forEach { SecretStore.removeModelKey(root, it) }
         } catch (e: Exception) {
             android.util.Log.w("Ruri", "Free-route model migration skipped; original model configuration was preserved", e)
         }
