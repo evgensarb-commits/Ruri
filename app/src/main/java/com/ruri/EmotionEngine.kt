@@ -29,6 +29,7 @@ object EmotionEngine {
             .put("fatigue_recovery_h", 7).put("silence_growth_h", 9).put("messages_to_satisfy", 8)
             .put("initiative_threshold", 40).put("initiative_gamma", 1.5).put("guarantee_at_100", true)
             .put("veto_allowed", true).put("initiative_mode", "drive_chance").put("drive_check_interval_min", 45)
+            .put("thought_interval_h", 6.0)
             .put("initiative_cooldown_min", 30).put("activity_fatigue_message", 4).put("activity_fatigue_task", 6)
             .put("boredom_solo_relief", 4)
             .put("reply_longing_relief", 20).put("message_longing_relief", 10)
