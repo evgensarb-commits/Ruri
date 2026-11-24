@@ -29,7 +29,7 @@ object EmotionEngine {
             .put("fatigue_recovery_h", 7).put("silence_growth_h", 9).put("messages_to_satisfy", 8)
             .put("initiative_threshold", 40).put("initiative_gamma", 1.5).put("guarantee_at_100", true)
             .put("veto_allowed", true).put("initiative_mode", "drive_chance").put("drive_check_interval_min", 45)
-            .put("thought_interval_h", 6.0)
+            .put("thought_interval_h", 2.0)
             .put("initiative_cooldown_min", 30).put("activity_fatigue_message", 4).put("activity_fatigue_task", 6)
             .put("boredom_solo_relief", 4)
             .put("reply_longing_relief", 20).put("message_longing_relief", 10)
@@ -70,6 +70,11 @@ object EmotionEngine {
         }
         val dd = def.optJSONObject("drift"); val cd = cfg.optJSONObject("drift") ?: JSONObject().also { cfg.put("drift", it) }
         for (k in dd.keys()) if (!cd.has(k)) cd.put(k, dd.get(k))
+        // Migrate the previous built-in six-hour cadence to two hours once, preserving custom values.
+        if (!cfg.optBoolean("thought_cadence_v2", false)) {
+            if (cd.optDouble("thought_interval_h", 6.0) == 6.0) cd.put("thought_interval_h", 2.0)
+            cfg.put("thought_cadence_v2", true)
+        }
         val dl = def.optJSONObject("lexicon"); val cl = cfg.optJSONObject("lexicon") ?: JSONObject().also { cfg.put("lexicon", it) }
         for (k in dl.keys()) { val arr = cl.optJSONArray(k) ?: JSONArray().also { cl.put(k, it) }; val da = dl.optJSONArray(k)
             for (i in 0 until da.length()) { val w = da.optString(i); var found = false
