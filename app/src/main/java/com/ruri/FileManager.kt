@@ -209,17 +209,6 @@ object FileManager {
         SecretStore.migrateLegacySearchKey(root)
         migrateModelConfig(root)
         migrateRouterApiRoutes(root)
-        val configuredModels = runCatching {
-            JSONObject(read(root, CONFIG_PATH)).optJSONArray("models")
-        }.getOrNull()
-        val hasMeroRoute = configuredModels?.let { models ->
-            (0 until models.length()).any { index ->
-                models.optJSONObject(index)?.optString("model")?.contains("meromero", ignoreCase = true) == true
-            }
-        } == true
-        if (hasMeroRoute) {
-            SecretStore.migrateRoutewayFallbackKey(root, "routeway", "routeway-minimax")
-        }
         SecretStore.removeModelKey(root, "routeway-darksoul")
         RouteMeta.pruneToConfiguredRoutes(root)
         RouteMeta.migrateLegacyNsfwFlags(root)
