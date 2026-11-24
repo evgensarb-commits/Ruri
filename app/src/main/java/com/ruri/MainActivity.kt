@@ -523,7 +523,9 @@ class MainActivity : AppCompatActivity() {
                     if (key.isBlank()) {
                         model.put("api_key", "").put("clear_api_key", true).put("enabled", true)
                     } else {
-                        model.put("api_key", key.trim()).remove("clear_api_key").put("enabled", true)
+                        model.put("api_key", key.trim())
+                        model.remove("clear_api_key")
+                        model.put("enabled", true)
                     }
                 }
                 require(found) { "Маршруты RouterAPI ещё не созданы; перезапусти приложение после обновления" }
