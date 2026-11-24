@@ -65,6 +65,17 @@ class AutonomyPackageIntegrationTest {
     }
 
     @Test
+    fun scheduledDiaryThoughtsHaveAnIndependentCadence() {
+        val diary = source("src/main/java/com/ruri/Diary.kt")
+        val scheduler = source("src/main/java/com/ruri/LifeScheduler.kt")
+        val emotion = source("src/main/java/com/ruri/EmotionEngine.kt")
+        assertTrue(diary.contains("fun lastThoughtAt"))
+        assertTrue(scheduler.contains("thoughtCheckDue"))
+        assertTrue(scheduler.contains("last_thought_check_at"))
+        assertTrue(emotion.contains("thought_interval_h"))
+    }
+
+    @Test
     fun runtimeMigrationKeepsOnlyMeroMeroAndNemotron() {
         val fileManager = source("src/main/java/com/ruri/FileManager.kt")
         val routeSelector = source("src/main/java/com/ruri/RouteSelector.kt")
@@ -74,7 +85,10 @@ class AutonomyPackageIntegrationTest {
         assertTrue(fileManager.contains("https://blockrun.ai/api/v1"))
         assertTrue(fileManager.contains("api_key_optional"))
         val chatEngine = source("src/main/java/com/ruri/ChatEngine.kt")
+        val thinker = source("src/main/java/com/ruri/Thinker.kt")
         assertTrue(chatEngine.contains("!model.optBoolean(\"api_key_optional\", false)"))
+        assertTrue(thinker.contains("!model.optBoolean(\"api_key_optional\", false)"))
+        assertTrue(thinker.contains("thought_check"))
         assertFalse(fileManager.contains("integrate.api.nvidia.com"))
         assertTrue(fileManager.contains("free_only"))
         assertFalse(fileManager.contains("huggingface.co"))
