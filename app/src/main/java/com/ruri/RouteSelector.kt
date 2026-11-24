@@ -8,7 +8,7 @@ import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import javax.net.ssl.SSLException
 
-enum class Task { CHAT, WARMTH, REASON, CREATIVE, VISION, TOOLS }
+enum class Task { CHAT, WARMTH, REASON, CREATIVE, VISION, TOOLS, CODE, LONG }
 
 /** Selects enabled free routes by manual priority, with explicit NSFW and vision overrides. */
 object RouteSelector {
