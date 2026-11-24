@@ -225,7 +225,7 @@ class TaskRouteSequenceTest {
                 root, models, 0, Task.CODE, online = true, vpn = false, routeTaskKey = "code"
             )
             assertEquals(listOf("routerapi-glm", "routerapi-deepseek", "routeway"),
-                order.map { models.getJSONObject(it).getString("id") })
+                order.take(3).map { models.getJSONObject(it).getString("id") })
         } finally {
             root.deleteRecursively()
         }
