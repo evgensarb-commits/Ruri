@@ -17,6 +17,24 @@ object ChatEngine {
     @Volatile private var lastFinalMessageId: String? = null
     private val responseLock = Any()
 
+    internal data class TaskRouteClassification(val task: Task, val key: String)
+
+    internal fun classifyTask(commanderText: String, serializedMessagesLength: Int): TaskRouteClassification {
+        var task = RouteSelector.detectTask(commanderText)
+        val codeRx = Regex("(?i)(напиши|почини|пофикси|сделай|перепиши|отрефакторь)\\s+(код|функцию|класс|скрипт|метод)|\\.(kt|py|js|ts|java)\\b|kotlin|gradle|баг в коде|stacktrace")
+        var taskKey = when (task) {
+            Task.VISION -> "vision"
+            Task.WARMTH -> "warmth"
+            else -> "chat"
+        }
+        if (taskKey == "chat" && codeRx.containsMatchIn(commanderText)) {
+            task = Task.CODE
+            taskKey = "code"
+        }
+        if (serializedMessagesLength / 3 > 130000 && taskKey != "vision") taskKey = "long"
+        return TaskRouteClassification(task, taskKey)
+    }
+
     internal class ModelRequestFailure(
         message: String,
         val retryAfterMs: Long = 0L,
@@ -270,18 +288,9 @@ object ChatEngine {
         }
         val commanderText = history.last().optString("content")
         EmotionEngine.onCommanderMessage(root, commanderText, history.last().optString("_ruri_event_id"))
-        var task = RouteSelector.detectTask(commanderText)
-        val codeRx = Regex("(?i)(напиши|почини|пофикси|сделай|перепиши|отрефакторь)\\s+(код|функцию|класс|скрипт|метод)|\\.(kt|py|js|ts|java)\\b|kotlin|gradle|баг в коде|stacktrace")
-        var taskKey = when (task) {
-            Task.VISION -> "vision"
-            Task.WARMTH -> "warmth"
-            else -> "chat"
-        }
-        if (taskKey == "chat" && codeRx.containsMatchIn(commanderText)) {
-            task = Task.CODE
-            taskKey = "code"
-        }
-        if (messages.toString().length / 3 > 130000 && taskKey != "vision") taskKey = "long"
+        val classification = classifyTask(commanderText, messages.toString().length)
+        val task = classification.task
+        val taskKey = classification.key
         val adult = RouteSelector.isAdultTopic(commanderText) || RouteSelector.nsfwWindow(root)
         fun selectOrder(online: Boolean): List<Int> = RouteSelector.orderedIndices(
             root, models, current, task, online, NetState.vpn, adult, taskKey
