@@ -29,6 +29,17 @@ object LifeScheduler {
     internal fun driveCheckDue(now: Long, lastDriveCheck: Long, intervalMinutes: Double): Boolean =
         intervalMinutes > 0.0 && (lastDriveCheck <= 0L || now - lastDriveCheck >= intervalMinutes * 60000.0)
 
+    internal fun thoughtCheckDue(
+        now: Long,
+        lastThoughtAt: Long,
+        lastAttemptAt: Long,
+        intervalHours: Double
+    ): Boolean {
+        if (intervalHours <= 0.0) return false
+        val baseline = maxOf(lastThoughtAt, lastAttemptAt)
+        return baseline <= 0L || now - baseline >= intervalHours * 3_600_000.0
+    }
+
     fun ensurePeriodic(context: Context) {
         registerConnectivityWake(context.applicationContext)
         val request = PeriodicWorkRequestBuilder<RuriLifeWorker>(15, TimeUnit.MINUTES)
@@ -291,6 +302,7 @@ class RuriLifeWorker(
         val notificationEvent = reason.contains("phone_notification") && !reason.contains("removed")
         val explicitSelfTask = reason.contains("research_task") || reason.contains("capability_gap")
         val driveCheckEvent = reason.contains("drive_check")
+        val thoughtCheckEvent = reason.contains("thought_check")
 
         if (!driveCheckEvent) {
             val drift = EmotionEngine.drift(root)
@@ -305,9 +317,29 @@ class RuriLifeWorker(
             if (claimed && EmotionEngine.pressure(root) >= drift.optDouble("initiative_threshold", 40.0)) {
                 LifeScheduler.enqueueEvent(context, "drive_check")
             }
+
+            // Diary thoughts have their own quiet cadence, independent of the
+            // probabilistic Commander-initiative gate. Failed attempts are retried
+            // only after the same interval; no provider/quota preflight is added.
+            if (!notificationEvent && !explicitSelfTask && !thoughtCheckEvent) {
+                val intervalHours = drift.optDouble("thought_interval_h", 6.0)
+                var thoughtCheckClaimed = false
+                FileManager.updateL4State(root) { latest ->
+                    if (LifeScheduler.thoughtCheckDue(
+                            now,
+                            Diary.lastThoughtAt(root),
+                            latest.optLong("last_thought_check_at", 0L),
+                            intervalHours
+                        )) {
+                        latest.put("last_thought_check_at", now)
+                        thoughtCheckClaimed = true
+                    }
+                }
+                if (thoughtCheckClaimed) LifeScheduler.enqueueEvent(context, "thought_check")
+            }
         }
 
-        if (!driveCheckEvent && !notificationEvent && !explicitSelfTask) return false
+        if (!driveCheckEvent && !notificationEvent && !explicitSelfTask && !thoughtCheckEvent) return false
 
         val config = try { JSONObject(SecretStore.readRuntimeConfig(root)) } catch (_: Exception) { return false }
         val models = config.optJSONArray("models") ?: return false
