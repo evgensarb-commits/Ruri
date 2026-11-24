@@ -206,6 +206,42 @@ class MigrationPrunesDeadRoutesTest {
                 tasks.keySet().toSet())
         } finally { root.deleteRecursively() }
     }
+
+    @Test fun repairRestoresLostRouterApiRoutesEvenAfterOneShotFlag() {
+        // Device reality: the one-shot flag is set but the routerapi routes were lost
+        // (broken save / manual cleanup). ensure() must restore them anyway.
+        val root = Files.createTempDirectory("ruri-routerapi-repair").toFile()
+        try {
+            FileManager.init(root)
+            val cfg = JSONObject(FileManager.read(root, "core/config.json"))
+            cfg.put("routerapi_migration_v2", true) // one-shot already "done"
+            cfg.put("models", JSONArray().put(JSONObject()
+                .put("id", "routeway").put("model", "gemma-4-26b-a4b-it-meromero:free")
+                .put("free_tier", true).put("enabled", true)))
+            // Selection points at a route that no longer exists.
+            cfg.put("selected_route_id", "routerapi-cydonia").put("route_mode", "MANUAL")
+            RouterAPIMigration.applyMigration(cfg)
+
+            val models = cfg.getJSONArray("models")
+            val ids = (0 until models.length()).map { models.getJSONObject(it).optString("id") }
+            assertTrue(ids.containsAll(listOf("routerapi-glm", "routerapi-cydonia", "routerapi-unslop", "routerapi-deepseek")))
+            // Broken MANUAL selection must fall back to a talkative state.
+            assertEquals("routeway", cfg.optString("selected_route_id"))
+            assertEquals("AUTO", cfg.optString("route_mode"))
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun needsRepairDetectsMissingRouterApiRoutes() {
+        val withRoutes = JSONObject().put("models", JSONArray()
+            .put(JSONObject().put("id", "routeway"))
+            .put(JSONObject().put("id", "routerapi-cydonia")))
+        assertFalse(RouterAPIMigration.needsRepair(withRoutes))
+        val withoutRoutes = JSONObject().put("models", JSONArray()
+            .put(JSONObject().put("id", "routeway")))
+        assertTrue(RouterAPIMigration.needsRepair(withoutRoutes))
+        assertTrue(RouterAPIMigration.needsRepair(JSONObject()))
+        assertTrue(RouterAPIMigration.needsRepair(JSONObject().put("models", "not-an-array")))
+    }
 }
 
 class SingleRouterAPIKeyTest {
@@ -567,5 +603,18 @@ class UnifiedRoutesTest {
         assertTrue(probe.contains("`free_tier` is telemetry, not a gate"))
         val selector = RepoSources.text("app/src/main/java/com/ruri/RouteSelector.kt")
         assertFalse(selector.contains("model.optBoolean(\"free_tier\""))
+    }
+
+    @Test fun oneTapModelChooserSavesManualSelectionImmediately() {
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        // Simple model picker at the top of the routes card: pick Cydonia -> saved.
+        assertTrue(html.contains("id=\"activeModelSelect\""))
+        assertTrue(html.contains("ВЫБОР МОДЕЛИ"))
+        // The picker writes route_mode + selected_route_id itself via saveRuntimeConfig.
+        assertTrue(html.contains("c.route_mode='MANUAL'"))
+        assertTrue(html.contains("c.selected_route_id=v"))
+        // Repair path exists in the migration.
+        val migration = RepoSources.text("app/src/main/java/com/ruri/RouterAPIMigration.kt")
+        assertTrue(migration.contains("fun needsRepair"))
     }
 }
