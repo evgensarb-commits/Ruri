@@ -334,7 +334,7 @@ object FileManager {
                 .put("long", JSONArray().put("routerapi-unslop").put("routerapi-cydonia")))
             .put("routerapi_migration_v2", true)
 
-        SecretStore.saveRuntimeConfig(root, config.toString(2))
+        write(root, CONFIG_PATH, SecretStore.configForBackup(config.toString(2)))
         retiredIds.distinct().forEach { SecretStore.removeModelKey(root, it) }
     }
 
