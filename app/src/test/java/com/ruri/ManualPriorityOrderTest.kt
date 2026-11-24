@@ -21,6 +21,7 @@ class ManualPriorityOrderTest {
         FileManager.init(it)
         val config = JSONObject(FileManager.read(it, "core/config.json"))
             .put("nsfw_override", override)
+        config.remove("route_tasks")
         FileManager.write(it, "core/config.json", config.toString(2))
     }
 
