@@ -7,8 +7,6 @@ import android.app.Service
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
-import org.json.JSONArray
-import org.json.JSONObject
 import androidx.core.app.NotificationCompat
 
 /**
@@ -33,20 +31,14 @@ class RuriService : Service() {
     override fun onCreate() {
         super.onCreate()
         FileManager.init(filesDir)
-        ShelfWatcher.start(this)
         createChannel()
         DeviceEventMonitor.register(this)
         NetState.register(this)
         NetState.addListener(networkListener)
         Thread({
-            runCatching {
-                NetState.refresh(applicationContext)
-                val config = JSONObject(SecretStore.readRuntimeConfig(filesDir))
-                if (Probe.claimStartupRefresh(filesDir)) {
-                    Probe.refreshReachability(filesDir, config.optJSONArray("models") ?: JSONArray(), topOnly = false, force = true)
-                }
-            }.onFailure { android.util.Log.w("Ruri", "Startup route refresh failed", it) }
-        }, "ruri-service-route-refresh").start()
+            runCatching { NetState.refresh(applicationContext) }
+                .onFailure { android.util.Log.w("Ruri", "Startup network refresh failed", it) }
+        }, "ruri-service-network-refresh").start()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -85,7 +77,6 @@ class RuriService : Service() {
         NetState.removeListener(networkListener)
         NetState.unregister()
         DeviceEventMonitor.unregister(this)
-        ShelfWatcher.stop()
         super.onDestroy()
     }
 

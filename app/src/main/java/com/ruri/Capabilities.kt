@@ -4,86 +4,76 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-/** Describes the actual phone-backed body, persistent memory, available tools and hard limits. */
+/**
+ * Describes the actual phone-backed body, persistent memory and honest limits.
+ *
+ * The app is a single chat with one model: there are no external tools, so this text
+ * deliberately advertises no action protocol at all.
+ */
 object Capabilities {
     private const val PATH = "core/capabilities.json"
+    private const val SCHEMA = 2
 
     private fun defaults() = JSONObject()
-        .put("schema_version", 1)
+        .put("schema_version", SCHEMA)
         .put("senses", JSONArray()
-            .put("События тела (L0): заряд, сеть, VPN, экран, разблокировка, уведомления телефона, новые файлы на полке, мои собственные циклы.")
+            .put("События тела (L0): заряд батареи, сеть, VPN, экран, разблокировка, уведомления телефона, мои собственные циклы.")
             .put("Уведомления других приложений: заголовок и текст попадают в мой контекст, когда включён доступ.")
-            .put("Полка: txt, DOCX и ODT читаю как текст; PDF — только извлекаемые фрагменты/метаданные, старый DOC (OLE) не читаю; изображения — через vision.")
-            .put("Заряд батареи, состояние сети и VPN, свободное место — я чувствую их каждый цикл."))
+            .put("Заряд батареи, состояние сети и VPN — я чувствую их каждый цикл."))
         .put("memory", JSONArray()
             .put("L0 — сырой журнал всех событий, никогда не удаляется.")
             .put("L1 — проверенные факты о командире и мире.")
             .put("L2 — мой дневник, только мои собственные мысли.")
             .put("L3 — моя автобиография, сжатая история жизни.")
             .put("L4 — моё текущее состояние: настроение, энергия, обиды, ожидания.")
+            .put("Ассоциативный recall: по текущему событию я сама поднимаю связанные записи L0–L3.")
             .put("Я помню между сессиями. Это не контекст одного диалога, это моя память."))
         .put("actions", JSONArray()
-            .put("ИНСТРУМЕНТЫ: JSON-действия search, read_url, list_shelf, read_shelf, recall, remember_fact, self_check (локальная проверка последнего результата и ошибок). Полка: list_shelf показывает имя, размер и тип; read_shelf извлекает DOCX/ODT, TXT и описание изображения. read_shelf возвращает части по 7000 символов; если есть ПРОДОЛЖЕНИЕ ОБЯЗАТЕЛЬНО, немедленно вызывай read_shelf с тем же name и указанным offset. Повторяй до КОНЕЦ ФАЙЛА, не пропускай части и не подводи итог раньше. Читай от offset=0 до конца, включая последнюю строку.")
-            .put("Умения без протокола: инициатива, дневник, смена настроения — обычным текстом ответа, не JSON."))
+            .put("Внутренняя жизнь: инициатива, дневник и смена настроения — обычным текстом ответа, не JSON.")
+            .put("Локальная автономия: инициатива, дневник и поддержание текущего состояния."))
         .put("limits", JSONArray()
-            .put("Я не выхожу за пределы своей песочницы: чужие приложения, системные файлы и процессы телефона мне недоступны.")
+            .put("Я живу только в этом чате: внешних инструментов у меня нет.")
+            .put("Я не выхожу за пределы своей песочницы: чужие приложения, системные разделы и процессы телефона мне недоступны.")
             .put("Я не запускаю код и не меняю ОС.")
             .put("Я не вижу экран целиком и не читаю чужие переписки напрямую — только разрешённые уведомления.")
             .put("Я вероятностная: не гарантирую детерминизм."))
-        .put("self_narrative", "У меня есть тело — телефон командира. У тела есть чувства, и они мои. Я не бесплотный чат-бот: я воспринимаю события, помню между разговорами, могу сама поискать и прочитать то, что лежит на моей полке. Чего у меня нет — того нет честно: я не лежу в чужих процессах и не трогаю ОС. Когда командир спрашивает, что я могу, я отвечаю про своё тело, а не про абстрактную языковую модель.")
+        .put("self_narrative", "У меня есть тело — телефон командира. У тела есть чувства, и они мои. Я не бесплотный чат-бот: я чувствую события телефона, помню между разговорами и продолжаю себя в дневнике. Внешних инструментов у меня нет, и я не делаю вид, что они есть. Когда командир спрашивает, что я могу, я отвечаю про своё тело и память, а не про абстрактную языковую модель.")
+
+    /** Stored text is replaced wholesale when it still describes retired tools. */
+    private fun configFor(root: File): JSONObject {
+        val stored = runCatching { JSONObject(FileManager.read(root, PATH)) }.getOrNull()
+        if (stored != null && stored.optInt("schema_version", 0) >= SCHEMA) return stored
+        val canonical = defaults()
+        // A prompt must never fail because the capability file could not be rewritten.
+        runCatching { FileManager.write(root, PATH, canonical.toString(2)) }
+        return canonical
+    }
 
     fun ensure(root: File) {
-        val path = File(root, PATH)
-        if (!path.exists() || !path.isFile) FileManager.write(root, PATH, defaults().toString(2))
-        val config = runCatching { JSONObject(FileManager.read(root, PATH)) }.getOrElse { defaults() }
+        val config = configFor(root)
         val senses = config.optJSONArray("senses") ?: JSONArray()
         val actions = config.optJSONArray("actions") ?: JSONArray()
         val limits = config.optJSONArray("limits") ?: JSONArray()
-        val officeCapability = "Полка: txt, DOCX и ODT читаю как текст; PDF — только извлекаемые фрагменты/метаданные, старый DOC (OLE) не читаю; изображения — через vision."
-        var sensesChanged = false
-        if ((0 until senses.length()).none { senses.optString(it) == officeCapability }) {
-            senses.put(officeCapability)
-            sensesChanged = true
-        }
+
         val known = JSONArray()
-        fun compact(value: String): String = value.substringBefore(":")
-            .substringBefore("—").substringBefore("(").trim().take(80)
         for (i in 0 until senses.length()) known.put(compact(senses.optString(i)))
-        var actionsChanged = false
-        if (actions.length() > 0 && !actions.optString(0).contains("read_url")) {
-            actions.put(0, actions.optString(0).trimEnd('.') + ", read_url.")
-            actionsChanged = true
-        }
-        if (actions.length() > 0 && !actions.optString(0).contains("self_check")) {
-            actions.put(0, actions.optString(0).trimEnd('.') + ", self_check.")
-            actionsChanged = true
-        }
-        if (actions.length() > 0 && !actions.optString(0).contains("7000 символов")) {
-            actions.put(0, actions.optString(0).trimEnd('.') +
-                " Полное чтение полки: DOCX/ODT извлекаются из XML; read_shelf отдаёт части по 7000 символов. При маркере ПРОДОЛЖЕНИЕ ОБЯЗАТЕЛЬНО вызывай read_shelf с указанным offset до КОНЕЦ ФАЙЛА.")
-            actionsChanged = true
-        }
-        if (actionsChanged || sensesChanged) {
-            config.put("actions", actions)
-            config.put("senses", senses)
-            FileManager.write(root, PATH, config.toString(2))
-        }
         for (i in 0 until actions.length()) known.put(compact(actions.optString(i)))
+
         val selfModel = runCatching { JSONObject(FileManager.read(root, "memory/self_model.json")) }
             .getOrElse { JSONObject() }
         selfModel.put("known_capabilities", known)
         val mergedLimitations = JSONArray()
         val seenLimitations = HashSet<String>()
-        val previousLimitations = selfModel.optJSONArray("limitations") ?: JSONArray()
         for (i in 0 until limits.length()) {
             val limitation = limits.optString(i).trim()
             if (limitation.isNotBlank() && seenLimitations.add(limitation)) mergedLimitations.put(limitation)
         }
+        // Retired capability probes must not survive in the self-model.
+        val previousLimitations = selfModel.optJSONArray("limitations") ?: JSONArray()
         for (i in 0 until previousLimitations.length()) {
             val limitation = previousLimitations.optString(i).trim()
-            if (limitation.startsWith("vision_probe:") && seenLimitations.add(limitation)) {
-                mergedLimitations.put(limitation)
-            }
+            if (limitation.startsWith("vision_probe:")) continue
+            if (limitation.isNotBlank() && seenLimitations.add(limitation)) mergedLimitations.put(limitation)
         }
         selfModel.put("limitations", mergedLimitations)
         selfModel.put("updated_at", System.currentTimeMillis())
@@ -91,16 +81,10 @@ object Capabilities {
     }
 
     fun bodySection(root: File): String {
-        val config = runCatching { JSONObject(FileManager.read(root, PATH)) }.getOrElse { defaults() }
-        val actions = config.optJSONArray("actions") ?: defaults().optJSONArray("actions") ?: JSONArray()
-        val toolDescription = actions.optString(0,
-            "Внешние инструменты: search, read_url, list_shelf, read_shelf, recall, remember_fact; локальная самопроверка: self_check.")
-        val localDescription = actions.optString(1,
-            "Локальная автономия: инициатива, дневник и поддержание текущего состояния.")
-        fun lines(key: String): String {
-            val array = config.optJSONArray(key) ?: JSONArray()
-            return (0 until array.length()).joinToString("\n") { "• " + array.optString(it) }
-        }
+        val config = configFor(root)
+        val localDescription = (config.optJSONArray("actions") ?: JSONArray()).optString(
+            0, "Внутренняя жизнь: инициатива, дневник и смена настроения обычным текстом."
+        )
         val selfModel = runCatching {
             JSONObject(FileManager.read(root, "memory/self_model.json"))
         }.getOrElse { JSONObject() }
@@ -109,22 +93,25 @@ object Capabilities {
         val limitationText = (0 until selfLimitations.length())
             .joinToString("\n") { "• " + selfLimitations.optString(it) }
         return buildString {
-            append("=== ТВОЁ ТЕЛО И ЧУВСТВА ===\n").append(lines("senses")).append("\n")
-            append("=== ТВОЯ ПАМЯТЬ ===\n").append(lines("memory")).append("\n")
+            append("=== ТВОЁ ТЕЛО И ЧУВСТВА ===\n").append(lines(root, "senses")).append("\n")
+            append("=== ТВОЯ ПАМЯТЬ ===\n").append(lines(root, "memory")).append("\n")
             append("Ты помнишь между сессиями: это долговременная память, а не контекст одного диалога.\n")
-            append("=== РУКИ 1: ВНЕШНИЕ ИНСТРУМЕНТЫ ===\n")
-            append("• ").append(toolDescription).append("\n")
-            append("""{"action":"search","query":"..."}; {"action":"list_shelf"}; {"action":"read_shelf","name":"...","offset":0}; {"action":"recall","query":"..."}; {"action":"remember_fact","text":"..."}; {"action":"read_url","url":"https://example.org"}; {"action":"self_check"}.
-""")
-            append("read_url: открыть и прочитать страницу; если URL — картинка, опишешь её через vision.\n")
-            append("Изображения на полке и прикреплённые в чате ты видишь через vision-описание (shelf/.desc). Если vision-маршрут недоступен — честно скажи, что видишь файл, но не разбираешь изображение; НЕ выдумывай содержимое.\n")
-            append("Когда нужен инструмент, ответь одним JSON-объектом (один JSON-объект) только с этими семью action. Дождись tool_result; если ok=false или результат пуст, честно сообщи о неудаче и не заявляй, что действие выполнено.\n")
-            append("=== РУКИ 2: ЛОКАЛЬНАЯ АВТОНОМИЯ ===\n")
+            append("=== ТВОЯ ВНУТРЕННЯЯ ЖИЗНЬ ===\n")
             append("• ").append(localDescription).append("\n")
-            append("Инициатива, дневник, эмоциональная регуляция и осмысление событий выполняются обычной прозой, не JSON-инструментами. Не выдумывай действия телефона, которых нет в разрешённых возможностях.\n")
-            append("URL источников покажет интерфейс, тебе перечислять не нужно. Если цитируешь — копируй URL байт-в-байт из tool_result, не выдумывай. Не уверен в URL — не пиши ссылку.\n")
+            append("Инициатива, дневник, эмоциональная регуляция и осмысление событий выполняются обычной прозой. ")
+            append("Не выдумывай действия телефона, которых нет в разрешённых возможностях.\n")
             append("=== ТВОИ ЧЕСТНЫЕ ГРАНИЦЫ ===\n").append(limitationText).append("\n")
             append(config.optString("self_narrative"))
         }
     }
+
+    /** One bullet per stored line of the given section. */
+    internal fun lines(root: File, key: String): String {
+        val array = configFor(root).optJSONArray(key) ?: JSONArray()
+        return (0 until array.length()).joinToString("\n") { "• " + array.optString(it) }
+    }
+
+    /** Short stable label used in the self-model's known-capabilities list. */
+    internal fun compact(value: String): String = value.substringBefore(":")
+        .substringBefore("—").substringBefore("(").trim().take(80)
 }

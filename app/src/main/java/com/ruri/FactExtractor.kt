@@ -109,9 +109,8 @@ object FactExtractor {
             return 0
         }
         val models = config.optJSONArray("models") ?: JSONArray()
-        val current = config.optInt("current", 0)
-        // Fact extraction uses the same capability-free free-route policy as other cognition tasks.
-        val order = FreeModelRouter.orderedIndices(root, models, current, Task.REASON)
+        // One route only: index 0 or nothing.
+        val order: List<Int> = if (models.length() > 0) listOf(0) else emptyList()
         val prompt = buildPrompt(transcriptWindow)
         var parsed: JSONObject? = null
         var usedModel = ""

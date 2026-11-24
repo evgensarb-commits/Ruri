@@ -93,8 +93,8 @@ class RuriLifeWorker(
         return try {
             FileManager.init(root)
             NetState.refresh(appContext)
-            ShelfWatcher.scan(appContext)
-            detectResearchTask(appContext)
+            // No artificial event is queued here: the emotional gates in Thinker are evaluated
+            // on every wake, and a wake with no real event is reported as a routine check.
             val pending = EventQueue.snapshot(root)
             val reason = if (pending.isEmpty()) {
                 "проверка_состояния"
@@ -108,7 +108,6 @@ class RuriLifeWorker(
 
             // Update local state before replying; this path does not require a model request.
             LifeStateEngine.process(appContext, reason)
-            ShelfWatcher.ingestPending(appContext, pending)
 
             // Rehydrate the durable per-message outbox from L0 after process death. New
             // Commander events share one EventQueue reason so a long offline burst stays compact.
@@ -161,19 +160,8 @@ class RuriLifeWorker(
             }
 
             // Non-model maintenance follows the Commander queue so it cannot delay a reply.
-            runResearchTasks(root, pending)
             try { LocalBackupManager.createIfDue(root) }
             catch (backupError: Exception) { Log.e("Ruri", "Automatic local backup failed; life cycle will continue", backupError) }
-            if (NetState.online) {
-                val routeConfig = try { JSONObject(SecretStore.readRuntimeConfig(root)) } catch (_: Exception) { JSONObject() }
-                if (reason.contains("net_change")) {
-                    Probe.refreshReachability(
-                        root, routeConfig.optJSONArray("models") ?: org.json.JSONArray(),
-                        topOnly = false, force = true
-                    )
-                }
-                Probe.heartbeat(root, routeConfig)
-            }
 
             // Commander replies have priority over optional memory/model maintenance.
             // Do not let extraction or consolidation consume provider capacity while a reply waits.
@@ -212,108 +200,19 @@ class RuriLifeWorker(
     }
 
 
-    private fun detectResearchTask(context: Context) {
-        val root = context.filesDir
-        val lines = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 120, maxBytes = 256 * 1024)
-        val latest = lines.asReversed().asSequence().mapNotNull {
-            runCatching { JSONObject(it) }.getOrNull()
-        }.firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" } ?: return
-        val id = latest.optString("id").ifBlank { latest.optLong("ts").toString() }
-        val message = latest.optString("text").trim()
-        val pattern = Regex("(?iu)(?:что такое|кто такой|кто такая|что значит|объясни термин|объясни понятие|расскажи о)\\s+([^?!.\\n]{2,100})")
-        val term = pattern.find(message)?.groupValues?.get(1)?.trim()?.take(100)
-        var claimed = false
-        FileManager.updateL4State(root) { state ->
-            if (state.optString("last_research_detection_id") != id) {
-                state.put("last_research_detection_id", id)
-                claimed = true
-            }
-        }
-        if (claimed && !term.isNullOrBlank()) LifeScheduler.enqueueEvent(context, "research_task:" + term)
-    }
-
-    private fun runResearchTasks(root: java.io.File, pending: List<JSONObject>) {
-        val queries = pending.mapNotNull { item ->
-            val reason = item.optString("reason")
-            when {
-                reason.startsWith("research_task:") -> reason.removePrefix("research_task:").trim()
-                reason.startsWith("capability_gap:") -> reason.removePrefix("capability_gap:").trim()
-                reason.startsWith("unknown_term:") -> reason.removePrefix("unknown_term:").trim()
-                else -> null
-            }
-        }.filter { it.length >= 2 }.distinct().take(3)
-        for (query in queries) {
-            val response = runCatching { JSONObject(WebSearch.search(root, query)) }
-                .getOrElse { JSONObject().put("error", "Поиск недоступен") }
-            val results = response.optJSONArray("results") ?: org.json.JSONArray()
-            val summary = if (response.has("error")) response.optString("error") else buildString {
-                for (i in 0 until minOf(results.length(), 7)) {
-                    val item = results.optJSONObject(i) ?: continue
-                    append(item.optString("title")).append("\n")
-                    append(item.optString("snippet")).append("\n")
-                    append(item.optString("url")).append("\n\n")
-                }
-            }.take(10000)
-            val eventId = "research-" + System.currentTimeMillis() + "-" + query.hashCode()
-            FileManager.appendEvent(root, JSONObject()
-                .put("id", eventId).put("ts", System.currentTimeMillis())
-                .put("type", "web_research_result").put("source", "google_search")
-                .put("query", query).put("text", summary).put("result_count", results.length())
-                .put("privacy", "public_web"))
-            if (results.length() > 0) {
-                val factsFile = runCatching { JSONObject(FileManager.read(root, "memory/L1_facts.json")) }
-                    .getOrDefault(JSONObject().put("facts", org.json.JSONArray()))
-                val facts = factsFile.optJSONArray("facts") ?: org.json.JSONArray()
-                for (i in 0 until minOf(results.length(), 7)) {
-                    val item = results.optJSONObject(i) ?: continue
-                    val title = item.optString("title").trim()
-                    val snippet = item.optString("snippet").trim()
-                    if (title.isBlank() || snippet.length < 20) continue
-                    val factText = (title + ": " + snippet).take(400)
-                    val exists = (0 until facts.length()).any { facts.optJSONObject(it)?.optString("text") == factText }
-                    if (!exists && facts.length() < 500) facts.put(JSONObject()
-                        .put("id", eventId + "-" + i).put("text", factText)
-                        .put("category", "web_research").put("confidence", 0.65)
-                        .put("explicit", false).put("sensitivity", "public")
-                        .put("source_url", item.optString("url"))
-                        .put("source_event_ids", org.json.JSONArray().put(eventId))
-                        .put("origin", "google_search").put("created_at", System.currentTimeMillis()))
-                }
-                factsFile.put("facts", facts).put("updated_at", System.currentTimeMillis())
-                FileManager.write(root, "memory/L1_facts.json", factsFile.toString(2))
-            }
-        }
-    }
-
+    /**
+     * Decides only whether a cognition cycle is worth starting at all.
+     *
+     * The interval and the pressure threshold deliberately live nowhere here: every worker
+     * wake enqueues `drive_check`, and [EmotionEngine.initiativeGate] inside [Thinker]
+     * decides alone whether she writes, thinks or stays silent.
+     */
     private fun shouldRunRemoteCognition(context: Context, reason: String): Boolean {
-        val root = context.filesDir
-        val now = System.currentTimeMillis()
         val notificationEvent = reason.contains("phone_notification") && !reason.contains("removed")
         val explicitSelfTask = reason.contains("research_task") || reason.contains("capability_gap")
         val driveCheckEvent = reason.contains("drive_check")
 
-        if (!driveCheckEvent) {
-            val drift = EmotionEngine.drift(root)
-            val interval = drift.optDouble("drive_check_interval_min", 45.0)
-            var claimed = false
-            FileManager.updateL4State(root) { latest ->
-                if (LifeScheduler.driveCheckDue(now, latest.optLong("last_drive_check", 0L), interval)) {
-                    latest.put("last_drive_check", now)
-                    claimed = true
-                }
-            }
-            if (claimed && EmotionEngine.pressure(root) >= drift.optDouble("initiative_threshold", 40.0)) {
-                LifeScheduler.enqueueEvent(context, "drive_check")
-            }
-        }
-
         if (!driveCheckEvent && !notificationEvent && !explicitSelfTask) return false
-
-        val config = try { JSONObject(SecretStore.readRuntimeConfig(root)) } catch (_: Exception) { return false }
-        val models = config.optJSONArray("models") ?: return false
-        val task = if (driveCheckEvent) Task.WARMTH else if (explicitSelfTask) Task.TOOLS else Task.REASON
-        return FreeModelRouter.orderedIndices(
-            root, models, config.optInt("current", 0), task
-        ).isNotEmpty()
+        return Route.hasKey(context.filesDir)
     }
 }

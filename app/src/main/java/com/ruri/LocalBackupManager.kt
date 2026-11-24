@@ -177,7 +177,6 @@ object LocalBackupManager {
         require(file.length() <= MAX_ENTRY_BYTES) { "Backup file too large: $relative" }
         val bytes = when (relative) {
             "core/config.json" -> SecretStore.configForBackup(file.readText(Charsets.UTF_8)).toByteArray(Charsets.UTF_8)
-            "core/search.json" -> SecretStore.searchConfigForBackup(file.readText(Charsets.UTF_8)).toByteArray(Charsets.UTF_8)
             else -> file.readBytes()
         }
         output[relative] = bytes
@@ -227,7 +226,6 @@ object LocalBackupManager {
             val sanitized = content.mapValues { (path, bytes) ->
                 when (path) {
                     "core/config.json" -> SecretStore.configForBackup(bytes.toString(Charsets.UTF_8)).toByteArray(Charsets.UTF_8)
-                    "core/search.json" -> SecretStore.searchConfigForBackup(bytes.toString(Charsets.UTF_8)).toByteArray(Charsets.UTF_8)
                     else -> bytes
                 }
             }

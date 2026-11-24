@@ -24,16 +24,6 @@ object Thinker {
         return recent.joinToString("\n")
     }
 
-    /** Shelf contributes names only; full text is read on demand via read_shelf. */
-    internal fun shelfNamesBlock(names: List<String>, limit: Int = 8): String {
-        val text = StringBuilder()
-        for (i in 0 until minOf(names.size, limit)) {
-            val name = names[i]
-            if (name.isNotBlank()) text.append("- ").append(name).append(" (полный текст читай через read_shelf)\n")
-        }
-        return text.toString()
-    }
-
     /**
      * Records a durable wake reason and hands execution to WorkManager.
      * Repeated reasons are coalesced in the queue; every underlying event stays in L0.
@@ -100,10 +90,21 @@ object Thinker {
             initiative = true
         }
 
-        if (originalReason.contains("drive_check") && !initiative) {
-            state.put("last_thought", now)
-            persistStatePreservingTurnInFlight(root, state, baselineState)
-            return
+        // A wake with no real event does not mean she must speak. Two emotional gates apply:
+        // an initiative lets her write to the CHAT; a softer thought gate only lets her write
+        // a DIARY entry. Neither is a timer — both scale with boredom and longing. A wake
+        // caused by a real event (a notification, a Commander message) still produces a
+        // thought without the softer gate, because something actually happened.
+        val routineWake = originalReason.contains("проверка_состояния") ||
+            originalReason.contains("drive_check")
+        if (routineWake && !initiative) {
+            val lastThoughtTurn = state.optLong("last_thought_turn", 0L)
+            if (!EmotionEngine.thoughtGate(root, now, lastThoughtTurn)) {
+                state.put("last_thought", now)
+                persistStatePreservingTurnInFlight(root, state, baselineState)
+                return
+            }
+            reason = "мысль_по_эмоциям"
         }
 
         appendEvent(root, "wake", JSONObject()
@@ -123,24 +124,21 @@ object Thinker {
         }
 
         val prompt = buildPrompt(ctx, root, state, reason, initiative)
-        val current = config.optInt("current", 0)
-        val task = if (initiative) Task.WARMTH else Task.REASON
-        val adult = RouteSelector.isAdultTopic(RouteSelector.latestCommanderText(root)) || RouteSelector.nsfwWindow(root)
-        val order = RouteSelector.orderedIndices(root, models, current, task, adult = adult)
+        // One route only: index 0 or nothing.
+        val order: List<Int> = if (models.length() > 0) listOf(0) else emptyList()
         if (order.isEmpty()) {
             state.put("last_thought", now)
             persistStatePreservingTurnInFlight(root, state, baselineState)
             return
         }
         var reply: String? = null
-        var successfulIndex = -1
         var successfulRouteId = ""
         var followupRequests = 0
         for (index in order) {
             val model = models.optJSONObject(index) ?: continue
-            // All cognition routes must carry the full memory context.
+            // The single route must carry the full memory context.
             if (model.optString("api_key").isBlank()) continue
-            val routeId = model.optString("id").ifBlank { model.optString("name", "route_$index") }
+            val routeId = model.optString("id").ifBlank { Route.ID }
             val requestNext: (JSONArray) -> String? = { nextMessages ->
                 if (followupRequests >= 8) {
                     appendEvent(root, "model_request_budget_exhausted", JSONObject()
@@ -148,7 +146,7 @@ object Thinker {
                     null
                 } else {
                     followupRequests++
-                    ChatEngine.requestToolFollowup(model, nextMessages, root, routeId, task)
+                    ChatEngine.requestToolFollowup(model, nextMessages, root, routeId, Task.CHAT)
                 }
             }
             runCatching { RouteMeta.recordAttempt(root, routeId) }
@@ -157,7 +155,7 @@ object Thinker {
                 .put(JSONObject().put("role", "user").put("content",
                     if (initiative) "Напиши сообщение Командиру обычной прозой." else "Напиши внутреннюю мысль для дневника обычной прозой."))
             var requestFailureClassified = false
-            val initial = requestModel(model, messages, root, routeId, task) { requestFailureClassified = true }
+            val initial = requestModel(model, messages, root, routeId) { requestFailureClassified = true }
             reply = if (initial.isNullOrBlank()) null else ToolLoop.unwrapDiaryReply(root, initial, messages) { next ->
                 requestNext(next)
             }
@@ -172,7 +170,7 @@ object Thinker {
                     appendEvent(root, "thought_lost", JSONObject()
                         .put("route", routeId)
                         .put("reason", "truly_empty_after_retry"))
-                    runCatching { RouteMeta.recordFailure(root, routeId, "other", task) }
+                    runCatching { RouteMeta.recordFailure(root, routeId, "other") }
                     continue
                 }
             }
@@ -184,7 +182,7 @@ object Thinker {
             }
             if (!reply.isNullOrBlank() && initiative &&
                 RouteSelector.looksLikeRefusalOrDisclaimer(reply)) {
-                runCatching { RouteMeta.recordFailure(root, routeId, "refusal", task) }
+                runCatching { RouteMeta.recordFailure(root, routeId, "refusal") }
                 if (RouteSelector.isAdultTopic(prompt)) {
                     FileManager.appendEvent(root, JSONObject()
                         .put("type", "nsfw_refusal")
@@ -199,12 +197,11 @@ object Thinker {
                 continue
             }
             if (!reply.isNullOrBlank()) {
-                runCatching { RouteMeta.recordSuccess(root, routeId, task) }
-                successfulIndex = index
+                runCatching { RouteMeta.recordSuccess(root, routeId) }
                 successfulRouteId = routeId
                 break
             }
-            if (!requestFailureClassified) runCatching { RouteMeta.recordFailure(root, routeId, "other", task) }
+            if (!requestFailureClassified) runCatching { RouteMeta.recordFailure(root, routeId, "other") }
             appendEvent(root, "model_error", JSONObject().put("model", model.optString("name", "unknown")))
         }
 
@@ -212,10 +209,6 @@ object Thinker {
             state.put("last_thought", now)
             persistStatePreservingTurnInFlight(root, state, baselineState)
             return
-        }
-        if (successfulIndex >= 0 && successfulIndex != current) {
-            config.put("current", successfulIndex)
-            SecretStore.saveRuntimeConfig(root, config.toString(2))
         }
         val (replyWithoutDecision, decision) = EmotionEngine.parseInitiativeDecision(reply)
         val (cleanedReply, emotionDelta) = EmotionEngine.parseAndStrip(replyWithoutDecision)
@@ -276,6 +269,9 @@ object Thinker {
             state.put("waiting_for_reply", true)
             state.put("initiative_sent_at", now)
             state.put("last_initiative", now)
+        } else {
+            // Record the emotional thought turn so the diary gate can measure its pause.
+            state.put("last_thought_turn", now)
         }
         state.put("last_thought", now)
         state.put("mood", EmotionEngine.moodLabel(EmotionEngine.readValues(root)))
@@ -283,20 +279,6 @@ object Thinker {
         persistStatePreservingTurnInFlight(root, state, baselineState)
         val stillInFlight = readJson(root, "memory/L4_state.json").optBoolean("turn_in_flight", false)
         if (!inFlight && !stillInFlight) Notifier.thought(ctx, safeReply, notificationMessageId)
-    }
-
-    internal fun shelfContextText(root: File, name: String): String {
-        val safe = ShelfWatcher.safeName(name) ?: return ""
-        val file = File(root, "shelf/" + safe)
-        if (!file.isFile) return ""
-        val bytes = runCatching { file.readBytes() }.getOrNull() ?: return ""
-        return if (Vision.mimeOf(bytes) != null) {
-            FileManager.read(root, "shelf/.desc/" + safe + ".txt")
-                .takeIf { it.isNotBlank() }?.take(900)
-                ?: "[изображение без описания: vision недоступен]"
-        } else {
-            FileManager.read(root, "shelf/" + safe).take(900)
-        }
     }
 
     private fun buildPrompt(ctx: Context, root: File, state: JSONObject, reason: String, initiative: Boolean): String {
@@ -328,8 +310,6 @@ object Thinker {
         }.take(3).joinToString(" ") { it.optString("text").take(220) }
         val recallQuery = (reason + " " + recentCommanderContext).take(900)
         val recalledMemories = MemoryRetriever.recall(root, recallQuery, limit = 5)
-        val shelfNames = try { JSONArray(FileManager.list(root, "shelf")) } catch (_: Exception) { JSONArray() }
-        val shelfText = shelfNamesBlock((0 until shelfNames.length()).map { shelfNames.optString(it) })
         // Commander explicitly enabled full notification context for Ruri's cognition.
         // Only authentication credentials are withheld; ordinary personal content remains visible.
         val notificationLines = FileManager.readLastLines(
@@ -355,14 +335,6 @@ object Thinker {
                 else "- $type: " + event.optString("text").take(260)
             }.getOrNull()
         }.take(12).asReversed().joinToString("\n")
-        val researchText = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 1200, maxBytes = 1024 * 1024)
-            .asReversed().mapNotNull { line ->
-                runCatching {
-                    val event = JSONObject(line)
-                    if (event.optString("type") != "web_research_result") null
-                    else "Запрос: " + event.optString("query") + "\\n" + event.optString("text").take(5000)
-                }.getOrNull()
-            }.take(4).asReversed().joinToString("\\n\\n")
         val summary = readJson(root, "memory/L3_summary.json").optString("summary").take(4000)
         val quiet = hoursSince(state.optLong("last_seen_commander"), System.currentTimeMillis())
         val outcomeDigest = OutcomeDigest.build(root)
@@ -393,7 +365,7 @@ object Thinker {
             "ТВОИ ФАКТЫ (L1):\n" + factText + "\n" +
             "ТВОЙ ДНЕВНИК (L2):\n" + diaryText + "\n" +
             "ТВОЯ АВТОБИОГРАФИЯ (L3):\n" + summary + "\n" +
-            "ПОСЛЕДНИЕ СОБЫТИЯ ТВОЕГО ТЕЛА (L0):\n" + (if (initiative) bodyEventText + "\n" + notificationText + "\nМатериалы с полки:\n" + shelfText else bodyEventText + "\nМатериалы с полки (имена):\n" + shelfText) + "\n"
+            "ПОСЛЕДНИЕ СОБЫТИЯ ТВОЕГО ТЕЛА (L0):\n" + (if (initiative) bodyEventText + "\n" + notificationText else bodyEventText) + "\n"
         val prompt = if (initiative) common +
             "\nСейчас ты сама решила написать Командиру после долгой тишины. Выбери форму и объём сообщения по полю length_policy и текущему настроению."
         else common +
@@ -401,7 +373,7 @@ object Thinker {
         return SecretRedactor.redactText(prompt)
     }
 
-    private fun requestModel(model: JSONObject, messages: JSONArray, root: File, routeId: String, task: Task, onClassifiedFailure: () -> Unit): String? {
+    private fun requestModel(model: JSONObject, messages: JSONArray, root: File, routeId: String, onClassifiedFailure: () -> Unit): String? {
         var connection: HttpURLConnection? = null
         return try {
             val baseUrl = model.optString("base_url").trimEnd('/')
@@ -432,7 +404,7 @@ object Thinker {
                 val errorTokens = errorUsage?.optLong("total_tokens", -1L)?.takeIf { it >= 0L }
                     ?: ((errorUsage?.optLong("prompt_tokens", 0L) ?: 0L) + (errorUsage?.optLong("completion_tokens", 0L) ?: 0L))
                 if (errorTokens > 0) RouteMeta.addTokens(root, routeId, errorTokens)
-                RouteMeta.recordFailure(root, routeId, RouteSelector.classify(code, null, text), task)
+                RouteMeta.recordFailure(root, routeId, RouteSelector.classify(code, null, text))
                 onClassifiedFailure()
                 return null
             }
@@ -443,7 +415,7 @@ object Thinker {
             if (tokens > 0) RouteMeta.addTokens(root, routeId, tokens)
             response.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
         } catch (e: Exception) {
-            RouteMeta.recordFailure(root, routeId, RouteSelector.classify(null, e), task)
+            RouteMeta.recordFailure(root, routeId, RouteSelector.classify(null, e))
             onClassifiedFailure()
             Log.w("Ruri", "Model request failed", e)
             null
