@@ -632,14 +632,16 @@ class ChatRecallAndQuotaTest {
                     .put("no_voice_yet"))
                 .toString(2))
             FileManager.init(dir)
-            val model = JSONObject(FileManager.read(dir, "memory/self_model.json"))
+            val raw = FileManager.read(dir, "memory/self_model.json")
+            val model = JSONObject(raw)
             val capabilities = model.optJSONArray("known_capabilities")?.toString().orEmpty()
             val limitations = model.optJSONArray("limitations")?.toString().orEmpty()
-            assertFalse("shelf capability must be gone", capabilities.contains("shelf"))
-            assertFalse("vision limitation must be gone", limitations.contains("vision"))
-            assertTrue("real limitations stay", limitations.contains("no_voice_yet"))
-            assertTrue("chat missing from " + capabilities, capabilities.contains("chat"))
-            assertTrue("initiative missing from " + capabilities, capabilities.contains("initiative"))
+            val dump = raw.replace(Regex("\\s+"), " ").take(400)
+            assertFalse("shelf capability must be gone: " + dump, capabilities.contains("shelf"))
+            assertFalse("vision limitation must be gone: " + dump, limitations.contains("vision"))
+            assertTrue("real limitations stay: " + dump, limitations.contains("no_voice_yet"))
+            assertTrue("chat missing: " + dump, capabilities.contains("chat"))
+            assertTrue("initiative missing: " + dump, capabilities.contains("initiative"))
         } finally { dir.deleteRecursively() }
     }
 }
