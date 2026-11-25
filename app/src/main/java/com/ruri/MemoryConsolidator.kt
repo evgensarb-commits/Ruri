@@ -413,28 +413,28 @@ object MemoryConsolidator {
             builder.append("Кто я: ").append(identity)
             val designation = character.optString("designation")
             if (designation.isNotBlank()) builder.append(" (").append(designation).append(")")
-            builder.append(". Искусственная личность, живущая на телефоне Командира.
-")
+            builder.append(". Искусственная личность, живущая на телефоне Командира.").append("\n")
         }
         val capabilities = selfModel.optJSONArray("known_capabilities")
         if (capabilities != null && capabilities.length() > 0) {
-            builder.append("Что умею: ")
-                .append((0 until capabilities.length()).mapNotNull { capabilities.optString(it).takeIf(String::isNotBlank) }
-                    .joinToString(", "))
-                .append(".
-")
+            val names = (0 until capabilities.length())
+                .mapNotNull { index -> capabilities.optString(index).takeIf { it.isNotBlank() } }
+            if (names.isNotEmpty()) {
+                builder.append("Что умею: ").append(names.joinToString(", ")).append(".").append("\n")
+            }
         }
         val byCategory = LinkedHashMap<String, MutableList<String>>()
         for (index in 0 until facts.length()) {
             val fact = facts.optJSONObject(index) ?: continue
-            val text = SecretRedactor.redactText(fact.optString("text")).replace(Regex("\\s+"), " ").trim()
+            val text = SecretRedactor.redactText(fact.optString("text"))
+                .replace(Regex("\\s+"), " ").trim()
             if (text.length < 5 || text.contains(SecretRedactor.PLACEHOLDER)) continue
             val category = fact.optString("category").ifBlank { "общее" }
             byCategory.getOrPut(category) { ArrayList() }.add(text.take(300))
         }
         for ((category, values) in byCategory) {
-            builder.append("\n").append(category).append(":\n")
-            values.forEach { builder.append("- ").append(it).append("\n") }
+            builder.append("\n").append(category).append(":").append("\n")
+            values.forEach { value -> builder.append("- ").append(value).append("\n") }
         }
         return builder.toString().trim().take(9000)
             .ifBlank { "Автобиография ещё не собрана: фактов недостаточно." }
