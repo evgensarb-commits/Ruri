@@ -93,8 +93,10 @@ class RuriLifeWorker(
         return try {
             FileManager.init(root)
             NetState.refresh(appContext)
-            // No artificial event is queued here: the emotional gates in Thinker are evaluated
-            // on every wake, and a wake with no real event is reported as a routine check.
+            // Every wake is an opportunity for her to feel something, but the decision to
+            // write is taken by the emotional gates inside Thinker — never by this timer.
+            // Without this marker a routine wake would never reach cognition at all.
+            EventQueue.enqueue(root, "drive_check")
             val pending = EventQueue.snapshot(root)
             val reason = if (pending.isEmpty()) {
                 "проверка_состояния"
@@ -203,9 +205,9 @@ class RuriLifeWorker(
     /**
      * Decides only whether a cognition cycle is worth starting at all.
      *
-     * The interval and the pressure threshold deliberately live nowhere here: every worker
-     * wake enqueues `drive_check`, and [EmotionEngine.initiativeGate] inside [Thinker]
-     * decides alone whether she writes, thinks or stays silent.
+     * No interval and no pressure threshold live here: every worker wake enqueues
+     * `drive_check`, and [EmotionEngine.initiativeGate] / [EmotionEngine.thoughtGate]
+     * inside [Thinker] decide alone whether she writes, thinks or stays silent.
      */
     private fun shouldRunRemoteCognition(context: Context, reason: String): Boolean {
         val notificationEvent = reason.contains("phone_notification") && !reason.contains("removed")

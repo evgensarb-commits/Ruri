@@ -468,4 +468,102 @@ class RemovedModulesGoneTest {
         assertTrue(emotion.contains("initiativeGate"))
         assertTrue(emotion.contains("pressure"))
     }
+
+/**
+ * Autonomy cadence: opportunities come from every wake, decisions come from emotions,
+ * and a locked screen must never stop her.
+ */
+class AutonomyCadenceTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-cadence").toFile().also {
+        FileManager.init(it)
+        EmotionEngine.ensure(it)
+    }
+
+    @Test fun everyWorkerWakeOffersAnEmotionalOpportunity() {
+        // Without this marker a routine wake never reaches the gates, so she would only
+        // ever think when a notification happened to arrive.
+        val scheduler = RepoSources.text("app/src/main/java/com/ruri/LifeScheduler.kt")
+        assertTrue(scheduler.contains("EventQueue.enqueue(root, \"drive_check\")"))
+    }
+
+    @Test fun routineWakeIsSeparatedFromRealEvents() {
+        val thinker = RepoSources.text("app/src/main/java/com/ruri/Thinker.kt")
+        // A real event must be able to produce a thought without the softer gate.
+        for (marker in listOf("phone_notification", "commander_message", "research_task")) {
+            assertTrue("real event marker missing: $marker", thinker.contains(marker))
+        }
+        assertTrue(thinker.contains("val routineWake = !hasRealEvent"))
+        assertTrue(thinker.contains("EmotionEngine.thoughtGate"))
+    }
+
+    @Test fun diaryThoughtNeedsLessPressureThanInitiative() {
+        val dir = root()
+        try {
+            val drift = EmotionEngine.drift(dir)
+            val initiativeThreshold = drift.optDouble("initiative_threshold", 30.0)
+            val thoughtThreshold = drift.optDouble("thought_threshold", 18.0)
+            assertTrue(
+                "a diary thought must be cheaper than contacting the Commander",
+                thoughtThreshold < initiativeThreshold
+            )
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun higherPressureShortensBothPauses() {
+        val drift = JSONObject()
+            .put("initiative_cooldown_min", 10.0)
+            .put("thought_cooldown_min", 12.0)
+        val low = 20.0
+        val high = 95.0
+        val initiativeLow = EmotionEngine.initiativeCooldownMs(drift, low, 30.0)
+        val initiativeHigh = EmotionEngine.initiativeCooldownMs(drift, high, 30.0)
+        val thoughtLow = EmotionEngine.thoughtCooldownMs(drift, low, 18.0)
+        val thoughtHigh = EmotionEngine.thoughtCooldownMs(drift, high, 18.0)
+        assertTrue("initiative pause must shrink", initiativeHigh < initiativeLow)
+        assertTrue("thought pause must shrink", thoughtHigh < thoughtLow)
+        // Neither pause may be a fixed interval: at full pressure it nearly disappears.
+        assertTrue(initiativeHigh < initiativeLow * 0.25)
+        assertTrue(thoughtHigh < thoughtLow * 0.25)
+    }
+
+    @Test fun thoughtGateStaysClosedBelowItsThreshold() {
+        val dir = root()
+        try {
+            EmotionEngine.applyDelta(dir, JSONObject()
+                .put("boredom", -100.0).put("longing", -100.0), "test")
+            // No pressure at all: she stays silent and spends nothing.
+            assertFalse(EmotionEngine.thoughtGate(dir, System.currentTimeMillis(), 0L))
+        } finally { dir.deleteRecursively() }
+    }
+}
+
+class BackgroundLifetimeTest {
+    @Test fun retriesAreScheduledThroughWorkManagerNotOnlyTheHandler() {
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        // WorkManager survives a locked screen; a handler callback does not.
+        assertTrue(activity.contains("LifeScheduler.scheduleCommanderReplyRetry"))
+        val scheduler = RepoSources.text("app/src/main/java/com/ruri/LifeScheduler.kt")
+        assertTrue(scheduler.contains("fun scheduleCommanderReplyRetry"))
+        // The worker must run even when nothing is on screen.
+        assertTrue(scheduler.contains("PeriodicWorkRequestBuilder"))
+    }
+
+    @Test fun batteryExemptionIsExposedToTheCommander() {
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        assertTrue(activity.contains("fun isIgnoringBatteryOptimizations("))
+        assertTrue(activity.contains("fun requestIgnoreBatteryOptimizations("))
+        val manifest = RepoSources.text("app/src/main/AndroidManifest.xml")
+        assertTrue(manifest.contains("REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"))
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        assertTrue(html.contains("batteryAllow"))
+    }
+
+    @Test fun foregroundServiceKeepsHerPresent() {
+        val service = RepoSources.text("app/src/main/java/com/ruri/RuriService.kt")
+        assertTrue(service.contains("startForeground"))
+        assertTrue(service.contains("START_STICKY"))
+        val manifest = RepoSources.text("app/src/main/AndroidManifest.xml")
+        assertTrue(manifest.contains("android:stopWithTask=\"false\""))
+    }
+}
 }
