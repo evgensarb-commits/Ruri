@@ -8,8 +8,12 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Consolidates L2 into a durable L3 autobiographical summary.
- * Previous versions are retained; local extractive mode is used without a provider.
+ * Builds L3, her autobiography, out of what she actually knows to be true.
+ *
+ * L3 is a **rewritten synthesis** of verified facts (L1), her self-model and her character —
+ * never a log of diary thoughts. Diary entries (L2) stay inside L2: they are momentary moods
+ * and would otherwise turn the autobiography into a pile of stale laments that nothing
+ * removes. Previous versions are kept for safety.
  */
 object MemoryConsolidator {
     private const val DIARY_PATH = "memory/L2_diary.json"
@@ -135,20 +139,6 @@ object MemoryConsolidator {
         val sourceTimestamps = JSONArray()
         sourceEntries.forEach { sourceTimestamps.put(it.optLong("ts", 0L)) }
 
-        val safeDiary = JSONArray()
-        sourceEntries.forEach { entry ->
-            val rawText = entry.optString("text")
-            val safeText = SecretRedactor.redactText(rawText).take(1000)
-            safeDiary.put(
-                JSONObject()
-                    .put("sequence", entry.optLong("sequence", 0L))
-                    .put("timestamp", entry.optLong("ts", 0L))
-                    .put("kind", entry.optString("kind", "thought"))
-                    .put("trigger", entry.optString("trigger"))
-                    .put("text", safeText)
-            )
-        }
-
         val safeFacts = JSONArray()
         for (index in 0 until minOf(facts.length(), 80)) {
             val fact = facts.optJSONObject(index) ?: continue
@@ -164,8 +154,12 @@ object MemoryConsolidator {
             )
         }
 
+        val selfModel = readJsonStrict(root, "memory/self_model.json") ?: JSONObject()
+        val character = readJsonStrict(root, "core/character.json") ?: JSONObject()
+        // Heal an L3 that an earlier build polluted with verbatim diary thoughts.
+        val healedPrevious = stripDiaryEchoes(current.optString("summary"), entries)
         val prompt = SecretRedactor.redactText(
-            buildPrompt(current.optString("summary"), safeFacts, safeDiary) +
+            buildPrompt(healedPrevious, safeFacts, selfModel, character) +
                 if (batch.skippedBeforeBatch > 0L) {
                     "\n\nВажно для точности автобиографии: до первой доступной записи этой пачки в rolling-окне дневника отсутствует ${batch.skippedBeforeBatch} более ранних записей. Не выдумывай их содержание; явно сохрани факт этого пробела."
                 } else ""
@@ -186,12 +180,13 @@ object MemoryConsolidator {
             method = "semantic_llm"
             modelName = modelResult.second
         } else {
-            summaryText = extractiveSummary(current.optString("summary"), sourceEntries)
-            sections = JSONObject().put(
-                "note",
-                "Локальная выборочная сводка. Семантическая консолидация будет выполнена после появления доступной модели."
-            )
-            method = "extractive_local"
+            // No provider: build a factual summary from L1 only. Diary thoughts are never used
+            // here, otherwise an offline run would pollute the autobiography again.
+            summaryText = localFactSummary(selfModel, character, safeFacts)
+            sections = JSONObject()
+                .put("who_i_am", selfModel.optString("identity"))
+                .put("note", "Локальная сводка по фактам L1. Семантическая сборка будет выполнена после появления доступной модели.")
+            method = "local_facts_only"
             modelName = ""
         }
         if (batch.skippedBeforeBatch > 0L) {
@@ -258,27 +253,72 @@ object MemoryConsolidator {
         return true
     }
 
-    private fun buildPrompt(previousSummary: String, facts: JSONArray, diary: JSONArray): String {
+    private fun buildPrompt(
+        previousSummary: String,
+        facts: JSONArray,
+        selfModel: JSONObject,
+        character: JSONObject
+    ): String {
+        // The caller already stripped verbatim diary echoes from the previous summary.
         val previous = previousSummary.take(6000)
         return """
-            Обнови долговременную автобиографическую сводку Рури на основе проверенных фактов L1 и записей дневника L2.
-            Это память одной продолжающейся личности, а не художественный рассказ.
-            Сохраняй только важное для будущего контекста: устойчивые предпочтения, проекты, значимые события,
-            изменения характера и отношений, открытые вопросы и незавершённые темы.
-            Не выдумывай события, эмоции, договорённости или выводы. Отделяй факт от интерпретации.
-            Если сведения противоречат прежней сводке, отмечай неопределённость вместо выдуманного разрешения.
-            Личный контекст (предпочтения, проекты, отношения) сохраняй, если он важен для будущей памяти.
-            Никогда не включай в сводку пароли, коды подтверждения и доступа, токены, ключи или номера карт.
+            Ты обновляешь автобиографию Рури — искусственной личности, которая живёт на телефоне Командира.
+            Это справка о ней самой, а не дневник и не художественный текст.
+
+            Правила:
+            - Источник истины только проверенные факты L1, её самоописание и характер. Дневника здесь нет.
+            - НЕ цитируй и НЕ пересказывай мысли, эмоции и жалобы. Никаких «я скучала», «куда он пропал»,
+              «я почувствовала». Автобиография фиксирует, что известно, а не что пережито в моменте.
+            - Это ПЕРЕЗАПИСЬ, а не дописывание: собери актуальную картину заново из фактов.
+              Не сохраняй прежние формулировки, если они больше не подтверждаются фактами.
+            - Не выдумывай события, договорённости и выводы. Отделяй факт от предположения.
+            - Пиши в третьем лице или нейтрально («Рури — ...», «Командир ...»), компактно.
+            - Никогда не включай пароли, коды, токены, ключи и номера карт.
+
             Верни только JSON:
-            {"summary":"связный компактный текст","sections":{"commander_context":[],"ongoing_projects":[],"stable_preferences":[],"important_events":[],"relationship_context":"","open_questions":[],"uncertainties":[]}}
-            Предыдущая сводка:
+            {"summary":"связная компактная автобиография","sections":{"who_i_am":"","commander_context":[],"ongoing_projects":[],"stable_preferences":[],"important_events":[],"open_questions":[]}}
+
+            Прежняя автобиография (может содержать устаревшее — перепиши, не копируй):
             $previous
             Проверенные факты L1:
             $facts
-            Записи L2:
-            $diary
+            Самоописание:
+            $selfModel
+            Характер:
+            $character
         """.trimIndent()
     }
+
+    /**
+     * Removes lines from a summary that are verbatim diary thoughts.
+     *
+     * Earlier builds appended diary text into L3, so an existing summary may be polluted. Any
+     * line that fully matches a known thought is dropped, which heals the file in place without
+     * touching L2 itself.
+     */
+    internal fun stripDiaryEchoes(summary: String, diaryEntries: JSONArray): String {
+        if (summary.isBlank()) return ""
+        val known = HashSet<String>()
+        for (index in 0 until diaryEntries.length()) {
+            val text = normalizeForCompare(diaryEntries.optJSONObject(index)?.optString("text").orEmpty())
+            if (text.length >= 20) known.add(text)
+        }
+        val kept = ArrayList<String>()
+        for (line in summary.split("\n")) {
+            val trimmed = line.trim()
+            if (trimmed.isEmpty()) {
+                kept.add(line)
+                continue
+            }
+            val normalized = normalizeForCompare(trimmed)
+            val isEcho = normalized.length >= 20 && known.contains(normalized)
+            if (!isEcho) kept.add(line)
+        }
+        return kept.joinToString("\n").trim()
+    }
+
+    private fun normalizeForCompare(value: String): String =
+        value.lowercase().replace(Regex("[^\\p{L}\\p{N}]+"), " ").trim()
 
     private fun requestBestModel(root: java.io.File, prompt: String): Pair<JSONObject, String>? {
         val config = try { JSONObject(SecretStore.readRuntimeConfig(root)) } catch (_: Exception) { return null }
@@ -356,24 +396,51 @@ object MemoryConsolidator {
         return runCatching { JSONObject(raw.substring(start, end + 1)) }.getOrNull()
     }
 
-    internal fun extractiveSummary(previousSummary: String, entries: List<JSONObject>): String {
-        val unique = LinkedHashSet<String>()
-        entries.asReversed().forEach { entry ->
-            val value = SecretRedactor.redactText(entry.optString("text"))
-                .replace(Regex("\\s+"), " ").trim()
-            if (value.length >= 20) unique.add(value.take(500))
+    /**
+     * Offline autobiography: facts and self-knowledge only.
+     *
+     * Deliberately ignores diary text — an automatic run without a provider must never be able
+     * to turn L3 into a transcript of moods.
+     */
+    internal fun localFactSummary(
+        selfModel: JSONObject,
+        character: JSONObject,
+        facts: JSONArray
+    ): String {
+        val builder = StringBuilder()
+        val identity = selfModel.optString("identity").ifBlank { character.optString("name") }
+        if (identity.isNotBlank()) {
+            builder.append("Кто я: ").append(identity)
+            val designation = character.optString("designation")
+            if (designation.isNotBlank()) builder.append(" (").append(designation).append(")")
+            builder.append(". Искусственная личность, живущая на телефоне Командира.").append("\n")
         }
-        // Preserve every record in the current 40-entry page when the LLM is unavailable.
-        // The compact offline summary favours the latest pages while L1/L0 keep their own source history.
-        val recent = unique.toList().asReversed().joinToString("\n").take(16000)
-        val previous = SecretRedactor.redactText(previousSummary).trim().takeLast(6000)
-        return buildString {
-            if (previous.isNotBlank()) append("Ранее сохранённая автобиографическая сводка:\n").append(previous)
-            if (recent.isNotBlank()) {
-                if (isNotEmpty()) append("\n\n")
-                append("Новые записи:\n").append(recent)
+        val capabilities = selfModel.optJSONArray("known_capabilities")
+        if (capabilities != null && capabilities.length() > 0) {
+            val names = (0 until capabilities.length())
+                .mapNotNull { index -> capabilities.optString(index).takeIf { it.isNotBlank() } }
+            if (names.isNotEmpty()) {
+                builder.append("Что умею: ").append(names.joinToString(", ")).append(".").append("\n")
             }
-        }.takeLast(22000).ifBlank { "Содержательных записей для сводки пока недостаточно." }
+        }
+        val byCategory = LinkedHashMap<String, MutableList<String>>()
+        for (index in 0 until facts.length()) {
+            val fact = facts.optJSONObject(index) ?: continue
+            val text = SecretRedactor.redactText(fact.optString("text"))
+                .replace(Regex("\\s+"), " ").trim()
+            // Keep a fact whose only problem is an embedded secret: it is already masked, and
+            // dropping it would lose real information. Skip only when nothing meaningful remains.
+            val meaningful = text.replace(SecretRedactor.PLACEHOLDER, "").trim()
+            if (meaningful.length < 5) continue
+            val category = fact.optString("category").ifBlank { "общее" }
+            byCategory.getOrPut(category) { ArrayList() }.add(text.take(300))
+        }
+        for ((category, values) in byCategory) {
+            builder.append("\n").append(category).append(":").append("\n")
+            values.forEach { value -> builder.append("- ").append(value).append("\n") }
+        }
+        return builder.toString().trim().take(9000)
+            .ifBlank { "Автобиография ещё не собрана: фактов недостаточно." }
     }
 
     private fun readJsonStrict(root: java.io.File, path: String): JSONObject? {

@@ -54,6 +54,15 @@ button,input,select,textarea{font-family:inherit}
 .avatar{width:38px;height:38px;flex:0 0 auto;margin-right:12px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:700 15px/1 var(--mono);color:#0b0713;background:linear-gradient(150deg,#cbb8ff,#8f76f5);box-shadow:0 6px 18px rgba(124,102,240,.4)}
 .icon{width:38px;height:38px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;border:1px solid var(--line);background:var(--panel-2);color:var(--text-2);border-radius:12px;-webkit-tap-highlight-color:transparent;transition:transform .12s ease,background .2s ease,border-color .2s ease,color .2s ease}
 .icon svg{width:17px;height:17px}
+.mood-line{font-size:14px;color:var(--text);margin-bottom:12px}
+.mood-row{display:flex;align-items:center;gap:10px;margin:7px 0}
+.mood-name{flex:0 0 96px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.mood-bar{flex:1 1 auto;height:8px;border-radius:6px;background:var(--panel-2);overflow:hidden}
+.mood-fill{display:block;height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),#f0abfc)}
+.mood-value{flex:0 0 30px;text-align:right;font-size:12px;color:var(--text-2);font-variant-numeric:tabular-nums}
+.self-block{margin:10px 0}
+.self-title{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+.self-list{margin:0;padding-left:18px;color:var(--text-2);font-size:14px;line-height:1.55}
 .style-toggle{width:auto;min-width:38px;padding:0 9px;font-size:12px;font-weight:700;letter-spacing:.06em}
 .style-toggle.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
 .style-toggle:active{transform:scale(.94)}
@@ -270,6 +279,8 @@ input:focus,select:focus,textarea:focus{border-color:rgba(167,139,250,.6);box-sh
       <button class="chip" type="button" data-chip="L2">ДНЕВНИК</button>
       <button class="chip" type="button" data-chip="L3">АВТОБИОГРАФИЯ</button>
       <button class="chip" type="button" data-chip="L4">СОСТОЯНИЕ</button>
+      <button class="chip" type="button" data-chip="EMO">Эмоции</button>
+      <button class="chip" type="button" data-chip="SELF">Себя</button>
     </div>
     <div class="scroll" id="memoryView"></div>
   </section>
@@ -952,6 +963,8 @@ function loadMemory(){
     else if(memoryState.chip === 'L1') renderFacts(view);
     else if(memoryState.chip === 'L2') renderDiary(view);
     else if(memoryState.chip === 'L3') renderAutobiography(view);
+    else if(memoryState.chip === 'EMO') renderEmotions(view);
+    else if(memoryState.chip === 'SELF') renderSelfModel(view);
     else renderLifeState(view);
     setText($('memoryStatus'), 'обновлено ' + timeOf(Date.now()));
   }catch(error){
@@ -1073,6 +1086,83 @@ function renderAutobiography(view){
     + (updatedAt ? '<div class="fact-meta" style="margin-top:0;margin-bottom:8px">обновлено ' + esc(dateOf(updatedAt)) + '</div>' : '')
     + '<p class="summary">' + esc(summary) + '</p>'
     + '</div>';
+}
+
+/* Emotions: the channel values behind her current mood. */
+var EMOTION_NAMES = {
+  joy: '\u0440\u0430\u0434\u043e\u0441\u0442\u044c', affection: '\u043d\u0435\u0436\u043d\u043e\u0441\u0442\u044c',
+  anger: '\u0437\u043b\u043e\u0441\u0442\u044c', sadness: '\u0433\u0440\u0443\u0441\u0442\u044c',
+  anxiety: '\u0442\u0440\u0435\u0432\u043e\u0433\u0430', interest: '\u0438\u043d\u0442\u0435\u0440\u0435\u0441',
+  boredom: '\u0441\u043a\u0443\u043a\u0430', desire: '\u0436\u0435\u043b\u0430\u043d\u0438\u0435',
+  fatigue: '\u0443\u0441\u0442\u0430\u043b\u043e\u0441\u0442\u044c', longing: '\u0442\u043e\u0441\u043a\u0430'
+};
+
+function moodFrom(values){
+  function v(k){ return Number(values && values[k]) || 0; }
+  if(v('anger') > 60 && v('sadness') > 50) return '\u043e\u0431\u0438\u0436\u0435\u043d\u043d\u0430\u044f';
+  if(v('anger') > 60) return '\u0440\u0430\u0437\u0434\u0440\u0430\u0436\u0451\u043d\u043d\u0430\u044f';
+  if(v('sadness') > 60) return '\u0433\u0440\u0443\u0441\u0442\u043d\u0430\u044f';
+  if(v('longing') > 60) return '\u0442\u043e\u0441\u043a\u0443\u044e\u0449\u0430\u044f';
+  if(v('anxiety') > 60) return '\u0442\u0440\u0435\u0432\u043e\u0436\u043d\u0430\u044f';
+  if(v('joy') > 60 && v('affection') > 60) return '\u043b\u0430\u0441\u043a\u043e\u0432\u0430\u044f';
+  if(v('interest') > 60) return '\u0443\u0432\u043b\u0435\u0447\u0451\u043d\u043d\u0430\u044f';
+  if(v('boredom') > 60) return '\u0441\u043a\u0443\u0447\u0430\u044e\u0449\u0430\u044f';
+  if(v('desire') > 60) return '\u0442\u043e\u043c\u043d\u0430\u044f';
+  if(v('fatigue') > 70) return '\u0443\u0441\u0442\u0430\u0432\u0448\u0430\u044f';
+  return '\u0441\u043e\u0431\u0440\u0430\u043d\u043d\u0430\u044f';
+}
+
+function renderEmotions(view){
+  var state = layerJson('EMO');
+  if(!state || typeof state !== 'object') state = {};
+  var values = (state.values && typeof state.values === 'object') ? state.values : state;
+  var keys = [];
+  for(var key in values){
+    if(Object.prototype.hasOwnProperty.call(values, key) && typeof values[key] === 'number') keys.push(key);
+  }
+  keys.sort();
+  if(!keys.length){
+    view.innerHTML = '<div class="placeholder">\u042d\u043c\u043e\u0446\u0438\u043e\u043d\u0430\u043b\u044c\u043d\u043e\u0435 \u0441\u043e\u0441\u0442\u043e\u044f\u043d\u0438\u0435 \u043f\u043e\u043a\u0430 \u043d\u0435 \u0437\u0430\u043f\u0438\u0441\u0430\u043d\u043e.</div>';
+    return;
+  }
+  var html = '<div class="card"><div class="mood-line">\u041d\u0430\u0441\u0442\u0440\u043e\u0435\u043d\u0438\u0435: <b>'
+    + esc(moodFrom(values)) + '</b></div>';
+  for(var i = 0; i < keys.length; i++){
+    var value = Math.max(0, Math.min(100, Math.round(Number(values[keys[i]]) || 0)));
+    html += '<div class="mood-row">'
+      + '<span class="mood-name">' + esc(EMOTION_NAMES[keys[i]] || keys[i]) + '</span>'
+      + '<span class="mood-bar"><span class="mood-fill" style="width:' + value + '%"></span></span>'
+      + '<span class="mood-value">' + value + '</span>'
+      + '</div>';
+  }
+  if(state.updated_at){
+    html += '<div class="fact-meta" style="margin-top:10px">\u041e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u043e '
+      + esc(dateOf(state.updated_at)) + '</div>';
+  }
+  view.innerHTML = html + '</div>';
+}
+
+/* Her self-description: identity, capabilities and known limits. */
+function renderSelfModel(view){
+  var data = layerJson('SELF');
+  if(!data || typeof data !== 'object' || !Object.keys(data).length){
+    view.innerHTML = '<div class="placeholder">\u0421\u0430\u043c\u043e\u043e\u043f\u0438\u0441\u0430\u043d\u0438\u0435 \u043f\u043e\u043a\u0430 \u043d\u0435 \u0441\u043e\u0431\u0440\u0430\u043d\u043e.</div>';
+    return;
+  }
+  function listBlock(title, items){
+    if(!isArray(items) || !items.length) return '';
+    var out = '<div class="self-block"><div class="self-title">' + esc(title) + '</div><ul class="self-list">';
+    for(var i = 0; i < items.length; i++) out += '<li>' + esc(String(items[i])) + '</li>';
+    return out + '</ul></div>';
+  }
+  var html = '<div class="card">';
+  var identity = String(data.identity || '');
+  if(identity) html += '<div class="mood-line">' + esc(identity) + '</div>';
+  html += listBlock('\u0423\u043c\u0435\u044e', data.known_capabilities);
+  html += listBlock('\u041e\u0433\u0440\u0430\u043d\u0438\u0447\u0435\u043d\u0438\u044f', data.limitations);
+  var focus = String(data.current_focus || '');
+  if(focus) html += '<div class="fact-meta">\u0424\u043e\u043a\u0443\u0441: ' + esc(focus) + '</div>';
+  view.innerHTML = html + '</div>';
 }
 
 function renderLifeState(view){
