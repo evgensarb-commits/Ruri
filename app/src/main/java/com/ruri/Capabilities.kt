@@ -49,6 +49,14 @@ object Capabilities {
         return canonical
     }
 
+    /**
+     * Writes the authoritative self-description.
+     *
+     * `known_capabilities` starts with the machine tokens this build really has, then adds the
+     * human-readable body lines. Anything describing an organ that was removed (shelf, vision,
+     * web search, file reading) is dropped: she must not tell the Commander about a body she
+     * does not have. This is self-description, never episodic memory.
+     */
     fun ensure(root: File) {
         val config = configFor(root)
         val senses = config.optJSONArray("senses") ?: JSONArray()
@@ -56,28 +64,48 @@ object Capabilities {
         val limits = config.optJSONArray("limits") ?: JSONArray()
 
         val known = JSONArray()
-        for (i in 0 until senses.length()) known.put(compact(senses.optString(i)))
-        for (i in 0 until actions.length()) known.put(compact(actions.optString(i)))
+        retainedCapabilities.forEach { known.put(it) }
+        fun addCapability(value: String) {
+            val compacted = compact(value)
+            if (compacted.isBlank() || describesRetiredOrgan(value)) return
+            for (i in 0 until known.length()) if (known.optString(i) == compacted) return
+            known.put(compacted)
+        }
+        for (i in 0 until senses.length()) addCapability(senses.optString(i))
+        for (i in 0 until actions.length()) addCapability(actions.optString(i))
 
         val selfModel = runCatching { JSONObject(FileManager.read(root, "memory/self_model.json")) }
             .getOrElse { JSONObject() }
         selfModel.put("known_capabilities", known)
         val mergedLimitations = JSONArray()
         val seenLimitations = HashSet<String>()
-        for (i in 0 until limits.length()) {
-            val limitation = limits.optString(i).trim()
-            if (limitation.isNotBlank() && seenLimitations.add(limitation)) mergedLimitations.put(limitation)
+        fun addLimitation(value: String) {
+            val trimmed = value.trim()
+            if (trimmed.isBlank()) return
+            if (trimmed.startsWith("vision_probe:")) return
+            if (describesRetiredOrgan(trimmed)) return
+            if (seenLimitations.add(trimmed)) mergedLimitations.put(trimmed)
         }
-        // Retired capability probes must not survive in the self-model.
+        for (i in 0 until limits.length()) addLimitation(limits.optString(i))
         val previousLimitations = selfModel.optJSONArray("limitations") ?: JSONArray()
-        for (i in 0 until previousLimitations.length()) {
-            val limitation = previousLimitations.optString(i).trim()
-            if (limitation.startsWith("vision_probe:")) continue
-            if (limitation.isNotBlank() && seenLimitations.add(limitation)) mergedLimitations.put(limitation)
-        }
+        for (i in 0 until previousLimitations.length()) addLimitation(previousLimitations.optString(i))
         selfModel.put("limitations", mergedLimitations)
         selfModel.put("updated_at", System.currentTimeMillis())
         FileManager.write(root, "memory/self_model.json", selfModel.toString(2))
+    }
+
+    /** Machine names of the faculties this build has. */
+    private val retainedCapabilities = listOf("chat", "local_memory", "diary", "emotions", "initiative")
+
+    /** Markers of organs removed by the down-grade. */
+    private val retiredOrganMarkers = listOf(
+        "shelf", "полк", "vision", "изображен", "картинк", "фото", "скриншот",
+        "web_search", "поиск", "search", "read_url", "url", "файл", "документ"
+    )
+
+    internal fun describesRetiredOrgan(value: String): Boolean {
+        val lowered = value.lowercase()
+        return retiredOrganMarkers.any(lowered::contains)
     }
 
     fun bodySection(root: File): String {
