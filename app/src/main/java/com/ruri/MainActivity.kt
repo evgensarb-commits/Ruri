@@ -300,6 +300,16 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun queueStatus(): String = CommanderReplyQueue.status(filesDir).toString()
 
+        /** Chat style switch: false = messenger conversation, true = scene role-play. */
+        @JavascriptInterface
+        fun roleplayMode(): Boolean = ChatStyle.roleplayEnabled(filesDir)
+
+        @JavascriptInterface
+        fun setRoleplayMode(enabled: Boolean): String {
+            return try { ChatStyle.setRoleplay(filesDir, enabled); "OK" }
+            catch (e: Exception) { "ERROR: " + (e.message ?: "style switch failed") }
+        }
+
         @JavascriptInterface
         fun retryPending(): String {
             return try {

@@ -265,6 +265,8 @@ object ChatEngine {
             "${state.optString("current_focus", selfModel.optString("current_focus"))}. " +
             "Активные цели: ${goals.optJSONArray("active") ?: JSONArray()}. " +
             "Незавершённые задачи: ${state.optJSONArray("active_tasks") ?: JSONArray()}. " +
+            ChatStyle.architectureSection() +
+            ChatStyle.chatDirective(root) +
             "Ты общаешься с Командиром в чате приложения. Отвечай обычной прозой, без JSON и без служебных блоков. " +
             "Ниже — ТВОЯ ДОЛГОСРОЧНАЯ ПАМЯТЬ. Это не контекст одного диалога; ты помнишь между сессиями.\n" +
             "ТВОЯ АВТОБИОГРАФИЯ (L3):\n$summary\n" +
