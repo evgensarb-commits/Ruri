@@ -45,7 +45,7 @@ class RouteCanonicalConfigTest {
             val model = models.getJSONObject(0)
             assertEquals(Route.ID, model.optString("id"))
             assertEquals(Route.BASE_URL, model.optString("base_url"))
-            assertEquals(Route.MODEL, model.optString("model"))
+            assertEquals(Route.MODEL_FREE, model.optString("model"))
             assertTrue(model.optBoolean("needs_vpn"))
         } finally { dir.deleteRecursively() }
     }
@@ -76,7 +76,7 @@ class RouteCanonicalConfigTest {
         val withKey = Route.canonical("sk-test-key-123")
         assertEquals("sk-test-key-123", withKey.optString("api_key"))
         assertEquals(Route.BASE_URL, withKey.optString("base_url"))
-        assertEquals(Route.MODEL, withKey.optString("model"))
+        assertEquals(Route.MODEL_FREE, withKey.optString("model"))
         assertTrue(withKey.optBoolean("needs_vpn"))
         assertEquals("", Route.canonical().optString("api_key"))
     }
@@ -380,7 +380,7 @@ class DiagnosticsVerdictTest {
             val snapshot = JSONObject(Diagnostics.snapshot(dir, online = true, vpn = true))
             val route = snapshot.getJSONObject("route")
             assertEquals(Route.ID, route.optString("id"))
-            assertEquals(Route.MODEL, route.optString("model"))
+            assertEquals(Route.MODEL_FREE, route.optString("model"))
             assertEquals(Route.BASE_URL, route.optString("base_url"))
             assertTrue(route.optBoolean("needs_vpn"))
             assertTrue(snapshot.has("queue"))
