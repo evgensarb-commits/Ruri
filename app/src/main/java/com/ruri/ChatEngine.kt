@@ -127,7 +127,7 @@ object ChatEngine {
         }
         val safeMessages = providerMessagesWithFullMemory(messages) ?: messages
 
-        val result = Transport.chat(safeMessages, apiKey)
+        val result = Transport.chat(safeMessages, apiKey, 400)
         when (result) {
             is Transport.Result.Success -> {
                 recordDiagnostic(root, "ok", result.httpStatus, "", result.stages)
@@ -221,17 +221,17 @@ object ChatEngine {
         val summary = readJson(root, "memory/L3_summary.json").optString("summary").take(4000)
 
         val factContext = StringBuilder()
-        for (index in maxOf(0, facts.length() - 16) until facts.length()) {
+        for (index in maxOf(0, facts.length() - 8) until facts.length()) {
             val fact = facts.optJSONObject(index) ?: continue
             val value = fact.optString("text").trim()
-            if (value.isNotBlank()) factContext.append("- ").append(value.take(300)).append("\n")
+            if (value.isNotBlank()) factContext.append("- ").append(value.take(200)).append("\n")
         }
         val diaryContext = StringBuilder()
-        for (index in maxOf(0, diary.length() - 6) until diary.length()) {
+        for (index in maxOf(0, diary.length() - 3) until diary.length()) {
             val entry = diary.optJSONObject(index) ?: continue
             if (entry.optString("id").isNotBlank() && Tombstone.isDeleted(root, entry.optString("id"))) continue
             val value = entry.optString("text").trim()
-            if (value.isNotBlank()) diaryContext.append("- ").append(value.take(500)).append("\n")
+            if (value.isNotBlank()) diaryContext.append("- ").append(value.take(300)).append("\n")
         }
         val bodyEventContext = FileManager.readLastLines(
             root, "memory/L0_raw.jsonl", maxLines = 1200, maxBytes = 1024 * 1024
@@ -242,7 +242,7 @@ object ChatEngine {
                 if (type.isBlank() || type == "message" || type == "tool_call" || type == "tool_result") null
                 else "- $type: " + (event.optString("text").ifBlank { event.optString("reason") }).take(260)
             }.getOrNull()
-        }.take(12).asReversed().joinToString("\n")
+        }.take(6).asReversed().joinToString("\n")
         val bannedPhrases = character.optJSONArray("banned_phrases") ?: JSONArray()
 
         val system = "Имя: ${character.optString("name")}; обозначение: ${character.optString("designation")}. " +
@@ -291,7 +291,7 @@ object ChatEngine {
             throw IllegalStateException("Сообщение Командира не найдено в L0; оно осталось в очереди")
         }
         val history = (if (targetPosition >= 0) newestFirstHistory.drop(targetPosition) else newestFirstHistory)
-            .take(8).reversed()
+            .take(6).reversed()
         if (history.isEmpty() || history.last().optString("role") != "user") {
             throw IllegalStateException("Не найдено последнее сообщение командира")
         }
@@ -300,7 +300,7 @@ object ChatEngine {
         // Associative recall is local and free: it runs on the device and only adds context.
         // Capabilities promises it, so the chat prompt must actually carry it.
         val recalled = runCatching {
-            MemoryRetriever.recall(root, history.last().optString("content"), limit = 6)
+            MemoryRetriever.recall(root, history.last().optString("content"), limit = 3)
         }.getOrDefault("")
         if (recalled.isNotBlank()) {
             messages.put(JSONObject().put("role", "system").put("content",
@@ -561,7 +561,7 @@ object ChatEngine {
             ?: throw ModelRequestFailure(
                 "Не удалось собрать полный контекст памяти для продолжения ответа", 0L, "config"
             )
-        return when (val result = Transport.chat(safeMessages, apiKey)) {
+        return when (val result = Transport.chat(safeMessages, apiKey, 400)) {
             is Transport.Result.Success -> {
                 if (root != null) runCatching { RouteMeta.recordSuccess(root, routeId, task) }
                 result.reply
