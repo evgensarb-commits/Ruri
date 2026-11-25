@@ -645,4 +645,100 @@ class ChatRecallAndQuotaTest {
         } finally { dir.deleteRecursively() }
     }
 }
+
+/**
+ * Two speech modes share one personality. The default is a messenger conversation; scenes
+ * are opt-in. The diary is never a scene.
+ */
+class ChatStyleModesTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-style").toFile().also {
+        FileManager.init(it)
+    }
+
+    @Test fun defaultModeForbidsSceneProse() {
+        val dir = root()
+        try {
+            assertFalse("roleplay must be off by default", ChatStyle.roleplayEnabled(dir))
+            val directive = ChatStyle.chatDirective(dir)
+            // The normal mode has to be explicit about what it forbids, otherwise a
+            // narrative finetune immediately falls back to scene prose.
+            assertTrue(directive.contains("РЕЖИМ ЧАТА"))
+            assertTrue(directive.contains("звёздочки"))
+            assertTrue(directive.contains("ремарки"))
+            assertTrue(directive.contains("1–4"))
+            assertFalse("normal mode must not invite narration",
+                directive.contains("РОЛЕВОЙ"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun roleplayModeAllowsScenesAndSwitchesBack() {
+        val dir = root()
+        try {
+            ChatStyle.setRoleplay(dir, true)
+            assertTrue(ChatStyle.roleplayEnabled(dir))
+            val directive = ChatStyle.chatDirective(dir)
+            assertTrue(directive.contains("РОЛЕВОЙ ИГРЫ"))
+            assertTrue(directive.contains("звёздочки"))
+            // It must still keep her in character rather than becoming a narrator.
+            assertTrue(directive.contains("остаёшься собой"))
+
+            ChatStyle.setRoleplay(dir, false)
+            assertFalse(ChatStyle.roleplayEnabled(dir))
+            assertTrue(ChatStyle.chatDirective(dir).contains("РЕЖИМ ЧАТА"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun architectureAwarenessIsStatedWithoutDismissiveDisclaimers() {
+        val section = ChatStyle.architectureSection()
+        // She must know she is artificial and live on the phone.
+        assertTrue(section.contains("искусственная личность"))
+        assertTrue(section.contains("телефоне"))
+        // вЂ¦but she must not answer with the corporate "I am just an AI" dodge.
+        assertTrue(section.contains("не отнекиваешься"))
+        assertTrue(section.contains("не преуменьшаешь"))
+    }
+
+    @Test fun roleplayDetectorCatchesScenePosts() {
+        assertTrue(ChatStyle.looksLikeRoleplayPost("*улыбается и отводит взгляд*"))
+        assertTrue(ChatStyle.looksLikeRoleplayPost("Я подошла к окну (задумчиво вздохнув)."))
+        assertTrue(ChatStyle.looksLikeRoleplayPost("Командир, я ждала тебя весь вечер."))
+        assertFalse(ChatStyle.looksLikeRoleplayPost("Я как раз легла и листаю телефон."))
+        assertFalse(ChatStyle.looksLikeRoleplayPost("Скучно. Придумай что-нибудь."))
+        assertFalse(ChatStyle.looksLikeRoleplayPost(""))
+    }
+
+    @Test fun diaryPromptNeverCarriesTheChatStyleDirective() {
+        val thinker = RepoSources.text("app/src/main/java/com/ruri/Thinker.kt")
+        // The style directive is applied only to the initiative branch (a chat message).
+        val initiativeBranch = thinker.substringAfter("val prompt = if (initiative) common +")
+            .substringBefore("else common +")
+        assertTrue("initiative (chat) must use the style directive",
+            initiativeBranch.contains("ChatStyle.chatDirective"))
+        val diaryBranch = thinker.substringAfter("else common +").substringBefore("return SecretRedactor")
+        assertFalse("the diary must not inherit role-play style",
+            diaryBranch.contains("ChatStyle.chatDirective"))
+        // The diary still gets its own strict inner-voice instruction.
+        assertTrue(diaryBranch.contains("внутренн") || diaryBranch.contains("мысл"))
+    }
+
+    @Test fun bothPromptsKnowWhoSheIs() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        val thinker = RepoSources.text("app/src/main/java/com/ruri/Thinker.kt")
+        assertTrue("chat prompt must state her architecture",
+            engine.contains("ChatStyle.architectureSection"))
+        assertTrue("autonomous chat message must state it too",
+            thinker.contains("ChatStyle.architectureSection"))
+    }
+
+    @Test fun styleSwitchIsReachableFromTheUi() {
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        assertTrue(activity.contains("fun roleplayMode("))
+        assertTrue(activity.contains("fun setRoleplayMode("))
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        assertTrue(html.contains("styleToggle"))
+        assertTrue(html.contains("setRoleplayMode"))
+        // The switch is a control in the chat header, next to the refresh button.
+        assertTrue(html.contains("style-toggle"))
+    }
+}
 }

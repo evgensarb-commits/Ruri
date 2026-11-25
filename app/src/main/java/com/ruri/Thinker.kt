@@ -229,7 +229,7 @@ object Thinker {
             return
         }
 
-        if (!initiative && safeReply.isNotBlank() && looksLikeRoleplayPost(safeReply)) {
+        if (!initiative && safeReply.isNotBlank() && ChatStyle.looksLikeRoleplayPost(safeReply)) {
             val fixModel = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
                 .firstOrNull { it.optString("id") == successfulRouteId } ?: models.optJSONObject(0)
             val fixMessages = JSONArray()
@@ -237,7 +237,7 @@ object Thinker {
                 .put(JSONObject().put("role", "user").put("content", safeReply))
             val fixedRaw = if (fixModel != null) runCatching { requestModel(fixModel, fixMessages, root, successfulRouteId, 220) {} }.getOrNull() else null
             val fixed = fixedRaw?.let { SecretRedactor.redactText(ToolLoop.stripActions(it).first.trim()) }.orEmpty()
-            if (fixed.isNotBlank() && !looksLikeRoleplayPost(fixed)) {
+            if (fixed.isNotBlank() && !ChatStyle.looksLikeRoleplayPost(fixed)) {
                 safeReply = fixed
             } else {
                 appendEvent(root, "thought_lost", JSONObject().put("reason", "roleplay_style").put("route", successfulRouteId))
@@ -389,7 +389,8 @@ object Thinker {
             "ТВОЯ АВТОБИОГРАФИЯ (L3):\n" + summary + "\n" +
             "ПОСЛЕДНИЕ СОБЫТИЯ ТВОЕГО ТЕЛА (L0):\n" + (if (initiative) bodyEventText + "\n" + notificationText else bodyEventText) + "\n"
         val prompt = if (initiative) common +
-            "\nСейчас ты сама решила написать Командиру после долгой тишины. Выбери форму и объём сообщения по полю length_policy и текущему настроению."
+            "\n" + ChatStyle.architectureSection() + ChatStyle.chatDirective(root) +
+            "Сейчас ты сама решила написать Командиру после долгой тишины. Выбери форму и объём сообщения по полю length_policy и текущему настроению."
         else common +
             "\nРЕЖИМ ДНЕВНИКА. Пиши ТОЛЬКО внутреннюю мысль от первого лица: 1-3 предложения, без сцен, без действий в звёздочках, без ремарок в скобках, без реплик и без обращений к Командиру как к собеседнику сцены. Мысль - это то, что ты чувствуешь и думаешь про себя, а не то, что ты делаешь или говоришь ему.\n" +
             "Примеры правильного тона:\n" +
@@ -398,10 +399,6 @@ object Thinker {
             "Не выдумывай события. Не пиши ролевой пост."
         return SecretRedactor.redactText(prompt)
     }
-
-    private fun looksLikeRoleplayPost(t: String): Boolean =
-        t.contains('*') || Regex("\\([а-яёa-z ]{3,}\\)").containsMatchIn(t) ||
-            Regex("(?i)^\\s*(командир|эй|слушай)[,!,.]").containsMatchIn(t)
 
     private fun requestModel(model: JSONObject, messages: JSONArray, root: File, routeId: String, maxTokens: Int = 400, onClassifiedFailure: () -> Unit): String? {
         var connection: HttpURLConnection? = null
