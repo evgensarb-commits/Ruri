@@ -375,7 +375,7 @@ object ChatEngine {
             val entry = JSONObject()
                 .put("timestamp", System.currentTimeMillis())
                 .put("provider", Route.DISPLAY_NAME)
-                .put("model", root?.let { Route.model(it) } ?: Route.MODEL_FREE)
+                .put("model", Route.model(root))
                 .put("base_url", Route.BASE_URL)
                 .put("vpn", NetState.vpn)
                 .put("online", NetState.online)
@@ -558,12 +558,16 @@ object ChatEngine {
         task: Task? = null
     ): String? {
         val apiKey = model.optString("api_key").ifBlank { root?.let { Route.apiKey(it) }.orEmpty() }
+        // The provider id comes from the config when a root is available; otherwise fall back
+        // to the id the caller already loaded into the model object.
+        val modelId = root?.let { Route.model(it) }
+            ?: model.optString("model").ifBlank { Route.MODEL_FREE }
         val safeMessages = providerMessagesWithFullMemory(leanFollowup(messages))
             ?: providerMessagesWithFullMemory(messages)
             ?: throw ModelRequestFailure(
                 "Не удалось собрать полный контекст памяти для продолжения ответа", 0L, "config"
             )
-        return when (val result = Transport.chat(safeMessages, apiKey, 400, Route.model(root))) {
+        return when (val result = Transport.chat(safeMessages, apiKey, 400, modelId)) {
             is Transport.Result.Success -> {
                 if (root != null) runCatching { RouteMeta.recordSuccess(root, routeId, task) }
                 result.reply
