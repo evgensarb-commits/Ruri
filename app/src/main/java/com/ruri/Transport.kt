@@ -37,7 +37,12 @@ object Transport {
         ) : Result()
     }
 
-    fun chat(messages: JSONArray, apiKey: String, maxTokens: Int = 512): Result {
+    fun chat(
+        messages: JSONArray,
+        apiKey: String,
+        maxTokens: Int = 512,
+        modelId: String = Route.MODEL_FREE
+    ): Result {
         val stages = JSONArray()
         val startedAt = System.nanoTime()
         var connection: HttpURLConnection? = null
@@ -95,7 +100,7 @@ object Transport {
             addStage(stages, "CONNECT", true, elapsed(stageAt), "TCP+TLS установлены")
 
             val body = JSONObject()
-                .put("model", Route.MODEL)
+                .put("model", modelId)
                 .put("messages", messages)
                 .put("max_completion_tokens", maxTokens)
                 .put("temperature", 0.9)
@@ -173,7 +178,7 @@ object Transport {
      * It proves the key is accepted and the provider is reachable right now, without
      * spending completion tokens. The stage list is reused by the diagnostics screen.
      */
-    fun probe(apiKey: String): Result {
+    fun probe(apiKey: String, modelId: String = Route.MODEL_FREE): Result {
         val stages = JSONArray()
         val startedAt = System.nanoTime()
         var connection: HttpURLConnection? = null
@@ -255,7 +260,7 @@ object Transport {
                 // Some gateways do not expose /models. A 404 there says nothing about the
                 // route, so fall back to the cheapest possible completion before judging.
                 if (code == 404) {
-                    val fallback = completionProbe(apiKey, stages, startedAt)
+                    val fallback = completionProbe(apiKey, modelId, stages, startedAt)
                     if (fallback != null) return fallback
                 }
                 return Result.Failure(kind, code, apiMessage(text), stages, elapsed(startedAt))
@@ -275,7 +280,12 @@ object Transport {
      * Returns null when the probe itself could not be attempted, so the caller keeps the
      * original verdict.
      */
-    private fun completionProbe(apiKey: String, stages: JSONArray, startedAt: Long): Result? {
+    private fun completionProbe(
+        apiKey: String,
+        modelId: String,
+        stages: JSONArray,
+        startedAt: Long
+    ): Result? {
         var connection: HttpURLConnection? = null
         return try {
             val endpoint = URL(Route.BASE_URL.trimEnd('/') + "/chat/completions")
@@ -289,7 +299,7 @@ object Transport {
                 setRequestProperty("Authorization", "Bearer $apiKey")
             }
             val body = JSONObject()
-                .put("model", Route.MODEL)
+                .put("model", modelId)
                 .put("messages", JSONArray().put(JSONObject()
                     .put("role", "user").put("content", "ping")))
                 .put("max_tokens", 1)
