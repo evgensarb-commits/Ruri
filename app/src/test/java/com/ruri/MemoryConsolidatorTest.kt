@@ -6,6 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.nio.file.Files
 
 class MemoryConsolidatorTest {
     @Test
@@ -194,5 +195,93 @@ class MemoryConsolidatorTest {
         val healed = MemoryConsolidator.stripDiaryEchoes("Кто я: Рури.", JSONArray())
         assertTrue(healed.contains("Кто я: Рури."))
     }
+}
 
+/**
+ * L3 is facts-driven now, and the Commander can force a rebuild from the interface.
+ */
+class AutobiographyRebuildTest {
+    private val day = 24L * 60L * 60L * 1000L
+
+    @Test fun rebuildIsDueWhenTheFactSetChanged() {
+        val now = 10L * day
+        // Nothing built yet: due regardless of counts.
+        assertTrue(MemoryConsolidator.shouldRebuildFromFacts(5, -1, 0L, now))
+        // Same facts and a recent rebuild: not due.
+        assertFalse(MemoryConsolidator.shouldRebuildFromFacts(5, 5, now - day / 2, now))
+        // A new fact appeared and the cooldown passed: due.
+        assertTrue(MemoryConsolidator.shouldRebuildFromFacts(6, 5, now - day * 2, now))
+    }
+
+    @Test fun dailyCooldownBlocksRebuildEvenWhenFactsChanged() {
+        val now = 10L * day
+        // Facts changed one hour ago: wait for the cooldown instead of burning tokens.
+        assertFalse(MemoryConsolidator.shouldRebuildFromFacts(9, 5, now - 60L * 60L * 1000L, now))
+    }
+
+    @Test fun unchangedFactsDoNotTriggerARebuildAfterTheCooldown() {
+        val now = 10L * day
+        assertFalse(MemoryConsolidator.shouldRebuildFromFacts(7, 7, now - day * 3, now))
+    }
+
+    @Test fun manualRebuildIsExposedToTheInterface() {
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        assertTrue(activity.contains("fun rebuildAutobiography("))
+        assertTrue(activity.contains("MemoryConsolidator.rebuildNow"))
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        assertTrue(html.contains("rebuildAutobio"))
+        assertTrue(html.contains("rebuildAutobiography"))
+    }
+
+    @Test fun forcedRebuildWritesAFactualSummaryWithoutDiaryText() {
+        val dir = Files.createTempDirectory("ruri-l3-rebuild").toFile()
+        try {
+            FileManager.init(dir)
+            // A diary thought that must never reach L3.
+            FileManager.write(dir, "memory/L2_diary.json", JSONObject()
+                .put("entries", JSONArray().put(JSONObject()
+                    .put("id", "d1").put("kind", "thought")
+                    .put("text", "Я скучала и не понимала, куда он пропал на весь вечер.")
+                    .put("ts", 1L)))
+                .toString(2))
+            FileManager.write(dir, "memory/L1_facts.json", JSONObject()
+                .put("facts", JSONArray()
+                    .put(JSONObject().put("id", "f1")
+                        .put("text", "Командир разрабатывает проект RU-R1").put("category", "проекты")))
+                .toString(2))
+            // A polluted summary from an earlier build.
+            FileManager.write(dir, "memory/L3_summary.json", JSONObject()
+                .put("summary", "Я скучала и не понимала, куда он пропал на весь вечер.\nКомандир любит чай.")
+                .put("last_compressed", 0L)
+                .toString(2))
+
+            // No provider is reachable in unit tests, so the local facts path is used.
+            MemoryConsolidator.rebuildNowRoot(dir)
+
+            val summary = JSONObject(FileManager.read(dir, "memory/L3_summary.json"))
+            val text = summary.optString("summary")
+            assertTrue("facts must be present", text.contains("RU-R1"))
+            assertFalse("diary prose must not survive", text.contains("скучала"))
+            assertEquals("local_facts_only", summary.optString("method"))
+            assertTrue(summary.optBoolean("rebuilt_manually"))
+            assertEquals(1, summary.optInt("source_fact_count"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun forcedRebuildSurvivesAMalformedDiary() {
+        val dir = Files.createTempDirectory("ruri-l3-broken-diary").toFile()
+        try {
+            FileManager.init(dir)
+            // A broken L2 must not block the autobiography: it is not an input any more.
+            FileManager.write(dir, "memory/L2_diary.json", "{broken")
+            FileManager.write(dir, "memory/L1_facts.json", JSONObject()
+                .put("facts", JSONArray().put(JSONObject()
+                    .put("id", "f1").put("text", "Командир любит чай с молоком").put("category", "предпочтения")))
+                .toString(2))
+            val changed = MemoryConsolidator.rebuildNowRoot(dir)
+            assertTrue(changed)
+            val text = JSONObject(FileManager.read(dir, "memory/L3_summary.json")).optString("summary")
+            assertTrue(text.contains("Командир любит чай с молоком"))
+        } finally { dir.deleteRecursively() }
+    }
 }

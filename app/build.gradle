@@ -41,6 +41,14 @@ android {
     kotlinOptions {
         jvmTarget = '17'
     }
+    testOptions {
+        unitTests {
+            // Unit tests run on the JVM without an Android device: android.util.Log must
+            // become a no-op instead of throwing, otherwise any code path that logs a
+            // consolidation step fails in CI.
+            returnDefaultValues = true
+        }
+    }
 }
 
 dependencies {
