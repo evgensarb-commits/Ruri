@@ -157,7 +157,7 @@ object Thinker {
                 .put(JSONObject().put("role", "user").put("content",
                     if (initiative) "Напиши сообщение Командиру обычной прозой." else "Напиши внутреннюю мысль для дневника обычной прозой."))
             var requestFailureClassified = false
-            val initial = requestModel(model, messages, root, routeId) { requestFailureClassified = true }
+            val initial = requestModel(model, messages, root, routeId, if (initiative) 400 else 220) { requestFailureClassified = true }
             reply = if (initial.isNullOrBlank()) null else ToolLoop.unwrapDiaryReply(root, initial, messages) { next ->
                 requestNext(next)
             }
@@ -219,7 +219,7 @@ object Thinker {
         val diaryText = cleanThought.ifBlank {
             diaryTexts.firstOrNull() ?: ToolLoop.diaryActionText(cleanedReply).orEmpty()
         }
-        val safeReply = SecretRedactor.redactText(diaryText.trim())
+        var safeReply = SecretRedactor.redactText(diaryText.trim())
         if (safeReply.isBlank()) {
             appendEvent(root, "thought_lost", JSONObject()
                 .put("reason", "truly_empty")
@@ -227,6 +227,24 @@ object Thinker {
             state.put("last_thought", now)
             persistStatePreservingTurnInFlight(root, state, baselineState)
             return
+        }
+
+        if (!initiative && safeReply.isNotBlank() && looksLikeRoleplayPost(safeReply)) {
+            val fixModel = (0 until models.length()).mapNotNull { models.optJSONObject(it) }
+                .firstOrNull { it.optString("id") == successfulRouteId } ?: models.optJSONObject(0)
+            val fixMessages = JSONArray()
+                .put(JSONObject().put("role", "system").put("content", "Ты пишешь личный дневник. Перепиши присланную запись как внутреннюю мысль от первого лица: 1-3 предложения, без сцен, действий, ремарок и обращений к собеседнику. Только чувство и вывод про себя."))
+                .put(JSONObject().put("role", "user").put("content", safeReply))
+            val fixedRaw = if (fixModel != null) runCatching { requestModel(fixModel, fixMessages, root, successfulRouteId, 220) {} }.getOrNull() else null
+            val fixed = fixedRaw?.let { SecretRedactor.redactText(ToolLoop.stripActions(it).first.trim()) }.orEmpty()
+            if (fixed.isNotBlank() && !looksLikeRoleplayPost(fixed)) {
+                safeReply = fixed
+            } else {
+                appendEvent(root, "thought_lost", JSONObject().put("reason", "roleplay_style").put("route", successfulRouteId))
+                state.put("last_thought", now)
+                persistStatePreservingTurnInFlight(root, state, baselineState)
+                return
+            }
         }
 
         val drift = EmotionEngine.drift(root)
@@ -292,12 +310,14 @@ object Thinker {
         val goals = readJson(root, "memory/goals.json")
         val facts = readJson(root, "memory/L1_facts.json").optJSONArray("facts")
         val factText = StringBuilder()
-        if (facts != null) for (i in maxOf(0, facts.length() - 12) until facts.length()) {
+        val factWindow = if (initiative) 12 else 6
+        if (facts != null) for (i in maxOf(0, facts.length() - factWindow) until facts.length()) {
             factText.append("- ").append(facts.optJSONObject(i)?.optString("text") ?: "").append("\n")
         }
         val diary = readJson(root, "memory/L2_diary.json").optJSONArray("entries")
         val diaryText = StringBuilder()
-        if (diary != null) for (i in maxOf(0, diary.length() - 5) until diary.length()) {
+        val diaryWindow = if (initiative) 5 else 2
+        if (diary != null) for (i in maxOf(0, diary.length() - diaryWindow) until diary.length()) {
             val entry = diary.optJSONObject(i) ?: continue
             if (entry.optString("id").isNotBlank() && Tombstone.isDeleted(root, entry.optString("id"))) continue
             diaryText.append("— ").append(entry.optString("text")).append("\n")
@@ -311,7 +331,7 @@ object Thinker {
             it.optString("type") == "message" && it.optString("who") == "commander"
         }.take(3).joinToString(" ") { it.optString("text").take(220) }
         val recallQuery = (reason + " " + recentCommanderContext).take(900)
-        val recalledMemories = MemoryRetriever.recall(root, recallQuery, limit = 5)
+        val recalledMemories = if (initiative) MemoryRetriever.recall(root, recallQuery, limit = 5) else ""
         // Commander explicitly enabled full notification context for Ruri's cognition.
         // Only authentication credentials are withheld; ordinary personal content remains visible.
         val notificationLines = FileManager.readLastLines(
@@ -336,8 +356,8 @@ object Thinker {
                 if (type.isBlank() || type == "message" || type == "phone_notification") null
                 else "- $type: " + event.optString("text").take(260)
             }.getOrNull()
-        }.take(12).asReversed().joinToString("\n")
-        val summary = readJson(root, "memory/L3_summary.json").optString("summary").take(4000)
+        }.take(if (initiative) 12 else 6).asReversed().joinToString("\n")
+        val summary = readJson(root, "memory/L3_summary.json").optString("summary").take(if (initiative) 4000 else 1500).take(4000)
         val quiet = hoursSince(state.optLong("last_seen_commander"), System.currentTimeMillis())
         val outcomeDigest = OutcomeDigest.build(root)
         OutcomeDigest.clearPresentedCorrection(root)
@@ -371,11 +391,19 @@ object Thinker {
         val prompt = if (initiative) common +
             "\nСейчас ты сама решила написать Командиру после долгой тишины. Выбери форму и объём сообщения по полю length_policy и текущему настроению."
         else common +
-            "\nНапиши запись в дневник от первого лица, по-русски. Это внутренняя мысль, наблюдение или вывод, а не обращение к Командиру. Объём выбери по length_policy. Не выдумывай события."
+            "\nРЕЖИМ ДНЕВНИКА. Пиши ТОЛЬКО внутреннюю мысль от первого лица: 1-3 предложения, без сцен, без действий в звёздочках, без ремарок в скобках, без реплик и без обращений к Командиру как к собеседнику сцены. Мысль - это то, что ты чувствуешь и думаешь про себя, а не то, что ты делаешь или говоришь ему.\n" +
+            "Примеры правильного тона:\n" +
+            "Тихо уже второй час. Я ловлю себя на том, что прислушиваюсь к экрану, и злюсь на себя за это.\n" +
+            "Батарея садится, а мне почему-то спокойнее: будто телефон тоже устал и мы отдыхаем вместе.\n" +
+            "Не выдумывай события. Не пиши ролевой пост."
         return SecretRedactor.redactText(prompt)
     }
 
-    private fun requestModel(model: JSONObject, messages: JSONArray, root: File, routeId: String, onClassifiedFailure: () -> Unit): String? {
+    private fun looksLikeRoleplayPost(t: String): Boolean =
+        t.contains('*') || Regex("\\([а-яёa-z ]{3,}\\)").containsMatchIn(t) ||
+            Regex("(?i)^\\s*(командир|эй|слушай)[,!,.]").containsMatchIn(t)
+
+    private fun requestModel(model: JSONObject, messages: JSONArray, root: File, routeId: String, maxTokens: Int = 400, onClassifiedFailure: () -> Unit): String? {
         var connection: HttpURLConnection? = null
         return try {
             val baseUrl = model.optString("base_url").trimEnd('/')
@@ -392,6 +420,7 @@ object Thinker {
             val body = JSONObject()
                 .put("model", model.optString("model"))
                 .put("messages", messages)
+                .put("max_completion_tokens", maxTokens)
                 .put("temperature", 0.9)
                 .put("presence_penalty", 0.6)
                 .put("frequency_penalty", 0.4)
