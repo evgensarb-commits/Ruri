@@ -54,6 +54,8 @@ button,input,select,textarea{font-family:inherit}
 .avatar{width:38px;height:38px;flex:0 0 auto;margin-right:12px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:700 15px/1 var(--mono);color:#0b0713;background:linear-gradient(150deg,#cbb8ff,#8f76f5);box-shadow:0 6px 18px rgba(124,102,240,.4)}
 .icon{width:38px;height:38px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;border:1px solid var(--line);background:var(--panel-2);color:var(--text-2);border-radius:12px;-webkit-tap-highlight-color:transparent;transition:transform .12s ease,background .2s ease,border-color .2s ease,color .2s ease}
 .icon svg{width:17px;height:17px}
+.autobio-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.autobio-head .inline-status{margin:0;flex:1 1 auto}
 .mood-line{font-size:14px;color:var(--text);margin-bottom:12px}
 .mood-row{display:flex;align-items:center;gap:10px;margin:7px 0}
 .mood-name{flex:0 0 96px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
@@ -1077,39 +1079,54 @@ function renderDiary(view){
 function renderAutobiography(view){
   var data = layerJson('L3');
   var summary = typeof data === 'string' ? data : String((data && data.summary) || '');
-  if(!summary.replace(/\s/g, '')){
-    view.innerHTML = '<div class="placeholder">Автобиография пока не написана.</div>';
-    return;
-  }
   var updatedAt = (data && typeof data === 'object') ? (data.updated_at || data.last_compressed) : 0;
-  view.innerHTML = '<div class="card">'
-    + (updatedAt ? '<div class="fact-meta" style="margin-top:0;margin-bottom:8px">обновлено ' + esc(dateOf(updatedAt)) + '</div>' : '')
-    + '<p class="summary">' + esc(summary) + '</p>'
+  var meta = [];
+  if(updatedAt) meta.push('\u041e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u043e ' + dateOf(updatedAt));
+  var method = (data && typeof data === 'object') ? String(data.method || '') : '';
+  if(method === 'local_facts_only') meta.push('\u043b\u043e\u043a\u0430\u043b\u044c\u043d\u043e, \u0431\u0435\u0437 \u043c\u043e\u0434\u0435\u043b\u0438');
+  var factCount = (data && typeof data === 'object') ? Number(data.source_fact_count || 0) : 0;
+  if(factCount) meta.push('\u0444\u0430\u043a\u0442\u043e\u0432 ' + factCount);
+
+  var head = '<div class="autobio-head">'
+    + '<button class="btn mini" id="rebuildAutobio" type="button">\u041f\u0435\u0440\u0435\u0441\u043e\u0431\u0440\u0430\u0442\u044c</button>'
+    + '<div class="inline-status" id="autobioStatus"></div>'
     + '</div>';
+
+  if(!summary.replace(/\s/g, '')){
+    view.innerHTML = head + '<div class="placeholder">\u0410\u0432\u0442\u043e\u0431\u0438\u043e\u0433\u0440\u0430\u0444\u0438\u044f \u0435\u0449\u0451 \u043d\u0435 \u0441\u043e\u0431\u0440\u0430\u043d\u0430. \u041d\u0430\u0436\u043c\u0438 \u00ab\u041f\u0435\u0440\u0435\u0441\u043e\u0431\u0440\u0430\u0442\u044c\u00bb.</div>';
+  }else{
+    view.innerHTML = head + '<div class="card">'
+      + (meta.length ? '<div class="fact-meta" style="margin-top:0;margin-bottom:8px">' + esc(meta.join(' \u00b7 ')) + '</div>' : '')
+      + '<p class="summary">' + esc(summary) + '</p>'
+      + '</div>';
+  }
+  var button = $('rebuildAutobio');
+  if(button) button.addEventListener('click', rebuildAutobiography);
 }
 
-/* Emotions: the channel values behind her current mood. */
-var EMOTION_NAMES = {
-  joy: '\u0440\u0430\u0434\u043e\u0441\u0442\u044c', affection: '\u043d\u0435\u0436\u043d\u043e\u0441\u0442\u044c',
-  anger: '\u0437\u043b\u043e\u0441\u0442\u044c', sadness: '\u0433\u0440\u0443\u0441\u0442\u044c',
-  anxiety: '\u0442\u0440\u0435\u0432\u043e\u0433\u0430', interest: '\u0438\u043d\u0442\u0435\u0440\u0435\u0441',
-  boredom: '\u0441\u043a\u0443\u043a\u0430', desire: '\u0436\u0435\u043b\u0430\u043d\u0438\u0435',
-  fatigue: '\u0443\u0441\u0442\u0430\u043b\u043e\u0441\u0442\u044c', longing: '\u0442\u043e\u0441\u043a\u0430'
-};
-
-function moodFrom(values){
-  function v(k){ return Number(values && values[k]) || 0; }
-  if(v('anger') > 60 && v('sadness') > 50) return '\u043e\u0431\u0438\u0436\u0435\u043d\u043d\u0430\u044f';
-  if(v('anger') > 60) return '\u0440\u0430\u0437\u0434\u0440\u0430\u0436\u0451\u043d\u043d\u0430\u044f';
-  if(v('sadness') > 60) return '\u0433\u0440\u0443\u0441\u0442\u043d\u0430\u044f';
-  if(v('longing') > 60) return '\u0442\u043e\u0441\u043a\u0443\u044e\u0449\u0430\u044f';
-  if(v('anxiety') > 60) return '\u0442\u0440\u0435\u0432\u043e\u0436\u043d\u0430\u044f';
-  if(v('joy') > 60 && v('affection') > 60) return '\u043b\u0430\u0441\u043a\u043e\u0432\u0430\u044f';
-  if(v('interest') > 60) return '\u0443\u0432\u043b\u0435\u0447\u0451\u043d\u043d\u0430\u044f';
-  if(v('boredom') > 60) return '\u0441\u043a\u0443\u0447\u0430\u044e\u0449\u0430\u044f';
-  if(v('desire') > 60) return '\u0442\u043e\u043c\u043d\u0430\u044f';
-  if(v('fatigue') > 70) return '\u0443\u0441\u0442\u0430\u0432\u0448\u0430\u044f';
-  return '\u0441\u043e\u0431\u0440\u0430\u043d\u043d\u0430\u044f';
+function rebuildAutobiography(){
+  var button = $('rebuildAutobio');
+  if(button) button.disabled = true;
+  setStatus('autobioStatus', '\u041f\u0435\u0440\u0435\u0441\u0431\u0438\u0440\u0430\u044e \u043f\u043e \u0444\u0430\u043a\u0442\u0430\u043c\u2026', '');
+  try{
+    var raw = call('rebuildAutobiography', [], 'ERROR: \u043d\u0435\u0442 \u0441\u0432\u044f\u0437\u0438 \u0441 Ruri');
+    if(isErr(raw)){
+      setStatus('autobioStatus', errText(raw), 'bad');
+      if(button) button.disabled = false;
+      return;
+    }
+    var data = parseJson(raw, {});
+    if(!data || data.ok !== true){
+      setStatus('autobioStatus', (data && data.error) ? String(data.error) : '\u041d\u0435 \u043f\u043e\u043b\u0443\u0447\u0438\u043b\u043e\u0441\u044c.', 'bad');
+      if(button) button.disabled = false;
+      return;
+    }
+    renderAutobiography($('memoryView'));
+    setStatus('autobioStatus', '\u0413\u043e\u0442\u043e\u0432\u043e.', 'good');
+  }catch(error){
+    setStatus('autobioStatus', String(error && error.message ? error.message : error), 'bad');
+    if(button) button.disabled = false;
+  }
 }
 
 function renderEmotions(view){

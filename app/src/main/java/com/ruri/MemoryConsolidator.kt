@@ -88,56 +88,56 @@ object MemoryConsolidator {
     }
 
     fun consolidateIfDue(context: Context): Boolean = synchronized(processLock) {
-        consolidateLocked(context)
+        consolidateLocked(context.filesDir, force = false)
     }
 
-    private fun consolidateLocked(context: Context): Boolean {
-        val root = context.filesDir
-        val diary = readJsonStrict(root, DIARY_PATH) ?: return false
-        val entries = diary.optJSONArray("entries") ?: run {
-            preserveInvalidShape(root, DIARY_PATH)
-            return false
-        }
+    /**
+     * Commander pressed «Пересобрать автобиографию»: rebuild immediately, ignoring the daily
+     * cooldown. Facts only — the diary is never input, so this can only produce a clean L3.
+     */
+    fun rebuildNow(context: Context): Boolean = rebuildNowRoot(context.filesDir)
+
+    /** Same rebuild without an Android Context, so it is testable on the JVM. */
+    internal fun rebuildNowRoot(root: java.io.File): Boolean = synchronized(processLock) {
+        consolidateLocked(root, force = true)
+    }
+
+    /**
+     * L3 is now driven by facts, not by the diary.
+     *
+     * A rebuild is due when the set of known facts changed since the last run, or when no
+     * autobiography exists yet. The daily cooldown keeps it from spending tokens on every wake.
+     */
+    internal fun shouldRebuildFromFacts(
+        factCount: Int,
+        previousFactCount: Int,
+        lastRebuiltAt: Long,
+        now: Long
+    ): Boolean {
+        if (lastRebuiltAt > 0L && now - lastRebuiltAt < DAY_MS) return false
+        return lastRebuiltAt == 0L || factCount != previousFactCount
+    }
+
+    private fun consolidateLocked(root: java.io.File, force: Boolean): Boolean {
         val current = readJsonStrict(root, SUMMARY_PATH) ?: return false
         if (!current.has("summary")) {
             preserveInvalidShape(root, SUMMARY_PATH)
             return false
         }
-        // L2 is a rolling window: consume the oldest uncompressed records in bounded pages.
-        val previousCount = current.optLong("last_compressed_entry_count", 0L)
-        val batch = selectEntriesForConsolidation(diary, previousCount, MAX_ENTRIES_PER_CONSOLIDATION)
-        val previousCompressedAt = current.optLong("last_compressed", 0L)
-        val totalEntries = batch.totalEntries
-        val now = System.currentTimeMillis()
-        if (!shouldConsolidateBatch(batch, previousCount, previousCompressedAt, now)) return false
-        val sourceEntries = thoughtEntries(batch.entries)
-        if (sourceEntries.isEmpty()) {
-            // A page containing only spoken mirrors is deliberately not autobiographical input.
-            // Still advance the L3 cursor so legacy said-only pages cannot block later thoughts.
-            val advanced = JSONObject(current.toString())
-                .put("last_compressed_entry_count", batch.lastSequence)
-                .put("total_diary_entries", totalEntries)
-                .put("last_said_page_skipped_at", now)
-                .put("last_said_page_skipped_count", batch.entries.size)
-            FileManager.write(root, SUMMARY_PATH, advanced.toString(2))
-            FileManager.appendEvent(root, JSONObject()
-                .put("type", "memory_consolidated")
-                .put("source", "memory")
-                .put("method", "said_entries_skipped")
-                .put("source_entry_count", 0)
-                .put("source_sequence_from", batch.firstSequence)
-                .put("source_sequence_to", batch.lastSequence)
-                .put("privacy", "local"))
-            return true
-        }
-
         val factsFile = readJsonStrict(root, FACTS_PATH) ?: return false
         val facts = factsFile.optJSONArray("facts") ?: run {
             preserveInvalidShape(root, FACTS_PATH)
             return false
         }
-        val sourceTimestamps = JSONArray()
-        sourceEntries.forEach { sourceTimestamps.put(it.optLong("ts", 0L)) }
+        val now = System.currentTimeMillis()
+        val previousCompressedAt = current.optLong("last_compressed", 0L)
+        if (!force && !shouldRebuildFromFacts(
+                facts.length(),
+                current.optInt("source_fact_count", -1),
+                previousCompressedAt,
+                now
+            )
+        ) return false
 
         val safeFacts = JSONArray()
         for (index in 0 until minOf(facts.length(), 80)) {
@@ -156,13 +156,14 @@ object MemoryConsolidator {
 
         val selfModel = readJsonStrict(root, "memory/self_model.json") ?: JSONObject()
         val character = readJsonStrict(root, "core/character.json") ?: JSONObject()
+        // A malformed diary must never block an autobiography rebuild: it is not an input.
+        val diaryEntries = runCatching {
+            readJsonStrict(root, DIARY_PATH)?.optJSONArray("entries")
+        }.getOrNull() ?: JSONArray()
         // Heal an L3 that an earlier build polluted with verbatim diary thoughts.
-        val healedPrevious = stripDiaryEchoes(current.optString("summary"), entries)
+        val healedPrevious = stripDiaryEchoes(current.optString("summary"), diaryEntries)
         val prompt = SecretRedactor.redactText(
-            buildPrompt(healedPrevious, safeFacts, selfModel, character) +
-                if (batch.skippedBeforeBatch > 0L) {
-                    "\n\nВажно для точности автобиографии: до первой доступной записи этой пачки в rolling-окне дневника отсутствует ${batch.skippedBeforeBatch} более ранних записей. Не выдумывай их содержание; явно сохрани факт этого пробела."
-                } else ""
+            buildPrompt(healedPrevious, safeFacts, selfModel, character)
         )
         val modelResult = requestBestModel(root, prompt)
         val summaryText: String
@@ -189,13 +190,6 @@ object MemoryConsolidator {
             method = "local_facts_only"
             modelName = ""
         }
-        if (batch.skippedBeforeBatch > 0L) {
-            sections.put("unavailable_earlier_diary_entries", batch.skippedBeforeBatch)
-            sections.put(
-                "history_gap_note",
-                "Часть более ранних записей уже вышла из rolling-окна L2 до этой консолидации; их содержимое не восстанавливалось и не выдумывалось."
-            )
-        }
 
         val rawVersions = current.optJSONArray("previous_versions") ?: JSONArray()
         val versions = SecretRedactor.redactEvent(
@@ -206,7 +200,7 @@ object MemoryConsolidator {
             versions.put(
                 JSONObject()
                     .put("saved_at", previousCompressedAt)
-                    .put("entry_count", previousCount)
+                    .put("entry_count", current.optLong("last_compressed_entry_count", 0L))
                     .put("summary", oldSummary)
                     .put("method", current.optString("method", "legacy"))
             )
@@ -220,20 +214,20 @@ object MemoryConsolidator {
         }
 
         val updated = JSONObject()
-            .put("schema_version", 2)
+            .put("schema_version", 3)
             .put("summary", summaryText)
             .put("sections", sections)
             .put("last_compressed", now)
-            .put("last_compressed_entry_count", batch.lastSequence)
-            .put("total_diary_entries", totalEntries)
-            .put("source_sequence_from", batch.firstSequence)
-            .put("source_sequence_to", batch.lastSequence)
-            .put("unavailable_entries_before_batch", batch.skippedBeforeBatch)
-            .put("source_entry_timestamps", sourceTimestamps)
+            .put("source_fact_count", safeFacts.length())
+            .put("total_facts", facts.length())
             .put("source_fact_ids", factIds)
             .put("method", method)
             .put("model", modelName)
             .put("previous_versions", versions)
+            .put("rebuilt_manually", force)
+        // Keep the legacy cursor so an older build sharing this file cannot replay history.
+        updated.put("last_compressed_entry_count", current.optLong("last_compressed_entry_count", 0L))
+        updated.put("total_diary_entries", current.optLong("total_diary_entries", 0L))
         FileManager.write(root, SUMMARY_PATH, updated.toString(2))
         FileManager.appendEvent(
             root,
@@ -242,14 +236,12 @@ object MemoryConsolidator {
                 .put("source", "memory")
                 .put("method", method)
                 .put("model", modelName)
-                .put("source_entry_count", sourceEntries.size)
-                .put("source_sequence_from", batch.firstSequence)
-                .put("source_sequence_to", batch.lastSequence)
-                .put("unavailable_entries_before_batch", batch.skippedBeforeBatch)
                 .put("fact_count", safeFacts.length())
+                .put("source_entry_count", 0)
+                .put("manual", force)
                 .put("privacy", "local")
         )
-        Log.i("Ruri", "L3 memory consolidated using " + method)
+        Log.i("Ruri", "L3 autobiography rebuilt using " + method)
         return true
     }
 

@@ -297,6 +297,24 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun readDiagnosticsLog(): String = Diagnostics.readLog(this@MainActivity)
 
+        /** Rebuild L3 from facts right now, ignoring the daily cooldown. */
+        @JavascriptInterface
+        fun rebuildAutobiography(): String {
+            return try {
+                val changed = MemoryConsolidator.rebuildNow(this@MainActivity)
+                JSONObject()
+                    .put("ok", changed)
+                    .put("summary", runCatching {
+                        JSONObject(FileManager.read(filesDir, "memory/L3_summary.json"))
+                            .optString("summary")
+                    }.getOrDefault(""))
+                    .toString()
+            } catch (e: Exception) {
+                JSONObject().put("ok", false)
+                    .put("error", e.message ?: "rebuild failed").toString()
+            }
+        }
+
         @JavascriptInterface
         fun queueStatus(): String = CommanderReplyQueue.status(filesDir).toString()
 
