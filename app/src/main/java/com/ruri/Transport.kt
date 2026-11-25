@@ -250,15 +250,67 @@ object Transport {
 
             val code = httpStatus ?: 0
             if (code !in 200..299) {
-                return Result.Failure(
-                    RouteSelector.classify(code, null, text), code, apiMessage(text), stages, elapsed(startedAt)
-                )
+                val kind = RouteSelector.classify(code, null, text)
+                // Some gateways do not expose /models. A 404 there says nothing about the
+                // route, so fall back to the cheapest possible completion before judging.
+                if (code == 404) {
+                    val fallback = completionProbe(apiKey, stages, startedAt)
+                    if (fallback != null) return fallback
+                }
+                return Result.Failure(kind, code, apiMessage(text), stages, elapsed(startedAt))
             }
             return Result.Success("", code, stages, elapsed(startedAt))
         } catch (e: Exception) {
             val detail = simple(e)
             addStage(stages, "UNEXPECTED", false, 0L, detail)
             return Result.Failure("network", httpStatus, detail, stages, elapsed(startedAt))
+        } finally {
+            runCatching { connection?.disconnect() }
+        }
+    }
+
+    /**
+     * Cheapest possible authenticated completion, used when `/models` is not exposed.
+     * Returns null when the probe itself could not be attempted, so the caller keeps the
+     * original verdict.
+     */
+    private fun completionProbe(apiKey: String, stages: JSONArray, startedAt: Long): Result? {
+        var connection: HttpURLConnection? = null
+        return try {
+            val endpoint = URL(Route.BASE_URL.trimEnd('/') + "/chat/completions")
+            connection = (endpoint.openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = CONNECT_TIMEOUT_MS
+                readTimeout = READ_TIMEOUT_MS
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty("Authorization", "Bearer $apiKey")
+            }
+            val body = JSONObject()
+                .put("model", Route.MODEL)
+                .put("messages", JSONArray().put(JSONObject()
+                    .put("role", "user").put("content", "ping")))
+                .put("max_tokens", 1)
+            val writeAt = System.nanoTime()
+            connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            addStage(stages, "FALLBACK_WRITE", true, elapsed(writeAt), "проверка через /chat/completions")
+            val code = connection.responseCode
+            addStage(stages, "FALLBACK_HTTP", code in 200..299, 0L, "HTTP $code")
+            val text = runCatching {
+                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            }.getOrDefault("")
+            if (code in 200..299) {
+                Result.Success("", code, stages, elapsed(startedAt))
+            } else {
+                Result.Failure(
+                    RouteSelector.classify(code, null, text), code, apiMessage(text),
+                    stages, elapsed(startedAt)
+                )
+            }
+        } catch (_: Exception) {
+            null
         } finally {
             runCatching { connection?.disconnect() }
         }

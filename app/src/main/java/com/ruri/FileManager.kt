@@ -201,6 +201,11 @@ object FileManager {
         // Shape upgrade only: existing goals and tasks are carried over untouched.
         upgradeGoalShape(root)
 
+        // Her self-description must match the body she actually has. Stale capability lines
+        // (shelf, vision, web search) would make her tell the Commander about organs that
+        // were removed. Only self_model is touched: episodic memory is never rewritten.
+        sanitizeSelfModel(root)
+
         Capabilities.ensure(root)
 
         put(root, "memory/L4_state.json", """
@@ -586,6 +591,61 @@ object FileManager {
             atomicWrite(file, goals.toString(2))
         } catch (_: Exception) {
             // A malformed goal store is left exactly as it is.
+        }
+    }
+
+    /**
+     * Aligns `memory/self_model.json` with the capabilities this build really has.
+     *
+     * Self-description is not episodic memory: if it still lists a shelf, vision or web
+     * search, she would describe a body she does not have. Removed organs are dropped,
+     * everything else in the file is preserved.
+     */
+    private fun sanitizeSelfModel(root: File) {
+        val file = safe(root, "memory/self_model.json") ?: return
+        if (!file.isFile) return
+        try {
+            val model = JSONObject(file.readText(Charsets.UTF_8))
+            val retired = listOf(
+                "shelf", "полк", "vision", "изображен", "картинк", "фото",
+                "web_search", "поиск", "search", "read_url", "url", "файл"
+            )
+            fun isRetired(value: String): Boolean {
+                val lowered = value.lowercase()
+                return retired.any(lowered::contains)
+            }
+
+            var changed = false
+            val capabilities = JSONArray()
+            (model.optJSONArray("known_capabilities") ?: JSONArray()).let { previous ->
+                for (i in 0 until previous.length()) {
+                    val value = previous.optString(i)
+                    if (value.isBlank() || isRetired(value)) { changed = true; continue }
+                    capabilities.put(value)
+                }
+            }
+            val requiredCapabilities = listOf("chat", "local_memory", "diary", "emotions", "initiative")
+            for (capability in requiredCapabilities) {
+                if ((0 until capabilities.length()).none { capabilities.optString(it) == capability }) {
+                    capabilities.put(capability)
+                    changed = true
+                }
+            }
+
+            val limitations = JSONArray()
+            (model.optJSONArray("limitations") ?: JSONArray()).let { previous ->
+                for (i in 0 until previous.length()) {
+                    val value = previous.optString(i)
+                    if (value.isBlank() || isRetired(value)) { changed = true; continue }
+                    limitations.put(value)
+                }
+            }
+
+            model.put("known_capabilities", capabilities).put("limitations", limitations)
+            model.put("updated_at", System.currentTimeMillis())
+            if (changed) atomicWrite(file, model.toString(2))
+        } catch (_: Exception) {
+            // A malformed self-model is left exactly as it is.
         }
     }
 

@@ -297,6 +297,17 @@ object ChatEngine {
         }
         EmotionEngine.onCommanderMessage(root, history.last().optString("content"),
             history.last().optString("_ruri_event_id"))
+        // Associative recall is local and free: it runs on the device and only adds context.
+        // Capabilities promises it, so the chat prompt must actually carry it.
+        val recalled = runCatching {
+            MemoryRetriever.recall(root, history.last().optString("content"), limit = 6)
+        }.getOrDefault("")
+        if (recalled.isNotBlank()) {
+            messages.put(JSONObject().put("role", "system").put("content",
+                "Ассоциативно найденные воспоминания. Используй их, если они относятся к вопросу. " +
+                    "Не выдавай предположения за точные воспоминания; при необходимости обозначай неопределённость.\n" +
+                    recalled))
+        }
         val assistantHistoryCount = history.count { it.optString("role") == "assistant" }
         var assistantHistoryIndex = 0
         history.forEach { item ->
