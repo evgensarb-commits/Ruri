@@ -428,7 +428,10 @@ object MemoryConsolidator {
             val fact = facts.optJSONObject(index) ?: continue
             val text = SecretRedactor.redactText(fact.optString("text"))
                 .replace(Regex("\\s+"), " ").trim()
-            if (text.length < 5 || text.contains(SecretRedactor.PLACEHOLDER)) continue
+            // Keep a fact whose only problem is an embedded secret: it is already masked, and
+            // dropping it would lose real information. Skip only when nothing meaningful remains.
+            val meaningful = text.replace(SecretRedactor.PLACEHOLDER, "").trim()
+            if (meaningful.length < 5) continue
             val category = fact.optString("category").ifBlank { "общее" }
             byCategory.getOrPut(category) { ArrayList() }.add(text.take(300))
         }
