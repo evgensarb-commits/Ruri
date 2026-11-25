@@ -210,7 +210,7 @@ class RuriLifeWorker(
     private fun shouldRunRemoteCognition(context: Context, reason: String): Boolean {
         val notificationEvent = reason.contains("phone_notification") && !reason.contains("removed")
         val explicitSelfTask = reason.contains("research_task") || reason.contains("capability_gap")
-        val driveCheckEvent = reason.contains("drive_check")
+        val driveCheckEvent = reason.contains("drive_check") || reason.contains("проверка_состояния")
 
         if (!driveCheckEvent && !notificationEvent && !explicitSelfTask) return false
         return Route.hasKey(context.filesDir)
