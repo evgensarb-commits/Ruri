@@ -295,6 +295,22 @@ input:focus,select:focus,textarea:focus{border-color:rgba(167,139,250,.6);box-sh
       </div>
 
       <div class="card">
+        <span class="card-label">МОДЕЛЬ</span>
+        <label class="field-label" for="modelVariant">Вариант</label>
+        <select id="modelVariant">
+          <option value="free">Gemma 4 26B MeroMero — бесплатно (дневной лимит токенов)</option>
+          <option value="paid">Gemma 4 31B MeroMero — платно (без лимита, по факту)</option>
+        </select>
+        <div class="inline-status" id="modelStatus">Проверяю…</div>
+        <label class="field-label" for="paidModelInput">Идентификатор платной модели</label>
+        <input id="paidModelInput" type="text" autocomplete="off" spellcheck="false" placeholder="gemma-4-31b-it-meromero">
+        <div class="row-actions">
+          <button class="btn ghost" id="savePaidModel" type="button">Сохранить идентификатор</button>
+        </div>
+        <p class="hint">Если платная модель не отвечает — скопируй точный id из каталога routeway.ai и вставь сюда.</p>
+      </div>
+
+      <div class="card">
         <span class="card-label">Личность</span>
         <label class="field-label" for="charName">Имя</label>
         <input id="charName" type="text" autocomplete="off" placeholder="Рури">
@@ -1152,6 +1168,38 @@ function setStatus(id, message, tone){
 /* ======================================================================
    НАСТРОЙКИ: личность
    ====================================================================== */
+/* Active provider model: free tier or the paid 31B variant. */
+function loadModelVariant(){
+  var variant = String(call('modelVariant', [], 'free') || 'free');
+  var select = $('modelVariant');
+  if(select) select.value = (variant === 'paid') ? 'paid' : 'free';
+  var input = $('paidModelInput');
+  if(input) input.value = String(call('paidModelId', [], '') || '');
+  setStatus('modelStatus',
+    variant === 'paid' ? '\u0410\u043a\u0442\u0438\u0432\u043d\u0430 \u043f\u043b\u0430\u0442\u043d\u0430\u044f \u043c\u043e\u0434\u0435\u043b\u044c.' : '\u0410\u043a\u0442\u0438\u0432\u043d\u0430 \u0431\u0435\u0441\u043f\u043b\u0430\u0442\u043d\u0430\u044f \u043c\u043e\u0434\u0435\u043b\u044c.',
+    variant === 'paid' ? 'good' : '');
+}
+
+function changeModelVariant(){
+  var select = $('modelVariant');
+  if(!select) return;
+  var result = call('setModelVariant', [select.value], 'ERROR: \u043d\u0435\u0442 \u0441\u0432\u044f\u0437\u0438 \u0441 Ruri');
+  if(isErr(result)){ setStatus('modelStatus', errText(result), 'bad'); return; }
+  loadModelVariant();
+  refreshStatus();
+}
+
+function savePaidModelId(){
+  var input = $('paidModelInput');
+  if(!input) return;
+  var value = String(input.value || '').replace(/^\s+|\s+$/g, '');
+  if(!value){ setStatus('modelStatus', '\u0412\u0441\u0442\u0430\u0432\u044c \u0438\u0434\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440.', 'bad'); return; }
+  var result = call('setPaidModelId', [value], 'ERROR: \u043d\u0435\u0442 \u0441\u0432\u044f\u0437\u0438 \u0441 Ruri');
+  if(isErr(result)){ setStatus('modelStatus', errText(result), 'bad'); return; }
+  setStatus('modelStatus', '\u0418\u0434\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440 \u0441\u043e\u0445\u0440\u0430\u043d\u0451\u043d.', 'good');
+  loadModelVariant();
+}
+
 function loadCharacter(){
   var cfg = parseJson(readText('core/character.json'), {});
   if(!cfg || typeof cfg !== 'object') cfg = {};
@@ -1484,6 +1532,7 @@ function allowBackground(){
 
 function refreshSettings(){
   loadConnection();
+  loadModelVariant();
   loadCharacter();
   loadBackups();
   loadBackground();
@@ -1498,6 +1547,8 @@ function refreshEverything(){
 }
 
 $('batteryAllow').addEventListener('click', allowBackground);
+$('modelVariant').addEventListener('change', changeModelVariant);
+$('savePaidModel').addEventListener('click', savePaidModelId);
 
 function showTab(name){
   var key = name || 'chat';

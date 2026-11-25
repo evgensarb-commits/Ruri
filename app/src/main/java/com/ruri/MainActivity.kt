@@ -310,6 +310,34 @@ class MainActivity : AppCompatActivity() {
             catch (e: Exception) { "ERROR: " + (e.message ?: "style switch failed") }
         }
 
+        /** Which MeroMero variant is active: "free" or "paid". */
+        @JavascriptInterface
+        fun modelVariant(): String = Route.variant(filesDir)
+
+        @JavascriptInterface
+        fun setModelVariant(variant: String): String {
+            return try {
+                Route.setVariant(filesDir, variant)
+                Route.ensure(filesDir)
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "model switch failed") }
+        }
+
+        /** Provider id of the paid variant, editable in case the catalogue names it differently. */
+        @JavascriptInterface
+        fun paidModelId(): String = Route.paidModelId(filesDir)
+
+        @JavascriptInterface
+        fun setPaidModelId(id: String): String {
+            return try {
+                val trimmed = id.trim()
+                require(trimmed.isNotBlank()) { "Идентификатор модели пуст" }
+                Route.setPaidModelId(filesDir, trimmed)
+                Route.ensure(filesDir)
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "model id save failed") }
+        }
+
         @JavascriptInterface
         fun retryPending(): String {
             return try {

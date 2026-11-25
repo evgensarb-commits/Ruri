@@ -127,7 +127,7 @@ object ChatEngine {
         }
         val safeMessages = providerMessagesWithFullMemory(messages) ?: messages
 
-        val result = Transport.chat(safeMessages, apiKey, 400)
+        val result = Transport.chat(safeMessages, apiKey, 400, Route.model(root))
         when (result) {
             is Transport.Result.Success -> {
                 recordDiagnostic(root, "ok", result.httpStatus, "", result.stages)
@@ -252,7 +252,7 @@ object ChatEngine {
             "Длина ответа: ${character.optString("length_policy")}. " +
             "Эмоции: ${character.optString("emotions")}. " +
             "Регуляторы характера: ${character.optJSONArray("regulators") ?: JSONArray()}. " +
-            "Примеры разнообразного входа (варианты, не шаблоны): ${character.optJSONArray("opening_exemplars") ?: JSONArray()}. " +
+            "Вход в сообщение придумывай сама, без шаблонов и заготовок. " +
             StyleGuard.repetitiveOpeningNote(root) + " " +
             "Фразы, которые нельзя использовать: ${bannedPhrases}. " +
             Capabilities.bodySection(root) + " " +
@@ -375,7 +375,7 @@ object ChatEngine {
             val entry = JSONObject()
                 .put("timestamp", System.currentTimeMillis())
                 .put("provider", Route.DISPLAY_NAME)
-                .put("model", Route.MODEL)
+                .put("model", root?.let { Route.model(it) } ?: Route.MODEL_FREE)
                 .put("base_url", Route.BASE_URL)
                 .put("vpn", NetState.vpn)
                 .put("online", NetState.online)
@@ -563,7 +563,7 @@ object ChatEngine {
             ?: throw ModelRequestFailure(
                 "Не удалось собрать полный контекст памяти для продолжения ответа", 0L, "config"
             )
-        return when (val result = Transport.chat(safeMessages, apiKey, 400)) {
+        return when (val result = Transport.chat(safeMessages, apiKey, 400, Route.model(root))) {
             is Transport.Result.Success -> {
                 if (root != null) runCatching { RouteMeta.recordSuccess(root, routeId, task) }
                 result.reply

@@ -741,4 +741,128 @@ class ChatStyleModesTest {
         assertTrue(html.contains("style-toggle"))
     }
 }
+
+/**
+ * Two variants of the same model, switchable from settings, and no pre-written lines
+ * anywhere in a prompt.
+ */
+class ModelVariantTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-variant").toFile().also {
+        FileManager.init(it)
+    }
+
+    @Test fun freeIsTheDefaultVariant() {
+        val dir = root()
+        try {
+            assertEquals(Route.VARIANT_FREE, Route.variant(dir))
+            assertFalse(Route.isPaid(dir))
+            assertEquals(Route.MODEL_FREE, Route.model(dir))
+            val models = JSONObject(FileManager.read(dir, "core/config.json")).getJSONArray("models")
+            assertEquals(Route.MODEL_FREE, models.getJSONObject(0).optString("model"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun switchingToPaidRewritesTheProviderModel() {
+        val dir = root()
+        try {
+            Route.setVariant(dir, Route.VARIANT_PAID)
+            assertEquals(Route.VARIANT_PAID, Route.variant(dir))
+            assertTrue(Route.isPaid(dir))
+            assertEquals(Route.paidModelId(dir), Route.model(dir))
+            // The persisted provider section must follow, otherwise ensure() would revert it.
+            val model = JSONObject(FileManager.read(dir, "core/config.json"))
+                .getJSONArray("models").getJSONObject(0)
+            assertEquals(Route.paidModelId(dir), model.optString("model"))
+            assertEquals(Route.ID, model.optString("id"))
+
+            Route.setVariant(dir, Route.VARIANT_FREE)
+            assertEquals(Route.MODEL_FREE, Route.model(dir))
+            assertFalse(Route.isPaid(dir))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun paidModelIdIsOverridableForACatalogueDifference() {
+        val dir = root()
+        try {
+            Route.setVariant(dir, Route.VARIANT_PAID)
+            Route.setPaidModelId(dir, "gemma-4-31b-it-meromero-v2")
+            assertEquals("gemma-4-31b-it-meromero-v2", Route.paidModelId(dir))
+            assertEquals("gemma-4-31b-it-meromero-v2", Route.model(dir))
+            val model = JSONObject(FileManager.read(dir, "core/config.json"))
+                .getJSONArray("models").getJSONObject(0)
+            assertEquals("gemma-4-31b-it-meromero-v2", model.optString("model"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun ensureDoesNotRevertTheChosenVariant() {
+        val dir = root()
+        try {
+            Route.setVariant(dir, Route.VARIANT_PAID)
+            // A second canonicalisation on start must accept the paid model as canonical.
+            val rewrote = Route.ensure(dir)
+            assertFalse("ensure must not rewrite a canonical paid config", rewrote)
+            assertEquals(Route.VARIANT_PAID, Route.variant(dir))
+            assertEquals(Route.paidModelId(dir), Route.model(dir))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun transportSendsTheActiveModelId() {
+        val transport = RepoSources.text("app/src/main/java/com/ruri/Transport.kt")
+        // The id has to be a parameter: hard-coding the free id would silently ignore the switch.
+        assertTrue(transport.contains("modelId: String = Route.MODEL_FREE"))
+        assertTrue(transport.contains(".put(\"model\", modelId)"))
+        assertFalse(transport.contains(".put(\"model\", Route.MODEL)"))
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        assertTrue(engine.contains("Route.model(root)"))
+    }
+
+    @Test fun variantIsReachableFromSettings() {
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        for (method in listOf("modelVariant", "setModelVariant", "paidModelId", "setPaidModelId")) {
+            assertTrue("bridge must expose $method", activity.contains("fun $method("))
+        }
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        assertTrue(html.contains("modelVariant"))
+        assertTrue(html.contains("paidModelInput"))
+        assertTrue(html.contains("setModelVariant"))
+    }
+}
+
+class NoCannedPhrasesTest {
+    @Test fun identitySeedHasNoPreWrittenReplies() {
+        val seed = RepoSources.text("app/src/main/java/com/ruri/FileManager.kt")
+        // Sample lines would be copied by the model as templates.
+        assertFalse(seed.contains("opening_exemplars\": ["))
+        assertFalse(seed.contains("Примеры правильного тона"))
+        assertFalse(seed.contains("Полночи думала про твою идею"))
+    }
+
+    @Test fun promptsAskForHerOwnWording() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        val thinker = RepoSources.text("app/src/main/java/com/ruri/Thinker.kt")
+        assertTrue("chat prompt must forbid templates",
+            engine.contains("без шаблонов и заготовок"))
+        assertTrue("thought prompt must forbid templates",
+            thinker.contains("без шаблонов и заготовок") ||
+                thinker.contains("никаких готовых формулировок"))
+        assertFalse("no prompt may inject example replies",
+            engine.contains("opening_exemplars") || thinker.contains("opening_exemplars"))
+    }
+
+    @Test fun existingInstallationsLoseTheStaleKey() {
+        val dir = Files.createTempDirectory("ruri-no-exemplars").toFile()
+        try {
+            FileManager.init(dir)
+            val character = JSONObject(FileManager.read(dir, "core/character.json"))
+                .put("opening_exemplars", JSONArray().put("готовая фраза"))
+            FileManager.write(dir, "core/character.json", character.toString(2))
+            FileManager.init(dir)
+            val after = JSONObject(FileManager.read(dir, "core/character.json"))
+            assertFalse("stale key must be gone", after.has("opening_exemplars"))
+            // The rest of her identity survives untouched.
+            assertEquals("Рури", after.optString("name"))
+            assertTrue(after.optString("persona").isNotBlank())
+        } finally { dir.deleteRecursively() }
+    }
+}
 }
