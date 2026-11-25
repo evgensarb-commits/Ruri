@@ -90,13 +90,15 @@ object Thinker {
             initiative = true
         }
 
-        // A wake with no real event does not mean she must speak. Two emotional gates apply:
-        // an initiative lets her write to the CHAT; a softer thought gate only lets her write
-        // a DIARY entry. Neither is a timer — both scale with boredom and longing. A wake
-        // caused by a real event (a notification, a Commander message) still produces a
-        // thought without the softer gate, because something actually happened.
-        val routineWake = originalReason.contains("проверка_состояния") ||
-            originalReason.contains("drive_check")
+        // A routine wake means nothing actually happened: only her own feelings. Such a wake
+        // must pass the softer thought gate before costing a model request. A wake caused by
+        // something real (a phone notification, an explicit self-task) produces a thought
+        // without that softer gate, because there is genuine material to think about.
+        val hasRealEvent = originalReason.contains("phone_notification") ||
+            originalReason.contains("commander_message") ||
+            originalReason.contains("research_task") ||
+            originalReason.contains("capability_gap")
+        val routineWake = !hasRealEvent
         if (routineWake && !initiative) {
             val lastThoughtTurn = state.optLong("last_thought_turn", 0L)
             if (!EmotionEngine.thoughtGate(root, now, lastThoughtTurn)) {

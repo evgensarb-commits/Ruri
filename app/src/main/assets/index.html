@@ -318,6 +318,15 @@ input:focus,select:focus,textarea:focus{border-color:rgba(167,139,250,.6);box-sh
       </div>
 
       <div class="card">
+        <span class="card-label">жизнь в фоне</span>
+        <p class="hint">Андроид усыпляет приложения и откладывает их работу, чтобы беречь батарею. Разреши Рури работать без ограничений — тогда она думает и отвечает даже с выключенным экраном.</p>
+        <div class="row-actions">
+          <button class="btn primary" id="batteryAllow" type="button">РАЗРЕШИТЬ РАБОТУ В ФОНЕ</button>
+        </div>
+        <div class="inline-status" id="batteryStatus">Проверяю…</div>
+      </div>
+
+      <div class="card">
         <span class="card-label">Диагностика</span>
         <p class="hint" id="diagHint">Живая проверка делает настоящий сетевой запрос — до 20 секунд.</p>
         <div class="row-actions">
@@ -1410,10 +1419,28 @@ function importData(file){
 /* ======================================================================
    ОБЩЕЕ
    ====================================================================== */
+function loadBackground(){
+  var allowed = call('isIgnoringBatteryOptimizations', [], false);
+  if(allowed === true){
+    setStatus('batteryStatus', 'Разрешено. Рури активна и с выключенным экраном.', 'good');
+    setHidden($('batteryAllow'), true);
+  }else{
+    setStatus('batteryStatus', 'Ограничение активно: система может откладывать её мысли и повторы ответа.', 'bad');
+    setHidden($('batteryAllow'), false);
+  }
+}
+
+function allowBackground(){
+  var result = call('requestIgnoreBatteryOptimizations', [], 'ERROR: не удалось открыть настройки');
+  if(isErr(result)){ setStatus('batteryStatus', errText(result), 'bad'); return; }
+  setStatus('batteryStatus', 'Подтверди разрешение в системном окне и вернись назад.', '');
+}
+
 function refreshSettings(){
   loadConnection();
   loadCharacter();
   loadBackups();
+  loadBackground();
   renderDiagState();
 }
 
@@ -1423,6 +1450,8 @@ function refreshEverything(){
   refreshSettings();
   if(memoryState.chip) loadMemory();
 }
+
+$('batteryAllow').addEventListener('click', allowBackground);
 
 function showTab(name){
   var key = name || 'chat';

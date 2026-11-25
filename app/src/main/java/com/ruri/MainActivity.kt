@@ -248,6 +248,9 @@ class MainActivity : AppCompatActivity() {
     private fun scheduleRetryIfNeeded(kind: String) {
         if (!RetryPolicy.isRetryable(kind)) return
         val delay = CommanderReplyQueue.nextDelayMs(filesDir) ?: return
+        // Durable scheduling first: WorkManager keeps retrying while the screen is off or the
+        // app is in the background, so a locked phone never stalls a pending reply.
+        runCatching { LifeScheduler.scheduleCommanderReplyRetry(this, delay) }
         if (!activityResumed) return
         synchronized(this) {
             if (retryScheduled) return
@@ -524,6 +527,31 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun hasUsageAccess(): Boolean = UsageAccessSensor.hasAccess(this@MainActivity)
+
+        /** True when Android is allowed to keep her background work alive. */
+        @JavascriptInterface
+        fun isIgnoringBatteryOptimizations(): Boolean {
+            val manager = getSystemService(android.os.PowerManager::class.java) ?: return false
+            return manager.isIgnoringBatteryOptimizations(packageName)
+        }
+
+        @JavascriptInterface
+        fun requestIgnoreBatteryOptimizations(): String {
+            return try {
+                if (isIgnoringBatteryOptimizations()) return "OK"
+                startActivity(Intent(
+                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:$packageName")
+                ))
+                "OK"
+            } catch (e: Exception) {
+                // Some vendors hide the direct dialog; fall back to the battery-usage screen.
+                runCatching {
+                    startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                }.onFailure { return "ERROR: " + (it.message ?: "settings unavailable") }
+                "OK"
+            }
+        }
 
         @JavascriptInterface
         fun openUsageAccessSettings(): String {
