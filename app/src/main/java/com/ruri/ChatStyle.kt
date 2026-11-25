@@ -13,17 +13,24 @@ import java.io.File
  */
 object ChatStyle {
 
+    private const val CONFIG_PATH = "core/config.json"
     private const val CONFIG_KEY = "roleplay_mode"
 
+    /**
+     * The switch is a UI preference, not a secret, so it lives in the public config next to
+     * the route. It deliberately does not go through SecretStore: that store needs the
+     * Android keystore, and a style toggle must keep working even if the store cannot open.
+     */
     fun roleplayEnabled(root: File): Boolean = runCatching {
-        org.json.JSONObject(SecretStore.readRuntimeConfig(root)).optBoolean(CONFIG_KEY, false)
+        org.json.JSONObject(FileManager.read(root, CONFIG_PATH)).optBoolean(CONFIG_KEY, false)
     }.getOrDefault(false)
 
     fun setRoleplay(root: File, enabled: Boolean) {
         runCatching {
-            val config = org.json.JSONObject(SecretStore.readRuntimeConfig(root))
+            val config = runCatching { org.json.JSONObject(FileManager.read(root, CONFIG_PATH)) }
+                .getOrElse { org.json.JSONObject() }
             config.put(CONFIG_KEY, enabled)
-            SecretStore.saveRuntimeConfig(root, config.toString(2))
+            FileManager.write(root, CONFIG_PATH, config.toString(2))
         }
     }
 
@@ -77,8 +84,9 @@ object ChatStyle {
         if (trimmed.contains('*')) return true
         // A parenthetical remark of three or more letters is a stage direction.
         if (Regex("\\([\\p{L} ]{3,}\\)").containsMatchIn(trimmed)) return true
-        // Opening a line as an in-scene address ("Командир, ...") or a quoted line.
-        if (Regex("(?i)^\\s*(командир|ты|милый|дорогой)\\s*[,!.]").containsMatchIn(trimmed)) return true
+        // Opening a line as an in-scene address ("Командир, ..."). (?iu) is required: a plain
+        // (?i) in Java only case-folds ASCII, so "Командир" would not match "командир".
+        if (Regex("(?iu)^\\s*(командир|ты|милый|дорогой)\\s*[,!.]").containsMatchIn(trimmed)) return true
         if (Regex("^\\s*[«\"].{20,}").containsMatchIn(trimmed)) return true
         return false
     }
