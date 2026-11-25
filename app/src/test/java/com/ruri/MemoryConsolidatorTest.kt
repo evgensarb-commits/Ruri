@@ -137,49 +137,62 @@ class MemoryConsolidatorTest {
     }
 
     @Test
-    fun offlineSummaryKeepsAllRecordsFromTheCurrentConsolidationPage() {
-        val previous = "Прежняя биографическая сводка о проекте RU-R1."
-        val entries = (1..40).map { index ->
-            JSONObject().put("text", "Дневниковая запись номер $index содержит уникальное событие и полезный контекст.")
-        }
+    fun localFallbackBuildsAutobiographyFromFactsOnlyAndNeverFromThoughts() {
+        val selfModel = JSONObject()
+            .put("identity", "Рури")
+            .put("known_capabilities", JSONArray().put("chat").put("local_memory"))
+        val character = JSONObject().put("name", "Рури").put("designation", "RU-R1")
+        val facts = JSONArray()
+            .put(JSONObject().put("text", "Командир разрабатывает проект RU-R1").put("category", "проекты"))
+            .put(JSONObject().put("text", "Командир любит чай с молоком").put("category", "предпочтения"))
+        // A diary-like line must never appear: it is not passed in at all.
+        val thoughts = "Я скучала и не понимала, куда он пропал на весь вечер."
 
-        val summary = MemoryConsolidator.extractiveSummary(previous, entries)
+        val summary = MemoryConsolidator.localFactSummary(selfModel, character, facts)
 
-        assertTrue(summary.contains(previous))
-        assertTrue(summary.contains("Дневниковая запись номер 1"))
-        assertTrue(summary.contains("Дневниковая запись номер 40"))
+        assertTrue(summary.contains("Рури"))
+        assertTrue(summary.contains("RU-R1"))
+        assertTrue(summary.contains("Командир разрабатывает проект RU-R1"))
+        assertTrue(summary.contains("Командир любит чай с молоком"))
+        assertFalse("autobiography must not contain diary prose", summary.contains("скучала"))
+        assertFalse(summary.contains(thoughts))
     }
 
     @Test
-    fun offlineSummaryRedactsSecretsFromPreviousSummaryAndDiary() {
-        val previous = "Проект RU-R1 продолжается. Пароль: hunter2."
-        val entries = listOf(
-            JSONObject().put("text", "Код подтверждения: 483920 для старого входа в аккаунт.")
-        )
-
-        val summary = MemoryConsolidator.extractiveSummary(previous, entries)
-
+    fun localFallbackRedactsSecretsInsideFacts() {
+        val facts = JSONArray()
+            .put(JSONObject().put("text", "Проект RU-R1 продолжается. Пароль: hunter2."))
+        val summary = MemoryConsolidator.localFactSummary(JSONObject(), JSONObject(), facts)
         assertTrue(summary.contains("Проект RU-R1"))
         assertFalse(summary.contains("hunter2"))
-        assertFalse(summary.contains("483920"))
         assertTrue(summary.contains(SecretRedactor.PLACEHOLDER))
     }
 
     @Test
-    fun offlineSummaryRetainsPreviousBiographyAndAllAvailableContext() {
-        val previous = "Ранее Рури и Командир начали долгосрочный проект RU-R1."
-        val entries = listOf(
-            JSONObject().put("text", "Командир живёт в Рубе и часто бывает рядом с Лиллем."),
-            JSONObject().put("text", "Командир сообщил email commander@example.com для важного проекта."),
-            JSONObject().put("text", "Пароль: hunter2 это секретная учётная строка, не сохранять.")
-        )
-
-        val summary = MemoryConsolidator.extractiveSummary(previous, entries)
-
-        assertTrue(summary.contains(previous))
-        assertTrue(summary.contains("Рубе"))
-        assertTrue(summary.contains("commander@example.com"))
-        assertFalse(summary.contains("hunter2"))
-        assertTrue(summary.contains(SecretRedactor.PLACEHOLDER))
+    fun localFallbackIsHonestWhenThereAreNoFactsYet() {
+        val summary = MemoryConsolidator.localFactSummary(JSONObject(), JSONObject(), JSONArray())
+        assertTrue(summary.isNotBlank())
+        assertTrue(summary.contains("не собрана") || summary.contains("недостаточно"))
     }
+
+    @Test
+    fun diaryEchoesAreStrippedFromAnAlreadyPollutedSummary() {
+        val thought = "Я скучала весь вечер и думала, куда он пропал."
+        val clean = "Рури — искусственная личность на телефоне Командира."
+        val polluted = clean + "\n" + thought + "\nКомандир разрабатывает проект RU-R1."
+        val entries = JSONArray().put(JSONObject().put("text", thought))
+
+        val healed = MemoryConsolidator.stripDiaryEchoes(polluted, entries)
+
+        assertFalse("a verbatim diary line must be removed", healed.contains(thought))
+        assertTrue("real autobiography lines stay", healed.contains(clean))
+        assertTrue(healed.contains("Командир разрабатывает проект RU-R1"))
+    }
+
+    @Test
+    fun strippingEchoesKeepsUnrelatedShortLines() {
+        val healed = MemoryConsolidator.stripDiaryEchoes("Кто я: Рури.", JSONArray())
+        assertTrue(healed.contains("Кто я: Рури."))
+    }
+
 }
