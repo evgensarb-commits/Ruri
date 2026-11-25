@@ -23,8 +23,14 @@ object Route {
     /** Free-tier MeroMero (A4B, ~4B active parameters). */
     const val MODEL_FREE = "gemma-4-26b-a4b-it-meromero:free"
 
-    /** Paid MeroMero 31B. Overridable via [paidModelId] when the catalogue differs. */
-    const val MODEL_PAID_DEFAULT = "gemma-4-31b-it-meromero"
+    /** Paid variant chosen by the Commander. Overridable via [paidModelId]. */
+    const val MODEL_PAID_DEFAULT = "gemma-4-31b-sdft-heretic-rp"
+
+    /** Ids an earlier build wrote by guessing. Never kept: they point at nothing real. */
+    private val MODEL_PAID_LEGACY_IDS = listOf(
+        "gemma-4-31b-it-meromero",
+        "gemma-4-31b-meromero-v2"
+    )
 
     const val VARIANT_FREE = "free"
     const val VARIANT_PAID = "paid"
@@ -75,8 +81,12 @@ object Route {
         persist(root, config)
     }
 
-    fun paidModelId(root: File): String =
-        publicConfig(root).optString(PAID_MODEL_KEY, MODEL_PAID_DEFAULT).ifBlank { MODEL_PAID_DEFAULT }
+    fun paidModelId(root: File): String {
+        val stored = publicConfig(root).optString(PAID_MODEL_KEY).trim()
+        // A config written by an earlier build may hold a guessed id; never keep it.
+        if (stored.isBlank() || stored in MODEL_PAID_LEGACY_IDS) return MODEL_PAID_DEFAULT
+        return stored
+    }
 
     fun setPaidModelId(root: File, id: String) {
         val trimmed = id.trim()
@@ -94,7 +104,7 @@ object Route {
         if (isPaid(root)) "$MODEL_PAID_LABEL" else "$MODEL_FREE_LABEL"
 
     private const val MODEL_FREE_LABEL = "Gemma 4 26B MeroMero (free)"
-    private const val MODEL_PAID_LABEL = "Gemma 4 31B MeroMero (paid)"
+    private const val MODEL_PAID_LABEL = "Gemma 4 31B SDFT Heretic RP (paid)"
 
     fun canonical(apiKey: String = "", modelId: String = MODEL_FREE): JSONObject {
         return JSONObject()

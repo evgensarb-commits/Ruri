@@ -785,12 +785,38 @@ class ModelVariantTest {
         val dir = root()
         try {
             Route.setVariant(dir, Route.VARIANT_PAID)
-            Route.setPaidModelId(dir, "gemma-4-31b-it-meromero-v2")
-            assertEquals("gemma-4-31b-it-meromero-v2", Route.paidModelId(dir))
-            assertEquals("gemma-4-31b-it-meromero-v2", Route.model(dir))
+            Route.setPaidModelId(dir, "catalogue-override-31b")
+            assertEquals("catalogue-override-31b", Route.paidModelId(dir))
+            assertEquals("catalogue-override-31b", Route.model(dir))
             val model = JSONObject(FileManager.read(dir, "core/config.json"))
                 .getJSONArray("models").getJSONObject(0)
-            assertEquals("gemma-4-31b-it-meromero-v2", model.optString("model"))
+            assertEquals("catalogue-override-31b", model.optString("model"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun paidDefaultIsTheChosenCatalogueId() {
+        val dir = root()
+        try {
+            // The id the Commander picked from the catalogue, not a guess.
+            assertEquals("gemma-4-31b-sdft-heretic-rp", Route.paidModelId(dir))
+            assertEquals("gemma-4-31b-sdft-heretic-rp", Route.MODEL_PAID_DEFAULT)
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun everyGuessedLegacyIdIsCorrectedOnRead() {
+        val dir = root()
+        try {
+            // Configs written by earlier builds may hold one of the guessed ids.
+            for (guess in listOf("gemma-4-31b-it-meromero", "gemma-4-31b-meromero-v2")) {
+                val config = JSONObject(FileManager.read(dir, "core/config.json"))
+                    .put("paid_model_id", guess)
+                FileManager.write(dir, "core/config.json", config.toString(2))
+                assertEquals(
+                    "guess $guess must be replaced",
+                    Route.MODEL_PAID_DEFAULT, Route.paidModelId(dir)
+                )
+                assertEquals("gemma-4-31b-sdft-heretic-rp", Route.paidModelId(dir))
+            }
         } finally { dir.deleteRecursively() }
     }
 
