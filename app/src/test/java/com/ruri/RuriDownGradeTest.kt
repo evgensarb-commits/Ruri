@@ -638,8 +638,8 @@ class ChatRecallAndQuotaTest {
             assertFalse("shelf capability must be gone", capabilities.contains("shelf"))
             assertFalse("vision limitation must be gone", limitations.contains("vision"))
             assertTrue("real limitations stay", limitations.contains("no_voice_yet"))
-            assertTrue("current capabilities are present", capabilities.contains("chat"))
-            assertTrue("current capabilities are present", capabilities.contains("initiative"))
+            assertTrue("chat missing from " + capabilities, capabilities.contains("chat"))
+            assertTrue("initiative missing from " + capabilities, capabilities.contains("initiative"))
         } finally { dir.deleteRecursively() }
     }
 }

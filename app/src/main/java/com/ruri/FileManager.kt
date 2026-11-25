@@ -615,41 +615,41 @@ object FileManager {
                 return retired.any(lowered::contains)
             }
 
-            var changed = false
-            val capabilities = JSONArray()
-            (model.optJSONArray("known_capabilities") ?: JSONArray()).let { previous ->
-                for (i in 0 until previous.length()) {
-                    val value = previous.optString(i)
-                    if (value.isBlank() || isRetired(value)) { changed = true; continue }
-                    capabilities.put(value)
-                }
-            }
+            // Start from the capabilities this build really has, then keep any extra
+            // non-retired capability the file already declared.
             val requiredCapabilities = listOf("chat", "local_memory", "diary", "emotions", "initiative")
-            for (capability in requiredCapabilities) {
-                if ((0 until capabilities.length()).none { capabilities.optString(it) == capability }) {
-                    capabilities.put(capability)
-                    changed = true
+            val capabilities = JSONArray()
+            requiredCapabilities.forEach { capabilities.put(it) }
+            val previousCapabilities = model.optJSONArray("known_capabilities") ?: JSONArray()
+            for (i in 0 until previousCapabilities.length()) {
+                val value = previousCapabilities.optString(i)
+                if (value.isBlank() || isRetired(value)) continue
+                var exists = false
+                for (j in 0 until capabilities.length()) {
+                    if (capabilities.optString(j) == value) exists = true
                 }
+                if (!exists) capabilities.put(value)
             }
 
             val limitations = JSONArray()
-            (model.optJSONArray("limitations") ?: JSONArray()).let { previous ->
-                for (i in 0 until previous.length()) {
-                    val value = previous.optString(i)
-                    if (value.isBlank() || isRetired(value)) { changed = true; continue }
-                    limitations.put(value)
-                }
+            val previousLimitations = model.optJSONArray("limitations") ?: JSONArray()
+            for (i in 0 until previousLimitations.length()) {
+                val value = previousLimitations.optString(i)
+                if (value.isBlank() || isRetired(value)) continue
+                limitations.put(value)
             }
 
             model.put("known_capabilities", capabilities).put("limitations", limitations)
             model.put("updated_at", System.currentTimeMillis())
-            if (changed) atomicWrite(file, model.toString(2))
+            // Always persist: the shape above is canonical even when nothing looked stale.
+            atomicWrite(file, model.toString(2))
         } catch (_: Exception) {
             // A malformed self-model is left exactly as it is.
         }
     }
 
-    private fun atomicWrite(file: File, content: String) {        val parent = file.parentFile ?: throw IllegalArgumentException("Data file has no parent")
+    private fun atomicWrite(file: File, content: String) {
+        val parent = file.parentFile ?: throw IllegalArgumentException("Data file has no parent")
         if (!parent.exists() && !parent.mkdirs()) throw IllegalStateException("Cannot create data directory")
         val temp = File(parent, file.name + ".tmp-" + UUID.randomUUID())
         try {
