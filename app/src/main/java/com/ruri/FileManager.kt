@@ -589,7 +589,8 @@ object FileManager {
         }
     }
 
-    private fun atomicWrite(file: File, content: String) {        val parent = file.parentFile ?: throw IllegalArgumentException("Data file has no parent")
+    private fun atomicWrite(file: File, content: String) {
+        val parent = file.parentFile ?: throw IllegalArgumentException("Data file has no parent")
         if (!parent.exists() && !parent.mkdirs()) throw IllegalStateException("Cannot create data directory")
         val temp = File(parent, file.name + ".tmp-" + UUID.randomUUID())
         try {

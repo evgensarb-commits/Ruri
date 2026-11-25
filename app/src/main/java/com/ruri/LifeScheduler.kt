@@ -215,6 +215,9 @@ class RuriLifeWorker(
         val driveCheckEvent = reason.contains("drive_check")
 
         if (!driveCheckEvent && !notificationEvent && !explicitSelfTask) return false
-        return Route.hasKey(context.filesDir)
+        if (!Route.hasKey(context.filesDir)) return false
+        // Her own initiative must not consume the Commander's daily allowance. This bounds
+        // autonomous cognition only; a Commander message always reaches the provider.
+        return RouteMeta.autonomyBudgetAvailable(context.filesDir)
     }
 }

@@ -295,6 +295,8 @@ input:focus,select:focus,textarea:focus{border-color:rgba(167,139,250,.6);box-sh
         <input id="charName" type="text" autocomplete="off" placeholder="Рури">
         <label class="field-label" for="charStyle">Манера речи</label>
         <textarea id="charStyle" rows="3" placeholder="Как Рури говорит"></textarea>
+        <label class="field-label" for="charAppearance">Внешность</label>
+        <textarea id="charAppearance" rows="3" placeholder="Как она себя видит"></textarea>
         <div class="row-actions">
           <button class="btn" id="saveCharacter" type="button">Сохранить</button>
         </div>
@@ -1133,6 +1135,12 @@ function loadCharacter(){
   var styleNode = $('charStyle');
   if(name) name.value = String(cfg.name || '');
   if(styleNode) styleNode.value = style;
+  var look = $('charAppearance');
+  if(look){
+    var appearance = parseJson(readText('core/appearance.json'), {});
+    if(!appearance || typeof appearance !== 'object') appearance = {};
+    look.value = typeof appearance.description === 'string' ? appearance.description : '';
+  }
 }
 
 function saveCharacter(){
@@ -1148,6 +1156,17 @@ function saveCharacter(){
   if(Object.prototype.hasOwnProperty.call(cfg, 'speech_rules')) cfg.speech_rules = style;
   var saved = call('write', ['core/character.json', JSON.stringify(cfg, null, 2)], 'ERROR: мост Ruri недоступен');
   if(isErr(saved)){ setStatus('characterStatus', 'Не сохранено: ' + errText(saved), 'bad'); return; }
+  var lookNode = $('charAppearance');
+  if(lookNode){
+    var appearance = parseJson(readText('core/appearance.json'), {});
+    if(!appearance || typeof appearance !== 'object') appearance = {};
+    appearance.description = String(lookNode.value || '').replace(/^\s+|\s+$/g, '');
+    var savedLook = call('write', ['core/appearance.json', JSON.stringify(appearance, null, 2)], 'ERROR: bridge');
+    if(isErr(savedLook)){
+      setStatus('characterStatus', 'Личность сохранена, внешность — нет: ' + errText(savedLook), 'bad');
+      return;
+    }
+  }
   setStatus('characterStatus', 'Сохранено.', 'good');
 }
 

@@ -422,12 +422,33 @@ class UiBridgeContractTest {
     @Test fun uiOnlyCallsBridgeMethodsThatExist() {
         val html = html()
         val activity = activity()
-        val calls = Regex("Ruri\\.([A-Za-z][A-Za-z0-9_]*)").findAll(html)
-            .map { it.groupValues[1] }.toSet()
+        // The UI reaches the bridge through the call() helper, so the contract test must
+        // read that form too — otherwise a renamed method slips through and only fails on a
+        // device, where nothing catches it.
+        val viaHelper = Regex("call\\(\\s*[\"']([A-Za-z][A-Za-z0-9_]*)[\"']")
+            .findAll(html).map { it.groupValues[1] }.toSet()
+        val direct = Regex("Ruri\\.([A-Za-z][A-Za-z0-9_]*)")
+            .findAll(html).map { it.groupValues[1] }.toSet()
+        val calls = viaHelper + direct
         assertTrue("UI must call at least one bridge method", calls.isNotEmpty())
+        assertTrue("UI must use the call() helper", viaHelper.isNotEmpty())
         for (call in calls) {
             assertTrue("bridge is missing $call", activity.contains("fun $call("))
         }
+    }
+
+    @Test fun identityFilesAreWritableAndMemoryIsNot() {
+        val activity = activity()
+        // Her self-description may be rewritten; episodic memory may not.
+        assertTrue(activity.contains("core/character.json"))
+        assertTrue(activity.contains("core/appearance.json"))
+        for (forbidden in listOf("memory/L0_raw.jsonl", "memory/L1_facts.json", "memory/L2_diary.json")) {
+            assertFalse(
+                "the generic bridge must never accept $forbidden",
+                Regex("selfDescribingPaths[^\\n]*" + Regex.escape(forbidden)).containsMatchIn(activity)
+            )
+        }
+        assertTrue(activity.contains("self_description_changed"))
     }
 
     @Test fun bridgeExposesRetryAndDiagnosticsContract() {
@@ -564,6 +585,64 @@ class BackgroundLifetimeTest {
         assertTrue(service.contains("START_STICKY"))
         val manifest = RepoSources.text("app/src/main/AndroidManifest.xml")
         assertTrue(manifest.contains("android:stopWithTask=\"false\""))
+    }
+}
+
+class ChatRecallAndQuotaTest {
+    @Test fun chatPromptCarriesAssociativeRecall() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        // Capabilities promises recall, so the chat path must actually use it.
+        assertTrue(engine.contains("MemoryRetriever.recall"))
+        assertTrue(engine.contains("Ассоциативно найденные воспоминания"))
+        val capabilities = RepoSources.text("app/src/main/java/com/ruri/Capabilities.kt")
+        assertTrue(capabilities.contains("recall"))
+    }
+
+    @Test fun autonomyRespectsADailyBudgetWithoutGatingTheChat() {
+        val dir = Files.createTempDirectory("ruri-autonomy-budget").toFile()
+        try {
+            FileManager.init(dir)
+            assertTrue("fresh install has budget", RouteMeta.autonomyBudgetAvailable(dir))
+            repeat(45) { RouteMeta.recordAttempt(dir, Route.ID) }
+            assertFalse("autonomy must stop when the day is spent",
+                RouteMeta.autonomyBudgetAvailable(dir))
+            // The chat path must not consult this budget at all: no preflight gates.
+            val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+            assertFalse("chat must never gate on the autonomy budget",
+                engine.contains("autonomyBudgetAvailable"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun diagnosticsFallsBackWhenModelsEndpointIsMissing() {
+        val transport = RepoSources.text("app/src/main/java/com/ruri/Transport.kt")
+        // Some gateways do not expose /models; a 404 there must not be reported as a
+        // broken route.
+        assertTrue(transport.contains("FALLBACK_HTTP"))
+        assertTrue(transport.contains("max_tokens"))
+    }
+
+    @Test fun selfDescriptionIsCleanedFromRetiredOrgans() {
+        val dir = Files.createTempDirectory("ruri-self-model").toFile()
+        try {
+            FileManager.init(dir)
+            FileManager.write(dir, "memory/self_model.json", JSONObject()
+                .put("known_capabilities", JSONArray().put("chat").put("shelf_files"))
+                .put("limitations", JSONArray()
+                    .put("vision_probe: vision не подтверждён")
+                    .put("no_voice_yet"))
+                .toString(2))
+            FileManager.init(dir)
+            val raw = FileManager.read(dir, "memory/self_model.json")
+            val model = JSONObject(raw)
+            val capabilities = model.optJSONArray("known_capabilities")?.toString().orEmpty()
+            val limitations = model.optJSONArray("limitations")?.toString().orEmpty()
+            val dump = raw.replace(Regex("\\s+"), " ").take(400)
+            assertFalse("shelf capability must be gone: " + dump, capabilities.contains("shelf"))
+            assertFalse("vision limitation must be gone: " + dump, limitations.contains("vision"))
+            assertTrue("real limitations stay: " + dump, limitations.contains("no_voice_yet"))
+            assertTrue("chat missing: " + dump, capabilities.contains("chat"))
+            assertTrue("initiative missing: " + dump, capabilities.contains("initiative"))
+        } finally { dir.deleteRecursively() }
     }
 }
 }

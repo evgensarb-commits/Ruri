@@ -34,6 +34,9 @@ class MainActivity : AppCompatActivity() {
     private var pendingMessageId: String? = null
     private val importFileRequestCode = 2002
 
+    /** Files she may rewrite about herself. Episodic memory is deliberately absent. */
+    private val selfDescribingPaths = setOf("core/character.json", "core/appearance.json")
+
     /** Foreground retry timer. Nothing is retried while the screen is off (see onPause). */
     private val autoRetry = Runnable { attemptPendingTurn() }
     private var retryScheduled = false
@@ -448,12 +451,39 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun write(path: String, content: String): String {
             return try {
-                require(path == "core/character.json") {
-                    "Only character settings may be written through the generic WebView bridge"
+                val normalized = path.replace('\\', '/').trimStart('/')
+                // Only her own identity files may be written from the interface. Both are
+                // self-description, never episodic memory, and each write is auditable.
+                require(normalized in selfDescribingPaths) {
+                    "Only identity files may be written through the generic WebView bridge"
                 }
-                FileManager.write(filesDir, path, content)
+                val incoming = JSONObject(content)
+                val previous = runCatching { JSONObject(FileManager.read(filesDir, normalized)) }
+                    .getOrElse { JSONObject() }
+                // Keep a recoverable copy before overwriting her self-description.
+                runCatching { LocalBackupManager.createSnapshot(filesDir) }
+                FileManager.write(filesDir, normalized, incoming.toString(2))
+                runCatching {
+                    FileManager.appendEvent(filesDir, JSONObject()
+                        .put("type", "self_description_changed")
+                        .put("source", "commander_ui")
+                        .put("path", normalized)
+                        .put("changed_keys", changedKeys(previous, incoming))
+                        .put("ts", System.currentTimeMillis()))
+                }
                 "OK"
             } catch (e: Exception) { "ERROR: " + (e.message ?: "write failed") }
+        }
+
+        /** Keys whose value actually changed, so L0 records a diff without storing prose. */
+        private fun changedKeys(before: JSONObject, after: JSONObject): JSONArray {
+            val changed = JSONArray()
+            val keys = after.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                if (before.opt(key)?.toString() != after.opt(key)?.toString()) changed.put(key)
+            }
+            return changed
         }
 
         @JavascriptInterface

@@ -111,6 +111,26 @@ object RouteMeta {
 
     fun available(root: File, id: String, now: Long = System.currentTimeMillis()): Boolean = true
 
+    /**
+     * Soft daily budget for **autonomous** cognition only.
+     *
+     * This is deliberately not a request gate: the Commander's chat always goes through, even
+     * on an exhausted budget (that is the no-preflight rule). It exists so her own idle
+     * thoughts cannot burn the whole daily allowance and leave the Commander without a reply.
+     */
+    fun autonomyBudgetAvailable(
+        root: File,
+        id: String = Route.ID,
+        maxDailyRequests: Int = 40,
+        maxDailyTokens: Long = 250_000L
+    ): Boolean {
+        val route = runCatching { route(root, id) }.getOrNull() ?: return true
+        val today = utcDay()
+        val requests = if (route.optString("day_key") == today) route.optInt("day_count", 0) else 0
+        val tokens = tokensToday(root, id)
+        return requests < maxDailyRequests && tokens < maxDailyTokens
+    }
+
     /** Records provider quota metadata for display/scoring only; never affects eligibility. */
     fun markQuotaExhausted(root: File, id: String, until: Long = 0L) = update(root, id) {
         it.put("quota_exhausted_until", until)
