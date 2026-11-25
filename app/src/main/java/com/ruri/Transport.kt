@@ -37,7 +37,7 @@ object Transport {
         ) : Result()
     }
 
-    fun chat(messages: JSONArray, apiKey: String): Result {
+    fun chat(messages: JSONArray, apiKey: String, maxTokens: Int = 512): Result {
         val stages = JSONArray()
         val startedAt = System.nanoTime()
         var connection: HttpURLConnection? = null
@@ -97,6 +97,7 @@ object Transport {
             val body = JSONObject()
                 .put("model", Route.MODEL)
                 .put("messages", messages)
+                .put("max_completion_tokens", maxTokens)
                 .put("temperature", 0.9)
                 .put("presence_penalty", 0.6)
                 .put("frequency_penalty", 0.4)
