@@ -694,9 +694,11 @@ class ChatStyleModesTest {
             assertTrue(ChatStyle.roleplayEnabled(dir))
             val directive = ChatStyle.chatDirective(dir)
             assertTrue(directive.contains("РОЛЕВОЙ ИГРЫ"))
-            assertTrue(directive.contains("звёздочки"))
+            assertTrue(directive.contains("звёздочк"))
+            // It must require staged action, not merely allow it.
+            assertTrue(directive.contains("ДЕЛАЕШЬ"))
             // It must still keep her in character rather than becoming a narrator.
-            assertTrue(directive.contains("остаёшься собой"))
+            assertTrue(directive.contains("ты Рури") || directive.contains("рассказчика"))
 
             ChatStyle.setRoleplay(dir, false)
             assertFalse(ChatStyle.roleplayEnabled(dir))
@@ -953,7 +955,9 @@ class AdaptiveLengthTest {
         val dir = root()
         try {
             ChatStyle.setRoleplay(dir, true)
-            assertEquals(900, ChatStyle.replyBudget(dir, "привет"))
+            // A scene needs room for staged action, not just a longer chat line.
+            assertTrue("scene budget must allow described action",
+                ChatStyle.replyBudget(dir, "привет") >= 1200)
             assertTrue(ChatStyle.chatDirective(dir, "привет").contains("РОЛЕВОЙ ИГРЫ"))
         } finally { dir.deleteRecursively() }
     }
@@ -1634,6 +1638,111 @@ class CloseRouterProviderTest {
         for (method in listOf("closeRouterModelId", "setCloseRouterModelId", "setCloseRouterKey", "closeRouterKeyState")) {
             assertTrue("bridge needs " + method, activity.contains("fun " + method + "("))
         }
+    }
+}
+
+/**
+ * Three Commander requests: a paperclip instead of the "КАРТ" label, a token-limit dial so a
+ * scene is not cut mid-sentence, and role-play that actually describes actions.
+ */
+class ReplyLengthAndStyleTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-style").toFile().also {
+        FileManager.init(it)
+    }
+
+    @Test fun theAttachButtonIsAPaperclipNotTheWordKart() {
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        val attach = html.substringAfter("id=\"pickImage\"").substringBefore("</button>")
+        assertFalse("the literal label must be gone", attach.contains(">КАРТ<"))
+        assertTrue("needs an inline svg paperclip", attach.contains("<svg"))
+        assertTrue("stays accessible", attach.contains("aria-label"))
+    }
+
+    @Test fun theCommanderDialOverridesTheBudget() {
+        val dir = root()
+        try {
+            // Default: the per-mode constant decides.
+            assertEquals(0, ChatStyle.manualTokenLimit(dir))
+            val auto = ChatStyle.replyBudget(dir, "привет")
+
+            // An explicit dial wins over every mode, including role-play.
+            ChatStyle.setManualTokenLimit(dir, 3000)
+            assertEquals(3000, ChatStyle.manualTokenLimit(dir))
+            assertEquals(3000, ChatStyle.replyBudget(dir, "привет"))
+            assertEquals(3000, ChatStyle.replyBudget(dir, "подробно расскажи"))
+            ChatStyle.setRoleplay(dir, true)
+            assertEquals(3000, ChatStyle.replyBudget(dir, "сцена"))
+
+            // Zero hands control back to the mode defaults. Compare against the default for the
+            // *current* mode: the role-play budget is different from the messenger one.
+            ChatStyle.setManualTokenLimit(dir, 0)
+            assertEquals(0, ChatStyle.manualTokenLimit(dir))
+            val sceneAuto = ChatStyle.replyBudget(dir, "привет")
+            assertTrue("role-play default must allow a scene", sceneAuto >= 1200)
+            ChatStyle.setRoleplay(dir, false)
+            assertEquals(auto, ChatStyle.replyBudget(dir, "привет"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun theDialIsClampedSoATypoCannotRunAway() {
+        val dir = root()
+        try {
+            ChatStyle.setManualTokenLimit(dir, 999_999)
+            assertEquals(ChatStyle.MAX_TOKEN_LIMIT, ChatStyle.manualTokenLimit(dir))
+            ChatStyle.setManualTokenLimit(dir, -50)
+            assertEquals(0, ChatStyle.manualTokenLimit(dir))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun roleplayDemandsActionNotJustLongerProse() {
+        // The old directive only permitted motion, so the model answered in long chat prose and
+        // the mode looked broken.
+        val directive = ChatStyle.roleplayDirective()
+        assertTrue("must require described action", directive.contains("ДЕЛАЕШЬ"))
+        assertTrue("must name the asterisk convention", directive.contains("звёздочк"))
+        assertTrue("must forbid dialogue-only replies", directive.contains("без действий"))
+        assertTrue("must forbid puppeting the Commander", directive.contains("Командира за него"))
+    }
+
+    @Test fun roleplayBudgetGrewEnoughForAScene() {
+        val dir = root()
+        try {
+            ChatStyle.setRoleplay(dir, true)
+            val scene = ChatStyle.replyBudget(dir, "сцена")
+            assertTrue("a scene needs more room than a messenger line", scene >= 1000)
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun sheCanExplainHerOwnArchitecture() {
+        val section = ChatStyle.architectureSection()
+        // She was guessing at her own design, so the facts must be stated explicitly.
+        for (fact in listOf("L0", "L1", "L2", "L3", "L4",
+            "remember_fact", "recall", "self_check", "L0_raw.jsonl")) {
+            assertTrue("architecture must mention " + fact, section.contains(fact))
+        }
+        assertTrue("must be honest about the model running remotely",
+            section.contains("на сервере"))
+        assertTrue("must warn against inventing her own design",
+            section.contains("не сочиняй"))
+    }
+
+    @Test fun theChatWindowDoesNotDropMessagesBehindNoise() {
+        val manager = RepoSources.text("app/src/main/java/com/ruri/FileManager.kt")
+        // L0 also collects wakes and tool traffic; a small tail hid the conversation and the
+        // chat looked wiped after a restart.
+        assertTrue("messages need a wider scan window",
+            manager.contains("if (requested == \"message\") 4000 else 500"))
+    }
+
+    @Test fun theSliderIsWiredEndToEnd() {
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        for (method in listOf("tokenLimit", "setTokenLimit", "maxTokenLimit")) {
+            assertTrue("bridge needs " + method, activity.contains("fun " + method + "("))
+        }
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        assertTrue(html.contains("id=\"tokenLimit\""))
+        assertTrue(html.contains("setTokenLimit"))
+        assertTrue(html.contains("function refreshTokenLimit"))
     }
 }
 }

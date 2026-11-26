@@ -281,7 +281,11 @@ object FileManager {
             "initiative_ignored", "initiative_vetoed", "error")
         val requested = filter.takeIf { it == "all" || it in allowed } ?: "all"
         val result = JSONArray()
-        readLastLines(root, L0_PATH, maxLines = 500, maxBytes = 2 * 1024 * 1024)
+        // The chat window used to scan only the last 500 lines. L0 also collects wakes, tool
+        // traffic, emotions and diagnostics, so a busy stretch pushed real messages out of view
+        // and the chat looked wiped after a restart. Read a much larger tail for messages.
+        val window = if (requested == "message") 4000 else 500
+        readLastLines(root, L0_PATH, maxLines = window, maxBytes = 2 * 1024 * 1024)
             .asReversed().forEach { line ->
                 if (result.length() >= bounded) return@forEach
                 val event = runCatching { SecretRedactor.redactEvent(JSONObject(line)) }.getOrNull() ?: return@forEach
