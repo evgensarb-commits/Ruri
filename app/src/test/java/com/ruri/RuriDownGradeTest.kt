@@ -1484,4 +1484,51 @@ class RouterAiProviderTest {
         assertFalse(engine.contains("Route.REQUIRES_VPN"))
     }
 }
+
+/**
+ * Regression: the routerai option existed but was unreachable in the UI for two reasons.
+ */
+class RouterAiUiReachabilityTest {
+    private fun html(): String = RepoSources.text("app/src/main/assets/index.html")
+
+    @Test fun theOptionIsPresentAndSelectable() {
+        val html = html()
+        assertTrue("the dropdown needs the third option", html.contains("value=\"routerai\""))
+        assertTrue("a change handler must react to the choice",
+            html.contains("$('modelVariant').addEventListener('change'"))
+    }
+
+    @Test fun theInputBlockIsHiddenByAttributeNotInlineStyle() {
+        // setHidden toggles the `hidden` attribute. An inline display:none can never be undone
+        // by it, which made the fields permanently invisible.
+        val html = html()
+        assertTrue("block must use the hidden attribute", html.contains("id=\"routeraiBlock\" hidden"))
+        assertTrue("no inline display:none on the block", !html.contains("routeraiBlock\" style=\"display:none"))
+        assertTrue("setHidden is what reveals it", html.contains("function setHidden"))
+    }
+
+    @Test fun theFieldsForKeyAndModelExist() {
+        val html = html()
+        for (id in listOf("routeraiKeyInput", "routeraiModelInput", "saveRouteraiKey", "saveRouteraiModel")) {
+            assertTrue("missing field $id", html.contains("id=\"$id\""))
+        }
+    }
+
+    @Test fun theChoiceIsNotCollapsedBackToFree() {
+        val html = html()
+        // The loader used to map every non-paid value to 'free', so selecting routerai in the
+        // dropdown immediately snapped back and looked like the option was dead.
+        val loader = html.substringAfter("function loadModelVariant(){").substringBefore("function changeModelVariant")
+        assertTrue(loader.contains("variant !== 'paid' && variant !== 'routerai'"))
+        assertTrue(loader.contains("select.value = variant"))
+        assertFalse(loader.contains("(variant === 'paid') ? 'paid' : 'free'"))
+    }
+
+    @Test fun savingTheRouteraiFieldsCallsTheBridge() {
+        val html = html()
+        assertTrue(html.contains("call('setRouteraiKey'"))
+        assertTrue(html.contains("call('setRouteraiModelId'"))
+        assertTrue(html.contains("call('routeraiKeyState'"))
+    }
+}
 }
