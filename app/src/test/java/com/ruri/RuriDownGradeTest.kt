@@ -1774,4 +1774,59 @@ class DocumentPickerTest {
         assertTrue(reader.contains("else -> decodeText(bytes)"))
     }
 }
+
+/**
+ * She answered "(не смогла сформулировать ответ)" after being asked to read an uploaded file:
+ * the chat path stripped the tool JSON without ever executing it.
+ */
+class ChatToolExecutionTest {
+    @Test fun theChatPathExecutesToolsInsteadOfDiscardingThem() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        val finish = engine.substringAfter("private fun finishTurn(")
+            .substringBefore("private fun runToolRequests(")
+        // The old code took the tool list into `_` and only published the leftover prose, so a
+        // document request silently vanished and the reply became the failure placeholder.
+        assertTrue("tool requests must be captured", finish.contains("toolRequests"))
+        assertTrue("and acted on", finish.contains("runToolRequests"))
+        assertFalse("must not be dropped", finish.contains("ToolLoop.stripActions(withoutEmotion)\n"))
+    }
+
+    @Test fun theToolLoopIsBoundedSoItCannotHang() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        // A confused model could otherwise request tool after tool and never produce prose.
+        assertTrue(engine.contains("MAX_TOOL_HOPS"))
+        assertTrue(engine.contains("while (hops < MAX_TOOL_HOPS)"))
+        val max = Regex("MAX_TOOL_HOPS = (\\d+)").find(engine)?.groupValues?.get(1)?.toInt()
+        assertTrue("hop limit must be small and finite", max != null && max in 1..32)
+    }
+
+    @Test fun toolTrafficIsRecordedInTheJournal() {
+        // The Commander checks L0 for the call, so it has to be written there.
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        assertTrue(engine.contains("\"tool_call\""))
+        assertTrue(engine.contains("\"tool_result\""))
+    }
+
+    @Test fun theToolResultIsFedBackToTheModel() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        // Without the result in the context the model would answer blind.
+        assertTrue(engine.contains("РЕЗУЛЬТАТ ИНСТРУМЕНТА"))
+        assertTrue(engine.contains("requestToolFollowup"))
+    }
+
+    @Test fun documentsAreAdvertisedSeparatelyFromImages() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        // list() mixes both, so a document hint built from it can describe an image as a doc.
+        assertTrue(engine.contains("DocReader.listDocumentNames(root)"))
+    }
+
+    @Test fun theBatteryIsCarriedIntoTheToolRoundTrip() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        // The follow-up rebuilds the prompt; a hardcoded value would drop the real charge.
+        val requests = engine.substringAfter("private fun runToolRequests(")
+            .substringBefore("internal fun")
+        assertTrue(requests.contains("batteryPercent"))
+        assertFalse(requests.contains("buildMessages(root, commanderMessageId, -1)"))
+    }
+}
 }

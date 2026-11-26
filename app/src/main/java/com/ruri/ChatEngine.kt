@@ -14,6 +14,13 @@ import java.io.File
  */
 object ChatEngine {
     const val OFFLINE_REPLY = "Связи нет. Отвечу, когда она вернётся."
+
+    /** Bound on tool round-trips in one turn: a confused model must not loop forever. */
+    private const val MAX_TOOL_HOPS = 8
+
+    /** Tool output injected back into the context, in characters. */
+    private const val TOOL_RESULT_LIMIT = 4000
+
     @Volatile private var lastFinalMessageId: String? = null
     private val responseLock = Any()
 
@@ -155,7 +162,7 @@ object ChatEngine {
                 recordDiagnostic(root, "ok", result.httpStatus, "", result.stages)
                 runCatching { RouteMeta.recordAttempt(root, Route.providerId(root)) }
                 runCatching { RouteMeta.recordHttpStatus(root, Route.providerId(root), result.httpStatus) }
-                return finishTurn(root, result.reply, commanderMessageId)
+                return finishTurn(root, result.reply, commanderMessageId, batteryPercent)
             }
 
             is Transport.Result.Failure -> {
@@ -186,15 +193,29 @@ object ChatEngine {
     }
 
     /** Cleans the raw provider answer and stores it as Ruri's chat message. */
-    private fun finishTurn(root: File, rawReply: String, commanderMessageId: String?): String {
+    private fun finishTurn(
+        root: File,
+        rawReply: String,
+        commanderMessageId: String?,
+        batteryPercent: Int = 50
+    ): String {
         val (replyWithoutDecision, _) = EmotionEngine.parseInitiativeDecision(rawReply)
         val (withoutEmotion, emotionDelta) = EmotionEngine.parseAndStrip(replyWithoutDecision)
         val emotion = if (emotionDelta != null) EmotionEngine.applyDelta(root, emotionDelta, "chat") else null
 
-        val (cleanReply, diaryTexts, _) = ToolLoop.stripActions(withoutEmotion)
+        // A tool request must be executed, not published. Previously the chat path only stripped
+        // the JSON, so the tool call vanished and the answer became "(не смогла сформулировать
+        // ответ)" — she silently lost the ability to read documents, pages and images.
+        val (cleanReply, diaryTexts, toolRequests) = ToolLoop.stripActions(withoutEmotion)
         diaryTexts.forEach { routeChatDiaryAction(root, it, emotion) }
 
-        val reply = resolveChatReply(cleanReply, diaryTexts.firstOrNull().orEmpty())
+        val resolved = if (toolRequests.isNotEmpty()) {
+            runToolRequests(root, withoutEmotion, toolRequests, emotion, commanderMessageId, batteryPercent)
+        } else {
+            resolveChatReply(cleanReply, diaryTexts.firstOrNull().orEmpty())
+        }
+
+        val reply = resolved
         if (recordAdultRefusal(
                 root = root,
                 routeId = Route.providerId(root),
@@ -214,6 +235,61 @@ object ChatEngine {
         runCatching { OfflineQueue.clear(root) }
         lastFinalMessageId = savedId
         return reply
+    }
+
+    /**
+     * Executes the tools she asked for, feeds the results back, and returns the final prose.
+     *
+     * Each round trip is bounded: a broken model could otherwise ask for tool after tool and
+     * never answer. If the follow-up produces another tool request the loop continues, but the
+     * hop count keeps it finite.
+     */
+    private fun runToolRequests(
+        root: File,
+        initialReply: String,
+        requests: List<JSONObject>,
+        emotion: JSONObject?,
+        commanderMessageId: String?,
+        batteryPercent: Int = 50
+    ): String {
+        val messages = buildMessages(root, commanderMessageId, batteryPercent)
+        var current = initialReply
+        var hops = 0
+        while (hops < MAX_TOOL_HOPS) {
+            val action = parseAction(current) ?: break
+            val name = action.optString("action")
+            val params = JSONObject(action.toString())
+            params.remove("action")
+
+            FileManager.appendEvent(root, SecretRedactor.redactEvent(
+                JSONObject().put("type", "tool_call").put("action", name).put("params", params)
+            ))
+            val result = executeTool(root, name, params)
+            val safeText = SecretRedactor.redactText(result.second).take(TOOL_RESULT_LIMIT)
+            FileManager.appendEvent(root, SecretRedactor.redactEvent(
+                JSONObject().put("type", "tool_result").put("action", name)
+                    .put("ok", result.first).put("text", safeText)
+            ))
+
+            messages.put(JSONObject().put("role", "user")
+                .put("content", "РЕЗУЛЬТАТ ИНСТРУМЕНТА $name:\n$safeText\n\n" +
+                    "Ответь обычной прозой по существу. Не возвращай JSON, если не нужен ещё один инструмент."))
+            current = requestToolFollowup(
+                model = JSONObject().put("api_key", Route.apiKey(root)),
+                messages = messages,
+                root = root,
+                routeId = Route.providerId(root),
+                task = Task.CHAT,
+                maxTokens = ChatStyle.replyBudget(root, currentCommanderText(root))
+            ) ?: break
+            hops++
+        }
+        if (hops >= MAX_TOOL_HOPS) {
+            return "Не удалось завершить цепочку действий: достигнут лимит $MAX_TOOL_HOPS вызовов."
+        }
+        val (cleaned, diaryAgain, _) = ToolLoop.stripActions(current)
+        diaryAgain.forEach { routeChatDiaryAction(root, it, emotion) }
+        return resolveChatReply(cleaned, diaryAgain.firstOrNull().orEmpty())
     }
 
     private fun currentCommanderText(root: File): String =
@@ -297,8 +373,9 @@ object ChatEngine {
             ChatStyle.architectureSection() +
             ChatStyle.chatDirective(root, commanderText) +
             ChatStyle.webReadHint(commanderText) +
-            // Only listed when files exist or the Commander mentions one.
-            ChatStyle.documentHint(commanderText, DocReader.list(root)) +
+            // Only documents here: images are advertised separately, and mixing them meant a
+            // markdown file could be listed as a document while an image was not.
+            ChatStyle.documentHint(commanderText, DocReader.listDocumentNames(root)) +
             ChatStyle.imageHint(
                 commanderText,
                 DocReader.listImageNames(root),
