@@ -127,12 +127,14 @@ object Vision {
         if (bytes.isEmpty()) return null to "Изображение пустое."
         if (bytes.size > MAX_IMAGE_BYTES) return null to "Изображение больше 8 МБ."
         if (!mime.startsWith("image/", ignoreCase = true)) return null to "Это не изображение."
-        val apiKey = Route.apiKey(root)
-        if (apiKey.isBlank()) return null to "Ключ провайдера не задан."
 
-        // Check the capability once; a cached refusal avoids repeating a failing request.
+        // A cached refusal is checked first: if the provider already said "no images", there is
+        // no point in repeating the request, and the reason is more specific than "no key".
         val known = supportState(root)
         if (known == false) return null to lastReason(root)
+
+        val apiKey = Route.apiKey(root)
+        if (apiKey.isBlank()) return null to "Ключ провайдера не задан."
 
         val messages = JSONArray().put(JSONObject()
             .put("role", "user")
@@ -165,7 +167,8 @@ object Vision {
         bytes.size > 3 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() -> "image/jpeg"
         bytes.size > 12 && String(bytes.sliceArray(0..3), Charsets.US_ASCII) == "RIFF" &&
             String(bytes.sliceArray(8..11), Charsets.US_ASCII) == "WEBP" -> "image/webp"
-        bytes.size > 6 && (String(bytes.sliceArray(0..5), Charsets.US_ASCII) == "GIF87a" ||
+        // "GIF87a"/"GIF89a" are exactly 6 bytes, so the guard must be >= 6.
+        bytes.size >= 6 && (String(bytes.sliceArray(0..5), Charsets.US_ASCII) == "GIF87a" ||
             String(bytes.sliceArray(0..5), Charsets.US_ASCII) == "GIF89a") -> "image/gif"
         else -> null
     }

@@ -399,7 +399,8 @@ class UiBridgeContractTest {
     @Test fun uiIsAMessengerWithoutTheRemovedFeatures() {
         val html = html()
         assertTrue(html.isNotBlank())
-        for (removed in listOf("МАРШРУТЫ", "VISION", "ПОЛКА", "ROUTERAPI", "shelf", "serper", "searxng")) {
+        // Vision is a live capability again, so it is no longer in this list.
+        for (removed in listOf("МАРШРУТЫ", "ПОЛКА", "ROUTERAPI", "shelf", "serper", "searxng")) {
             assertFalse("UI must not mention $removed", html.contains(removed, ignoreCase = true))
         }
         // The three panes of the down-graded app.
@@ -457,7 +458,9 @@ class UiBridgeContractTest {
             "getDiagnostics", "appendEvent", "completeChat", "readMemoryLayer", "readLastEvents")) {
             assertTrue("bridge must expose $method", activity.contains("fun $method("))
         }
-        assertFalse("vision bridge must be gone", activity.contains("fun visionStatus("))
+        // Vision is back, but it must report a real capability state, not a config flag.
+        assertTrue(activity.contains("fun visionStatus("))
+        assertTrue(activity.contains("fun checkVisionSupport("))
         assertFalse("shelf bridge must be gone", activity.contains("fun saveShelfFile("))
         assertFalse("search bridge must be gone", activity.contains("fun searchWeb("))
     }
@@ -1260,6 +1263,7 @@ class VisionCapabilityTest {
             FileManager.write(dir, "memory/vision_state.json", org.json.JSONObject()
                 .put("supported", false)
                 .put("reason", "Модель текстовая")
+                .put("checked_at", 1L)
                 .toString())
             val png = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)
             val (text, reason) = Vision.describeDetailed(dir, png, "image/png", "опиши")
