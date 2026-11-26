@@ -135,13 +135,14 @@ object ChatEngine {
             ?.optString("text").orEmpty()
 
         val result = Transport.chat(
-            safeMessages, apiKey, ChatStyle.replyBudget(root, commanderText), Route.model(root)
+            safeMessages, apiKey, ChatStyle.replyBudget(root, commanderText),
+            Route.model(root), Route.baseUrl(root)
         )
         when (result) {
             is Transport.Result.Success -> {
                 recordDiagnostic(root, "ok", result.httpStatus, "", result.stages)
-                runCatching { RouteMeta.recordAttempt(root, Route.ID) }
-                runCatching { RouteMeta.recordHttpStatus(root, Route.ID, result.httpStatus) }
+                runCatching { RouteMeta.recordAttempt(root, Route.providerId(root)) }
+                runCatching { RouteMeta.recordHttpStatus(root, Route.providerId(root), result.httpStatus) }
                 return finishTurn(root, result.reply, commanderMessageId)
             }
 
@@ -150,18 +151,18 @@ object ChatEngine {
                 var detail = result.detail
                 // MeroMero is only reachable through a VPN. A network-level failure while the
                 // tunnel is down is really "no VPN", which is terminal and actionable.
-                if (Route.REQUIRES_VPN && !NetState.vpn &&
+                if (Route.requiresVpn(root) && !NetState.vpn &&
                     (kind == "network" || kind == "timeout" || kind == "server" || kind == "bad_response")
                 ) {
                     kind = "no_vpn"
                     detail = detail.ifBlank { "VPN-туннель не обнаружен" }
                 }
                 recordDiagnostic(root, kind, result.httpStatus, detail, result.stages)
-                runCatching { RouteMeta.recordAttempt(root, Route.ID) }
+                runCatching { RouteMeta.recordAttempt(root, Route.providerId(root)) }
                 if (result.httpStatus != null) {
-                    runCatching { RouteMeta.recordHttpStatus(root, Route.ID, result.httpStatus!!) }
+                    runCatching { RouteMeta.recordHttpStatus(root, Route.providerId(root), result.httpStatus!!) }
                 }
-                runCatching { RouteMeta.recordFailure(root, Route.ID, kind, Task.CHAT) }
+                runCatching { RouteMeta.recordFailure(root, Route.providerId(root), kind, Task.CHAT) }
                 OfflineQueue.markPending(root)
                 throw ModelRequestFailure(
                     RetryPolicy.explain(kind, result.httpStatus, detail),
@@ -184,7 +185,7 @@ object ChatEngine {
         val reply = resolveChatReply(cleanReply, diaryTexts.firstOrNull().orEmpty())
         if (recordAdultRefusal(
                 root = root,
-                routeId = Route.ID,
+                routeId = Route.providerId(root),
                 task = Task.CHAT,
                 commanderText = currentCommanderText(root),
                 reply = reply,
@@ -194,9 +195,9 @@ object ChatEngine {
             throw ModelRequestFailure(RetryPolicy.explain("refusal"), 0L, "refusal")
         }
 
-        runCatching { RouteMeta.recordSuccess(root, Route.ID, Task.CHAT) }
+        runCatching { RouteMeta.recordSuccess(root, Route.providerId(root), Task.CHAT) }
         runCatching { OutcomeDigest.verifyClaims(root, reply) }
-        val savedId = appendFinalReply(root, reply, emotion, null, Route.DISPLAY_NAME, commanderMessageId)
+        val savedId = appendFinalReply(root, reply, emotion, null, Route.modelLabel(root), commanderMessageId)
         runCatching { BackupPolicy.checkpointState(root) }
         runCatching { OfflineQueue.clear(root) }
         lastFinalMessageId = savedId
@@ -398,9 +399,9 @@ object ChatEngine {
             val last = if (stages.length() > 0) stages.optJSONObject(stages.length() - 1) else null
             val entry = JSONObject()
                 .put("timestamp", System.currentTimeMillis())
-                .put("provider", Route.DISPLAY_NAME)
+                .put("provider", Route.modelLabel(root))
                 .put("model", Route.model(root))
-                .put("base_url", Route.BASE_URL)
+                .put("base_url", Route.baseUrl(root))
                 .put("vpn", NetState.vpn)
                 .put("online", NetState.online)
                 .put("result", kind)
@@ -628,7 +629,7 @@ object ChatEngine {
         model: JSONObject,
         messages: JSONArray,
         root: File? = null,
-        routeId: String = Route.ID,
+        routeId: String = Route.ID_ROUTEWAY,
         task: Task? = null,
         maxTokens: Int = 400
     ): String? {
@@ -642,7 +643,10 @@ object ChatEngine {
             ?: throw ModelRequestFailure(
                 "Не удалось собрать полный контекст памяти для продолжения ответа", 0L, "config"
             )
-        return when (val result = Transport.chat(safeMessages, apiKey, maxTokens, modelId)) {
+        return when (val result = Transport.chat(
+            safeMessages, apiKey, maxTokens, modelId,
+            root?.let { Route.baseUrl(it) } ?: Route.ROUTEWAY_BASE_URL
+        )) {
             is Transport.Result.Success -> {
                 if (root != null) runCatching { RouteMeta.recordSuccess(root, routeId, task) }
                 result.reply
@@ -682,7 +686,7 @@ object ChatEngine {
         reply: String,
         emotion: JSONObject? = null,
         meta: JSONObject? = null,
-        routeName: String = Route.DISPLAY_NAME,
+        routeName: String = Route.ROUTEWAY_BASE_URL.let { "Routeway" },
         commanderMessageId: String? = null
     ): String = appendFinalReplyInternal(root, reply, routeName, emotion, commanderMessageId)
 

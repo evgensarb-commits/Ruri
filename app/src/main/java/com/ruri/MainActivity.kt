@@ -440,6 +440,37 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun paidModelId(): String = Route.paidModelId(filesDir)
 
+        /** Model id used on routerai.ru (third provider option). */
+        @JavascriptInterface
+        fun routeraiModelId(): String = Route.routerAiModelId(filesDir)
+
+        @JavascriptInterface
+        fun setRouteraiModelId(id: String): String {
+            return try {
+                require(id.trim().isNotBlank()) { "Идентификатор модели пуст" }
+                Route.setRouterAiModelId(filesDir, id)
+                Route.ensure(filesDir)
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "model id save failed") }
+        }
+
+        /** routerai.ru key, stored in its own slot so switching providers keeps both. */
+        @JavascriptInterface
+        fun setRouteraiKey(key: String): String {
+            return try {
+                require(key.trim().isNotBlank()) { "Ключ пуст" }
+                Route.setProviderKey(filesDir, Route.ID_ROUTERAI, key)
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "key save failed") }
+        }
+
+        @JavascriptInterface
+        fun routeraiKeyState(): String = JSONObject()
+            .put("has_key", Route.hasProviderKey(filesDir, Route.ID_ROUTERAI))
+            .put("active", Route.isRouterAI(filesDir))
+            .put("model", Route.routerAiModelId(filesDir))
+            .toString()
+
         @JavascriptInterface
         fun setPaidModelId(id: String): String {
             return try {
@@ -566,12 +597,12 @@ class MainActivity : AppCompatActivity() {
                 if (!Route.hasKey(filesDir)) return@runCatching "Ключ Routeway не задан"
                 val state = CommanderReplyQueue.status(filesDir)
                 when {
-                    state.optInt("pending", 0) == 0 -> Route.DISPLAY_NAME
+                    state.optInt("pending", 0) == 0 -> Route.modelLabel(filesDir)
                     state.optBoolean("manual_retry", false) ->
-                        Route.DISPLAY_NAME + " · " + RetryPolicy.label(state.optString("last_error_kind"))
-                    else -> Route.DISPLAY_NAME + " · ждёт повтора"
+                        Route.modelLabel(filesDir) + " · " + RetryPolicy.label(state.optString("last_error_kind"))
+                    else -> Route.modelLabel(filesDir) + " · ждёт повтора"
                 }
-            }.getOrDefault(Route.DISPLAY_NAME)
+            }.getOrDefault(Route.modelLabel(filesDir))
         }
 
         @JavascriptInterface

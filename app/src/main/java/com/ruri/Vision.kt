@@ -88,7 +88,7 @@ object Vision {
                     .put(JSONObject().put("type", "text").put("text", "Опиши одно слово: что на картинке?"))
                     .put(JSONObject().put("type", "image_url")
                         .put("image_url", JSONObject().put("url", "data:image/png;base64," + TINY_PNG)))))
-            return when (val result = Transport.chat(messages, apiKey, 40, Route.model(root))) {
+            return when (val result = Transport.chat(messages, apiKey, 40, Route.model(root), Route.baseUrl(root))) {
                 is Transport.Result.Success -> {
                     remember(root, true, "Провайдер принял тестовое изображение.")
                     true to "Провайдер принял тестовое изображение."
@@ -144,7 +144,7 @@ object Vision {
                     .put("url", "data:" + mime + ";base64," +
                         Base64.encodeToString(bytes, Base64.NO_WRAP))))))
 
-        return when (val result = Transport.chat(messages, apiKey, 700, Route.model(root))) {
+        return when (val result = Transport.chat(messages, apiKey, 700, Route.model(root), Route.baseUrl(root))) {
             is Transport.Result.Success -> {
                 if (supportState(root) == null) remember(root, true, "Провайдер принял изображение.")
                 val safe = SecretRedactor.redactText(result.reply).take(MAX_DESCRIPTION)

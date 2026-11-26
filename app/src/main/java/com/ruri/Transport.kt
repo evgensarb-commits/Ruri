@@ -41,7 +41,8 @@ object Transport {
         messages: JSONArray,
         apiKey: String,
         maxTokens: Int = 512,
-        modelId: String = Route.MODEL_FREE
+        modelId: String = Route.MODEL_FREE,
+        baseUrl: String = Route.ROUTEWAY_BASE_URL
     ): Result {
         val stages = JSONArray()
         val startedAt = System.nanoTime()
@@ -49,10 +50,10 @@ object Transport {
         var httpStatus: Int? = null
         try {
             val endpoint = runCatching {
-                URL(Route.BASE_URL.trimEnd('/') + "/chat/completions")
+                URL(baseUrl.trimEnd('/') + "/chat/completions")
             }.getOrElse {
-                addStage(stages, "CONFIG", false, 0L, "неверный адрес: ${Route.BASE_URL}")
-                return Result.Failure("config", null, "неверный адрес: ${Route.BASE_URL}", stages, elapsed(startedAt))
+                addStage(stages, "CONFIG", false, 0L, "неверный адрес: $baseUrl")
+                return Result.Failure("config", null, "неверный адрес: $baseUrl", stages, elapsed(startedAt))
             }
             val host = endpoint.host
 
@@ -178,17 +179,21 @@ object Transport {
      * It proves the key is accepted and the provider is reachable right now, without
      * spending completion tokens. The stage list is reused by the diagnostics screen.
      */
-    fun probe(apiKey: String, modelId: String = Route.MODEL_FREE): Result {
+    fun probe(
+        apiKey: String,
+        modelId: String = Route.MODEL_FREE,
+        baseUrl: String = Route.ROUTEWAY_BASE_URL
+    ): Result {
         val stages = JSONArray()
         val startedAt = System.nanoTime()
         var connection: HttpURLConnection? = null
         var httpStatus: Int? = null
         try {
             val endpoint = runCatching {
-                URL(Route.BASE_URL.trimEnd('/') + "/models")
+                URL(baseUrl.trimEnd('/') + "/models")
             }.getOrElse {
-                addStage(stages, "CONFIG", false, 0L, "неверный адрес: ${Route.BASE_URL}")
-                return Result.Failure("config", null, "неверный адрес: ${Route.BASE_URL}", stages, elapsed(startedAt))
+                addStage(stages, "CONFIG", false, 0L, "неверный адрес: $baseUrl")
+                return Result.Failure("config", null, "неверный адрес: $baseUrl", stages, elapsed(startedAt))
             }
             val host = endpoint.host
 
@@ -260,7 +265,7 @@ object Transport {
                 // Some gateways do not expose /models. A 404 there says nothing about the
                 // route, so fall back to the cheapest possible completion before judging.
                 if (code == 404) {
-                    val fallback = completionProbe(apiKey, modelId, stages, startedAt)
+                    val fallback = completionProbe(apiKey, modelId, baseUrl, stages, startedAt)
                     if (fallback != null) return fallback
                 }
                 return Result.Failure(kind, code, apiMessage(text), stages, elapsed(startedAt))
@@ -283,12 +288,13 @@ object Transport {
     private fun completionProbe(
         apiKey: String,
         modelId: String,
+        baseUrl: String,
         stages: JSONArray,
         startedAt: Long
     ): Result? {
         var connection: HttpURLConnection? = null
         return try {
-            val endpoint = URL(Route.BASE_URL.trimEnd('/') + "/chat/completions")
+            val endpoint = URL(baseUrl.trimEnd('/') + "/chat/completions")
             connection = (endpoint.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = CONNECT_TIMEOUT_MS

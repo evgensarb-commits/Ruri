@@ -140,7 +140,7 @@ object Thinker {
             val model = models.optJSONObject(index) ?: continue
             // The single route must carry the full memory context.
             if (model.optString("api_key").isBlank()) continue
-            val routeId = model.optString("id").ifBlank { Route.ID }
+            val routeId = model.optString("id").ifBlank { Route.providerId(root) }
             val requestNext: (JSONArray) -> String? = { nextMessages ->
                 if (followupRequests >= 8) {
                     appendEvent(root, "model_request_budget_exhausted", JSONObject()

@@ -33,7 +33,7 @@ object Diagnostics {
         val root = ctx.filesDir
         NetState.refresh(ctx.applicationContext)
         val apiKey = Route.apiKey(root)
-        val result = Transport.probe(apiKey, Route.model(root))
+        val result = Transport.probe(apiKey, Route.model(root), Route.baseUrl(root))
         val record = JSONObject()
             .put("ok", result is Transport.Result.Success)
             .put("network", JSONObject().put("online", NetState.online).put("vpn", NetState.vpn))
@@ -45,14 +45,14 @@ object Diagnostics {
             is Transport.Result.Success -> {
                 record.put("http_status", result.httpStatus)
                     .put("error_kind", "ok")
-                    .put("verdict", verdict("ok", result.httpStatus, "", NetState.online, NetState.vpn, apiKey))
+                    .put("verdict", verdict("ok", result.httpStatus, "", NetState.online, NetState.vpn, apiKey, Route.requiresVpn(root)))
                 // A successful probe is worth remembering: it is evidence, not a guess.
                 runCatching {
                     NetworkDiagnostics.record(root, JSONObject()
                         .put("timestamp", System.currentTimeMillis())
-                        .put("provider", Route.DISPLAY_NAME)
+                        .put("provider", Route.modelLabel(root))
                         .put("model", Route.model(root))
-                        .put("base_url", Route.BASE_URL)
+                        .put("base_url", Route.baseUrl(root))
                         .put("vpn", NetState.vpn)
                         .put("online", NetState.online)
                         .put("result", "ok")
@@ -69,13 +69,13 @@ object Diagnostics {
                     .put("error_kind", result.kind)
                     .put("detail", result.detail)
                     .put("verdict", verdict(result.kind, result.httpStatus, result.detail,
-                        NetState.online, NetState.vpn, apiKey))
+                        NetState.online, NetState.vpn, apiKey, Route.requiresVpn(root)))
                 runCatching {
                     NetworkDiagnostics.record(root, JSONObject()
                         .put("timestamp", System.currentTimeMillis())
-                        .put("provider", Route.DISPLAY_NAME)
+                        .put("provider", Route.modelLabel(root))
                         .put("model", Route.model(root))
-                        .put("base_url", Route.BASE_URL)
+                        .put("base_url", Route.baseUrl(root))
                         .put("vpn", NetState.vpn)
                         .put("online", NetState.online)
                         .put("result", result.kind)
@@ -136,12 +136,12 @@ object Diagnostics {
     }
 
     private fun routeInfo(root: File): JSONObject = JSONObject()
-        .put("id", Route.ID)
-        .put("name", Route.DISPLAY_NAME)
-        .put("base_url", Route.BASE_URL)
+        .put("id", Route.providerId(root))
+        .put("name", Route.modelLabel(root))
+        .put("base_url", Route.baseUrl(root))
         .put("model", Route.model(root))
         .put("has_key", Route.hasKey(root))
-        .put("needs_vpn", Route.REQUIRES_VPN)
+        .put("needs_vpn", Route.requiresVpn(root))
 
     private fun lastAttempt(root: File): JSONObject {
         val raw = runCatching { NetworkDiagnostics.latest(root) }.getOrDefault("{}")
@@ -189,13 +189,14 @@ object Diagnostics {
         detail: String,
         online: Boolean,
         vpn: Boolean,
-        apiKey: String
+        apiKey: String,
+        requiresVpn: Boolean = true
     ): String = when {
         !online ->
             "Нет интернета: Android не видит активную сеть. Проверь Wi-Fi/мобильные данные."
         apiKey.isBlank() ->
             "Ключ Routeway не задан. Настройки → Подключение → вставь ключ и сохрани."
-        !vpn && Route.REQUIRES_VPN && kind != "ok" ->
+        requiresVpn && !vpn && kind != "ok" ->
             "VPN не обнаружен, а Gemma MeroMero работает только через VPN. " +
                 RetryPolicy.explain(kind, httpStatus, detail)
         kind == "ok" ->
