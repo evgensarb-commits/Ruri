@@ -337,11 +337,11 @@ input:focus,select:focus,textarea:focus{border-color:rgba(167,139,250,.6);box-sh
           </div>
           <div class="inline-status" id="routeraiKeyStatus"></div>
           <label class="field-label" for="routeraiModelInput">МОДЕЛЬ НА ROUTERAI</label>
-          <input id="routeraiModelInput" type="text" autocomplete="off" spellcheck="false" placeholder="google/gemma-3-27b-it">
+          <input id="routeraiModelInput" type="text" autocomplete="off" spellcheck="false" placeholder="вставь id модели из каталога">
           <div class="row-actions">
             <button class="btn ghost" id="saveRouteraiModel" type="button">Сохранить модель</button>
           </div>
-          <p class="hint">Скопируй точный id из каталога routerai.ru. Этот провайдер работает без VPN.</p>
+          <p class="hint">Здесь нет предзаполненной модели: скопируй точный id из каталога routerai.ru и вставь его выше. Без id запросы не отправляются. Этот провайдер работает без VPN.</p>
         </div></div>
 
       <div class="card">
@@ -1359,10 +1359,17 @@ function loadRouterai(){
   var model = $('routeraiModelInput');
   if(model && !model.value) model.value = String(data.model || '');
   if(isRouterai){
-    setStatus('routeraiKeyStatus', data.has_key === true
-      ? 'Ключ routerai сохранён.'
-      : 'Ключ routerai не задан — вставь его выше.',
-      data.has_key === true ? 'good' : 'bad');
+    var hasKey = data.has_key === true;
+    var hasModel = String(data.model || '').replace(/\s/g, '') !== '';
+    if(!hasKey && !hasModel){
+      setStatus('routeraiKeyStatus', 'Нужны ключ и идентификатор модели — вставь оба.', 'bad');
+    }else if(!hasKey){
+      setStatus('routeraiKeyStatus', 'Модель выбрана, но ключ routerai не задан.', 'bad');
+    }else if(!hasModel){
+      setStatus('routeraiKeyStatus', 'Ключ сохранён, но идентификатор модели не задан — без него запросы не уйдут.', 'bad');
+    }else{
+      setStatus('routeraiKeyStatus', 'Всё готово: ключ и модель заданы.', 'good');
+    }
   }
 }
 

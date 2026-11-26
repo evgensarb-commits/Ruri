@@ -109,6 +109,18 @@ object ChatEngine {
             OfflineQueue.markPending(root)
             throw ModelRequestFailure(RetryPolicy.explain("no_key"), 0L, "no_key")
         }
+        if (Route.routerAiUnconfigured(root)) {
+            // Ascertainable problem, not a transient one: explain it instead of sending a
+            // request the provider would reject with an unclear 404.
+            val detail = "routerai выбран, но модель не задана"
+            recordDiagnostic(root, "config", null, detail, JSONArray())
+            throw ModelRequestFailure(
+                "Выбран routerai.ru, но идентификатор модели не задан. " +
+                    "Открой «Настройки» → «Модель» и вставь точный id из каталога routerai.ru.",
+                0L,
+                "config"
+            )
+        }
         if (!NetState.online) {
             val detail = "Android сообщает об отсутствии сети"
             recordDiagnostic(root, "offline", null, detail, JSONArray())
