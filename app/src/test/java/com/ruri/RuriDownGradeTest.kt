@@ -1485,7 +1485,6 @@ class RouterAiProviderTest {
     }
 }
 
-}
 /**
  * Regression: the routerai option existed but was unreachable in the UI for two reasons.
  */
