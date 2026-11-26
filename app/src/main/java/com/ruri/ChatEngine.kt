@@ -127,7 +127,16 @@ object ChatEngine {
         }
         val safeMessages = providerMessagesWithFullMemory(messages) ?: messages
 
-        val result = Transport.chat(safeMessages, apiKey, 260, Route.model(root))
+        // The newest Commander message decides the answer length. Read it here, in the
+        // request path, so the budget is available before the call.
+        val commanderText = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 1000)
+            .asReversed().asSequence().mapNotNull { line -> runCatching { JSONObject(line) }.getOrNull() }
+            .firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" }
+            ?.optString("text").orEmpty()
+
+        val result = Transport.chat(
+            safeMessages, apiKey, ChatStyle.replyBudget(root, commanderText), Route.model(root)
+        )
         when (result) {
             is Transport.Result.Success -> {
                 recordDiagnostic(root, "ok", result.httpStatus, "", result.stages)
@@ -244,6 +253,12 @@ object ChatEngine {
             }.getOrNull()
         }.take(6).asReversed().joinToString("\n")
         val bannedPhrases = character.optJSONArray("banned_phrases") ?: JSONArray()
+        // The newest Commander message decides the answer mode: short by default, detailed
+        // when explicitly requested, role-play when the switch is on.
+        val commanderText = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 1000)
+            .asReversed().asSequence().mapNotNull { line -> runCatching { JSONObject(line) }.getOrNull() }
+            .firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" }
+            ?.optString("text").orEmpty()
 
         val system = "Имя: ${character.optString("name")}; обозначение: ${character.optString("designation")}. " +
             "Личность: ${character.optString("persona")}. " +
@@ -267,7 +282,7 @@ object ChatEngine {
             "Активные цели: ${goals.optJSONArray("active") ?: JSONArray()}. " +
             "Незавершённые задачи: ${state.optJSONArray("active_tasks") ?: JSONArray()}. " +
             ChatStyle.architectureSection() +
-            ChatStyle.chatDirective(root) +
+            ChatStyle.chatDirective(root, commanderText) +
             "Ты общаешься с Командиром в чате приложения. Отвечай обычной прозой, без JSON и без служебных блоков. " +
             "Ниже — ТВОЯ ДОЛГОСРОЧНАЯ ПАМЯТЬ. Это не контекст одного диалога; ты помнишь между сессиями.\n" +
             "ТВОЯ АВТОБИОГРАФИЯ (L3):\n$summary\n" +
@@ -556,7 +571,8 @@ object ChatEngine {
         messages: JSONArray,
         root: File? = null,
         routeId: String = Route.ID,
-        task: Task? = null
+        task: Task? = null,
+        maxTokens: Int = 400
     ): String? {
         val apiKey = model.optString("api_key").ifBlank { root?.let { Route.apiKey(it) }.orEmpty() }
         // The provider id comes from the config when a root is available; otherwise fall back
@@ -568,7 +584,7 @@ object ChatEngine {
             ?: throw ModelRequestFailure(
                 "Не удалось собрать полный контекст памяти для продолжения ответа", 0L, "config"
             )
-        return when (val result = Transport.chat(safeMessages, apiKey, 400, modelId)) {
+        return when (val result = Transport.chat(safeMessages, apiKey, maxTokens, modelId)) {
             is Transport.Result.Success -> {
                 if (root != null) runCatching { RouteMeta.recordSuccess(root, routeId, task) }
                 result.reply

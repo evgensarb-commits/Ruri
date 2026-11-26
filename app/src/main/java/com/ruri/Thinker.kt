@@ -148,7 +148,12 @@ object Thinker {
                     null
                 } else {
                     followupRequests++
-                    ChatEngine.requestToolFollowup(model, nextMessages, root, routeId, Task.CHAT)
+                    ChatEngine.requestToolFollowup(
+                        model, nextMessages, root, routeId, Task.CHAT,
+                        // Continuation of the same turn: same budget, so a long answer
+                        // requested by the Commander is never cut in half.
+                        maxTokens = if (initiative) 400 else 220
+                    )
                 }
             }
             runCatching { RouteMeta.recordAttempt(root, routeId) }
@@ -389,7 +394,8 @@ object Thinker {
             "ТВОЯ АВТОБИОГРАФИЯ (L3):\n" + summary + "\n" +
             "ПОСЛЕДНИЕ СОБЫТИЯ ТВОЕГО ТЕЛА (L0):\n" + (if (initiative) bodyEventText + "\n" + notificationText else bodyEventText) + "\n"
         val prompt = if (initiative) common +
-            "\n" + ChatStyle.architectureSection() + ChatStyle.chatDirective(root) +
+            // An initiative is an unprompted message: it must stay short, so no detailed mode.
+            "\n" + ChatStyle.architectureSection() + ChatStyle.chatDirective(root, "") +
             "Сейчас ты сама решила написать Командиру после долгой тишины. Выбери форму и объём сообщения по полю length_policy и текущему настроению."
         else common +
             "\nРЕЖИМ ДНЕВНИКА. Пиши ТОЛЬКО внутреннюю мысль от первого лица: 1-3 предложения, без сцен, без действий в звёздочках, без ремарок в скобках, без реплик и без обращений к Командиру как к собеседнику сцены. Мысль - это то, что ты чувствуешь и думаешь про себя, а не то, что ты делаешь или говоришь ему.\n" +
