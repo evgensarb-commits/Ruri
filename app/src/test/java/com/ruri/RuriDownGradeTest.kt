@@ -1788,7 +1788,9 @@ class ChatToolExecutionTest {
         // document request silently vanished and the reply became the failure placeholder.
         assertTrue("tool requests must be captured", finish.contains("toolRequests"))
         assertTrue("and acted on", finish.contains("runToolRequests"))
-        assertFalse("must not be dropped", finish.contains("ToolLoop.stripActions(withoutEmotion)\n"))
+        // The actual defect: the third element of the destructuring was discarded.
+        assertFalse("the tool list must not be dropped into _",
+            finish.contains("val (cleanReply, diaryTexts, _) = ToolLoop.stripActions"))
     }
 
     @Test fun theToolLoopIsBoundedSoItCannotHang() {
