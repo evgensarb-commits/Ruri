@@ -665,7 +665,9 @@ class ChatStyleModesTest {
             assertTrue(directive.contains("РЕЖИМ ЧАТА"))
             assertTrue(directive.contains("звёздочки"))
             assertTrue(directive.contains("ремарки"))
-            assertTrue(directive.contains("1–4"))
+            // The Commander wants a messenger, not essays: the cap must be stated in words.
+            assertTrue(directive.contains("2–3"))
+            assertTrue(directive.contains("ВЫСШИЙ ПРИОРИТЕТ"))
             assertFalse("normal mode must not invite narration",
                 directive.contains("РОЛЕВОЙ"))
         } finally { dir.deleteRecursively() }

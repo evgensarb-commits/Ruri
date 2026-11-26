@@ -218,8 +218,9 @@ class MainActivity : AppCompatActivity() {
             pushQueueState()
             return
         }
+        val battery = BatteryLevel.get(this)
         chatExecutor.execute {
-            val outcome = runCatching { ChatEngine.respond(filesDir, null) }
+            val outcome = runCatching { ChatEngine.respond(filesDir, null, battery) }
             outcome.onSuccess { reply ->
                 val messageId = ChatEngine.lastSavedReplyId()
                 mainHandler.post {
@@ -374,7 +375,8 @@ class MainActivity : AppCompatActivity() {
             }
             chatExecutor.execute {
                 runCatching { CommanderReplyQueue.enqueue(filesDir, commanderMessageId) }
-                val outcome = runCatching { ChatEngine.respond(filesDir, commanderMessageId) }
+                val battery = BatteryLevel.get(this@MainActivity)
+                val outcome = runCatching { ChatEngine.respond(filesDir, commanderMessageId, battery) }
                 outcome.onSuccess { reply ->
                     val messageId = ChatEngine.lastSavedReplyId()
                     mainHandler.post {
