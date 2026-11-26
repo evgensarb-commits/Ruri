@@ -971,4 +971,94 @@ class AdaptiveLengthTest {
         assertTrue(thinker.contains("ChatStyle.chatDirective(root, \"\")"))
     }
 }
+
+/**
+ * Page reading: a real tool, but only when the Commander asks for it, and never for
+ * local or service addresses.
+ */
+class WebReadToolTest {
+    @Test fun ordinaryChatDoesNotAdvertisePageReading() {
+        for (text in listOf("привет", "как дела?", "расскажи подробно про память", "что делаешь")) {
+            assertFalse("must not offer read_url for: $text", ChatStyle.wantsWebRead(text))
+            assertTrue("hint must be empty", ChatStyle.webReadHint(text).isEmpty())
+        }
+    }
+
+    @Test fun anExplicitRequestOrALinkEnablesTheTool() {
+        val requests = listOf(
+            "прочитай https://example.com/article",
+            "открой эту статью",
+            "посмотри что на сайте",
+            "прочти страницу про котиков",
+            "перейди по ссылке и перескажи",
+            "скинул ссылку, глянь"
+        )
+        for (text in requests) {
+            assertTrue("must detect: $text", ChatStyle.wantsWebRead(text))
+            val hint = ChatStyle.webReadHint(text)
+            assertTrue("hint must describe the action: $text", hint.contains("read_url"))
+            assertTrue(hint.contains("Не выдумывай"))
+        }
+    }
+
+    @Test fun parserAcceptsOnlyHttpAndRejectsLocalTargets() {
+        val ok = ChatEngine.parseAction("""{"action":"read_url","url":"https://example.com/a"}""")
+        assertEquals("read_url", ok?.optString("action"))
+        // Wrong scheme, extra fields, an oversized URL and a denylisted page all fail.
+        assertNull(ChatEngine.parseAction("""{"action":"read_url","url":"file:///etc/passwd"}"""))
+        assertNull(ChatEngine.parseAction("""{"action":"read_url","url":"https://ok.example","x":1}"""))
+        assertNull(ChatEngine.parseAction("""{"action":"read_url","url":"https://ok.example/${"a".repeat(2100)}"}"""))
+    }
+
+    @Test fun localAndServiceAddressesAreRefused() {
+        // The model must not be able to probe the phone's own network or the cloud metadata.
+        val local = listOf(
+            "http://localhost/admin", "http://127.0.0.1:8080/", "http://192.168.1.1/",
+            "http://10.0.0.1/", "http://172.16.0.1/", "http://169.254.169.254/latest/meta-data/",
+            "http://[::1]/", "http://printer.local/"
+        )
+        for (url in local) {
+            val (ok, message) = UrlReader.read(java.nio.file.Files.createTempDirectory("x").toFile(), url)
+            assertFalse("must refuse $url", ok)
+            assertTrue("must explain $url: $message", message.isNotBlank())
+        }
+    }
+
+    @Test fun htmlIsStrippedToReadableText() {
+        val html = "<html><head><title>Заголовок</title><style>p{}</style></head>" +
+            "<body><nav>меню</nav><h1>Заголовок</h1><p>Первый абзац.</p>" +
+            "<script>evil()</script><p>Второй &amp; последний.</p></body></html>"
+        val text = UrlReader.extractHtml(html)
+        assertTrue(text.contains("Первый абзац."))
+        assertTrue(text.contains("Второй & последний."))
+        assertFalse("scripts must be gone", text.contains("evil"))
+        assertFalse("styles must be gone", text.contains("p{}"))
+        assertFalse("markup must be gone", text.contains("<h1>"))
+        assertFalse("navigation must be gone", text.contains("меню"))
+        assertEquals("Заголовок", UrlReader.titleOf(html))
+    }
+
+    @Test fun anEmptyShellIsReportedHonestly() {
+        val dir = java.nio.file.Files.createTempDirectory("x").toFile()
+        try {
+            val (ok, message) = UrlReader.contentResult(dir, "text/html",
+                "<html><body><script>app()</script></body></html>".toByteArray())
+            assertFalse(ok)
+            assertTrue("must explain the reason: $message",
+                message.contains("нет читаемого текста"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun theToolIsWiredIntoTheLoopAndExecutor() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        assertTrue(engine.contains("\"read_url\" ->"))
+        assertTrue(engine.contains("UrlReader.read(root"))
+        assertTrue(engine.contains("ChatStyle.webReadHint(commanderText)"))
+        val loop = RepoSources.text("app/src/main/java/com/ruri/ToolLoop.kt")
+        assertTrue(loop.contains("\"read_url\""))
+        // The self-description must not claim the faculty is dead.
+        val capabilities = RepoSources.text("app/src/main/java/com/ruri/Capabilities.kt")
+        assertTrue(capabilities.contains("Читать страницу по ссылке"))
+    }
+}
 }

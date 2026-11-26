@@ -30,7 +30,8 @@ object Capabilities {
             .put("Я помню между сессиями. Это не контекст одного диалога, это моя память."))
         .put("actions", JSONArray()
             .put("Внутренняя жизнь: инициатива, дневник и смена настроения — обычным текстом ответа, не JSON.")
-            .put("Локальная автономия: инициатива, дневник и поддержание текущего состояния."))
+            .put("Локальная автономия: инициатива, дневник и поддержание текущего состояния.")
+            .put("Читать страницу по ссылке: Командир даёт адрес, я открываю и пересказываю текст."))
         .put("limits", JSONArray()
             .put("Я живу только в этом чате: внешних инструментов у меня нет.")
             .put("Я не выхожу за пределы своей песочницы: чужие приложения, системные разделы и процессы телефона мне недоступны.")
@@ -100,7 +101,9 @@ object Capabilities {
     /** Markers of organs removed by the down-grade. */
     private val retiredOrganMarkers = listOf(
         "shelf", "полк", "vision", "изображен", "картинк", "фото", "скриншот",
-        "web_search", "поиск", "search", "read_url", "url", "файл", "документ"
+        // read_url is a live tool again (Commander-requested page reads). Search
+        // engines, shelves and file access still do not exist.
+        "web_search", "поиск в интернете", "search", "файл", "документ", "полк"
     )
 
     internal fun describesRetiredOrgan(value: String): Boolean {
