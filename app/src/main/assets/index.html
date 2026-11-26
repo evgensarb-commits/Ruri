@@ -245,7 +245,7 @@ input:focus,select:focus,textarea:focus{border-color:rgba(167,139,250,.6);box-sh
         <div class="topbar-title">РУРИ</div>
         <div class="topbar-sub" id="chatStatus">загрузка…</div>
       </div>
-      <button class="icon" id="pickImage" type="button" aria-label="Прикрепить изображение">КАРТ</button>
+      <button class="icon" id="pickImage" type="button" aria-label="Прикрепить изображение" title="Прикрепить изображение"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
       <button class="icon style-toggle" id="styleToggle" type="button" aria-pressed="false"
               aria-label="Режим ролевой игры">РП</button>
       <button class="icon" id="refreshChat" type="button" aria-label="Обновить чат">
@@ -423,6 +423,13 @@ input:focus,select:focus,textarea:focus{border-color:rgba(167,139,250,.6);box-sh
         <div id="diagState"></div>
         <div id="diagResult"></div>
         <div class="log-box" id="diagLogBox" hidden></div>
+      </div>
+
+      <div class="card">
+        <span class="card-label">Длина ответа</span>
+        <p class="hint">Сколько токенов разрешено на один ответ. Ползунок влево — короче, вправо — длиннее. Поставь на ноль, чтобы длина выбиралась автоматически по режиму. Если в ролевой сцене ответ обрывается на полуслове — увеличь.</p>
+        <input id="tokenLimit" type="range" min="0" max="8192" step="128" value="0">
+        <div class="inline-status" id="tokenLimitStatus">Автоматически</div>
       </div>
 
       <div class="card">
@@ -781,6 +788,28 @@ function renderQueue(data){
    The diary ignores this switch: a diary entry is always her inner voice. */
 function styleOn(){
   return call('roleplayMode', [], false) === true;
+}
+
+/* Length control: a fixed token cap is exactly what cuts a scene mid-sentence, so the
+   Commander gets the dial instead of a hard-coded constant. */
+function refreshTokenLimit(){
+  var input = $('tokenLimit');
+  var max = Number(call('maxTokenLimit', [], 8192)) || 8192;
+  var current = Number(call('tokenLimit', [], 0)) || 0;
+  if(current > max) current = max;
+  if(input){ input.setAttribute('max', String(max)); input.value = String(current); }
+  setStatus('tokenLimitStatus',
+    current > 0 ? ('Предел ответа: ' + current + ' токенов.') : 'Автоматически — по режиму.',
+    current > 0 ? 'good' : '');
+}
+
+function saveTokenLimit(){
+  var input = $('tokenLimit');
+  if(!input) return;
+  var value = Number(input.value) || 0;
+  var result = call('setTokenLimit', [value], 'ERROR');
+  if(isErr(result)){ setStatus('tokenLimitStatus', errText(result), 'bad'); return; }
+  refreshTokenLimit();
 }
 
 function refreshStyleToggle(){
@@ -2086,6 +2115,19 @@ function bindEvents(){
   var styleBtn = $('styleToggle');
   if(styleBtn) styleBtn.addEventListener('click', toggleStyle);
   refreshStyleToggle();
+
+  var limitInput = $('tokenLimit');
+  if(limitInput){
+    limitInput.addEventListener('change', saveTokenLimit);
+    // Live label while dragging, saved only on release: one write per adjustment.
+    limitInput.addEventListener('input', function(){
+      var value = Number(limitInput.value) || 0;
+      setStatus('tokenLimitStatus',
+        value > 0 ? ('Предел ответа: ' + value + ' токенов.') : 'Автоматически — по режиму.',
+        value > 0 ? 'good' : '');
+    });
+  }
+  refreshTokenLimit();
 
   var refresh = $('refreshChat');
   if(refresh) refresh.addEventListener('click', function(){

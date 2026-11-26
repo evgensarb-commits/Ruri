@@ -417,6 +417,21 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun roleplayMode(): Boolean = ChatStyle.roleplayEnabled(filesDir)
 
+        /** Commander-set completion cap. 0 keeps the per-mode default. */
+        @JavascriptInterface
+        fun tokenLimit(): Int = ChatStyle.manualTokenLimit(filesDir)
+
+        @JavascriptInterface
+        fun setTokenLimit(tokens: Int): String {
+            return try {
+                ChatStyle.setManualTokenLimit(filesDir, tokens)
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "token limit save failed") }
+        }
+
+        @JavascriptInterface
+        fun maxTokenLimit(): Int = ChatStyle.MAX_TOKEN_LIMIT
+
         @JavascriptInterface
         fun setRoleplayMode(enabled: Boolean): String {
             return try { ChatStyle.setRoleplay(filesDir, enabled); "OK" }
