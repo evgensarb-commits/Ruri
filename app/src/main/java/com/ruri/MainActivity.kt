@@ -471,6 +471,36 @@ class MainActivity : AppCompatActivity() {
             .put("model", Route.routerAiModelId(filesDir))
             .toString()
 
+        /** closerouter.dev model id and key, same slot scheme as routerai. */
+        @JavascriptInterface
+        fun closeRouterModelId(): String = Route.closeRouterModelId(filesDir)
+
+        @JavascriptInterface
+        fun setCloseRouterModelId(id: String): String {
+            return try {
+                require(id.trim().isNotBlank()) { "Идентификатор модели пуст" }
+                Route.setCloseRouterModelId(filesDir, id)
+                Route.ensure(filesDir)
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "model id save failed") }
+        }
+
+        @JavascriptInterface
+        fun setCloseRouterKey(key: String): String {
+            return try {
+                require(key.trim().isNotBlank()) { "Ключ пуст" }
+                Route.setProviderKey(filesDir, Route.ID_CLOSEROUTER, key)
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "key save failed") }
+        }
+
+        @JavascriptInterface
+        fun closeRouterKeyState(): String = JSONObject()
+            .put("has_key", Route.hasProviderKey(filesDir, Route.ID_CLOSEROUTER))
+            .put("active", Route.isCloseRouter(filesDir))
+            .put("model", Route.closeRouterModelId(filesDir))
+            .toString()
+
         @JavascriptInterface
         fun setPaidModelId(id: String): String {
             return try {
