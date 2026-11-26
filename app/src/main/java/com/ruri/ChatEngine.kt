@@ -127,6 +127,13 @@ object ChatEngine {
         }
         val safeMessages = providerMessagesWithFullMemory(messages) ?: messages
 
+        // The newest Commander message decides the answer length. Read it here, in the
+        // request path, so the budget is available before the call.
+        val commanderText = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 1000)
+            .asReversed().asSequence().mapNotNull { line -> runCatching { JSONObject(line) }.getOrNull() }
+            .firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" }
+            ?.optString("text").orEmpty()
+
         val result = Transport.chat(
             safeMessages, apiKey, ChatStyle.replyBudget(root, commanderText), Route.model(root)
         )
