@@ -194,6 +194,38 @@ object SecretStore {
     }
 
     /** Removes the obsolete credential for a retired model route from encrypted storage. */
+    /**
+     * Stores a provider key under an arbitrary model id without touching the config file.
+     *
+     * Needed when two providers keep credentials simultaneously: switching the active route
+     * must not overwrite the other provider's slot, and saving a key for an inactive provider
+     * must not require switching to it first.
+     */
+    fun setModelKey(root: File, routeId: String, apiKey: String) = synchronized(lock) {
+        if (routeId.isBlank()) return@synchronized
+        try {
+            val secrets = readSecrets(root)
+            val trimmed = apiKey.trim()
+            if (trimmed.isBlank()) {
+                if (secrets.has(routeId)) {
+                    secrets.remove(routeId)
+                    writeSecrets(root, secrets)
+                }
+            } else {
+                secrets.put(routeId, trimmed)
+                writeSecrets(root, secrets)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Provider credential could not be stored; encrypted secrets were preserved", e)
+        }
+    }
+
+    /** Whether a key exists for this model id, without exposing it. */
+    fun hasModelKey(root: File, routeId: String): Boolean = synchronized(lock) {
+        if (routeId.isBlank()) return@synchronized false
+        runCatching { readSecrets(root).optString(routeId).isNotBlank() }.getOrDefault(false)
+    }
+
     fun removeModelKey(root: File, routeId: String) = synchronized(lock) {
         if (routeId.isBlank()) return@synchronized
         try {

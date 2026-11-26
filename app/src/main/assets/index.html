@@ -319,6 +319,7 @@ input:focus,select:focus,textarea:focus{border-color:rgba(167,139,250,.6);box-sh
         <select id="modelVariant">
           <option value="free">Gemma 4 26B MeroMero — бесплатно (дневной лимит токенов)</option>
           <option value="paid">Gemma 4 31B SDFT Heretic RP — платно (без лимита, по факту)</option>
+          <option value="routerai">routerai.ru — другой провайдер (свой ключ, без VPN)</option>
         </select>
         <div class="inline-status" id="modelStatus">Проверяю…</div>
         <label class="field-label" for="paidModelInput">Идентификатор платной модели</label>
@@ -327,7 +328,21 @@ input:focus,select:focus,textarea:focus{border-color:rgba(167,139,250,.6);box-sh
           <button class="btn ghost" id="savePaidModel" type="button">Сохранить идентификатор</button>
         </div>
         <p class="hint">Если платная модель не отвечает — скопируй точный id из каталога routeway.ai и вставь сюда.</p>
-      </div>
+      
+        <div id="routeraiBlock" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--line-soft)">
+          <label class="field-label" for="routeraiKeyInput">КЛЮЧ ROUTERAI.RU</label>
+          <input id="routeraiKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="ключ с routerai.ru">
+          <div class="row-actions">
+            <button class="btn ghost" id="saveRouteraiKey" type="button">Сохранить ключ</button>
+          </div>
+          <div class="inline-status" id="routeraiKeyStatus"></div>
+          <label class="field-label" for="routeraiModelInput">МОДЕЛЬ НА ROUTERAI</label>
+          <input id="routeraiModelInput" type="text" autocomplete="off" spellcheck="false" placeholder="google/gemma-3-27b-it">
+          <div class="row-actions">
+            <button class="btn ghost" id="saveRouteraiModel" type="button">Сохранить модель</button>
+          </div>
+          <p class="hint">Скопируй точный id из каталога routerai.ru. Этот провайдер работает без VPN.</p>
+        </div></div>
 
       <div class="card">
         <span class="card-label">Личность</span>
@@ -1334,6 +1349,45 @@ function setStatus(id, message, tone){
    НАСТРОЙКИ: личность
    ====================================================================== */
 /* Active provider model: free tier or the paid 31B variant. */
+function loadRouterai(){
+  var data = parseJson(call('routeraiKeyState', [], '{}'), {});
+  if(!data || typeof data !== 'object') data = {};
+  var block = $('routeraiBlock');
+  var select = $('modelVariant');
+  var isRouterai = select && select.value === 'routerai';
+  if(block) setHidden(block, !isRouterai);
+  var model = $('routeraiModelInput');
+  if(model && !model.value) model.value = String(data.model || '');
+  if(isRouterai){
+    setStatus('routeraiKeyStatus', data.has_key === true
+      ? 'Ключ routerai сохранён.'
+      : 'Ключ routerai не задан — вставь его выше.',
+      data.has_key === true ? 'good' : 'bad');
+  }
+}
+
+function saveRouteraiKey(){
+  var input = $('routeraiKeyInput');
+  var key = input ? String(input.value || '').replace(/^\s+|\s+$/g, '') : '';
+  if(!key){ setStatus('routeraiKeyStatus', 'Ключ пуст.', 'bad'); return; }
+  var result = call('setRouteraiKey', [key], 'ERROR');
+  if(isErr(result)){ setStatus('routeraiKeyStatus', errText(result), 'bad'); return; }
+  if(input) input.value = '';
+  setStatus('routeraiKeyStatus', 'Ключ сохранён.', 'good');
+  loadRouterai();
+  refreshStatus();
+}
+
+function saveRouteraiModel(){
+  var input = $('routeraiModelInput');
+  var value = input ? String(input.value || '').replace(/^\s+|\s+$/g, '') : '';
+  if(!value){ setStatus('routeraiKeyStatus', 'Вставь идентификатор модели.', 'bad'); return; }
+  var result = call('setRouteraiModelId', [value], 'ERROR');
+  if(isErr(result)){ setStatus('routeraiKeyStatus', errText(result), 'bad'); return; }
+  setStatus('routeraiKeyStatus', 'Модель сохранена.', 'good');
+  refreshStatus();
+}
+
 function loadModelVariant(){
   var variant = String(call('modelVariant', [], 'free') || 'free');
   var select = $('modelVariant');
@@ -1351,6 +1405,7 @@ function changeModelVariant(){
   var result = call('setModelVariant', [select.value], 'ERROR: \u043d\u0435\u0442 \u0441\u0432\u044f\u0437\u0438 \u0441 Ruri');
   if(isErr(result)){ setStatus('modelStatus', errText(result), 'bad'); return; }
   loadModelVariant();
+  loadRouterai();
   refreshStatus();
 }
 
@@ -1799,6 +1854,7 @@ function allowBackground(){
 function refreshSettings(){
   loadConnection();
   loadModelVariant();
+  loadRouterai();
   loadCharacter();
   loadBackups();
   loadDocuments();
@@ -1832,6 +1888,8 @@ $('docFile').addEventListener('change', function(){
 });
 $('modelVariant').addEventListener('change', changeModelVariant);
 $('savePaidModel').addEventListener('click', savePaidModelId);
+$('saveRouteraiKey').addEventListener('click', saveRouteraiKey);
+$('saveRouteraiModel').addEventListener('click', saveRouteraiModel);
 
 function showTab(name){
   var key = name || 'chat';

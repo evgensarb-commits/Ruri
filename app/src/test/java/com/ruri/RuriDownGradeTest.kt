@@ -1320,4 +1320,121 @@ class VisionCapabilityTest {
         assertTrue(reader.contains("word/media/"))
     }
 }
+
+/**
+ * Third provider: routerai.ru, with its own base URL and its own key slot.
+ */
+class RouterAiProviderTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-routerai").toFile().also {
+        FileManager.init(it)
+    }
+
+    @Test fun defaultIsStillRoutewayFree() {
+        val dir = root()
+        try {
+            assertEquals(Route.VARIANT_FREE, Route.variant(dir))
+            assertEquals(Route.ID_ROUTEWAY, Route.providerId(dir))
+            assertEquals(Route.ROUTEWAY_BASE_URL, Route.baseUrl(dir))
+            assertTrue("Routeway needs a tunnel", Route.requiresVpn(dir))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun switchingToRouteraiChangesProviderUrlModelAndVpnRule() {
+        val dir = root()
+        try {
+            Route.setVariant(dir, Route.VARIANT_ROUTERAI)
+            assertTrue(Route.isRouterAI(dir))
+            assertEquals(Route.ID_ROUTERAI, Route.providerId(dir))
+            assertEquals(Route.ROUTERAI_BASE_URL, Route.baseUrl(dir))
+            assertEquals(Route.routerAiModelId(dir), Route.model(dir))
+            // routerai.ru is a Russian provider: no tunnel required.
+            assertFalse("routerai must not require VPN", Route.requiresVpn(dir))
+            // The stored entry must follow, or ensure() would revert it on next start.
+            val entry = JSONObject(FileManager.read(dir, "core/config.json"))
+                .getJSONArray("models").getJSONObject(0)
+            assertEquals(Route.ID_ROUTERAI, entry.optString("id"))
+            assertEquals(Route.ROUTERAI_BASE_URL, entry.optString("base_url"))
+            assertFalse(entry.optBoolean("needs_vpn", true))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun theRouteraiModelIdIsEditable() {
+        val dir = root()
+        try {
+            Route.setVariant(dir, Route.VARIANT_ROUTERAI)
+            Route.setRouterAiModelId(dir, "anthropic/claude-3.5-sonnet")
+            assertEquals("anthropic/claude-3.5-sonnet", Route.routerAiModelId(dir))
+            assertEquals("anthropic/claude-3.5-sonnet", Route.model(dir))
+            val entry = JSONObject(FileManager.read(dir, "core/config.json"))
+                .getJSONArray("models").getJSONObject(0)
+            assertEquals("anthropic/claude-3.5-sonnet", entry.optString("model"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun keysLiveInSeparateSlotsPerProvider() {
+        val dir = root()
+        try {
+            // Save a routerai key while Routeway stays active.
+            Route.setProviderKey(dir, Route.ID_ROUTERAI, "routerai-secret")
+            assertTrue(Route.hasProviderKey(dir, Route.ID_ROUTERAI))
+
+            // Switching must not carry Routeway's key into routerai's slot and vice versa.
+            Route.setVariant(dir, Route.VARIANT_ROUTERAI)
+            assertEquals("", Route.apiKey(dir))
+            // The stored secret still exists under its own id.
+            assertTrue(Route.hasProviderKey(dir, Route.ID_ROUTERAI))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun ensureKeepsTheChosenProviderAndDoesNotRevert() {
+        val dir = root()
+        try {
+            Route.setVariant(dir, Route.VARIANT_ROUTERAI)
+            val rewrote = Route.ensure(dir)
+            assertFalse("a canonical routerai config must not be rewritten", rewrote)
+            assertEquals(Route.VARIANT_ROUTERAI, Route.variant(dir))
+            assertEquals(Route.ROUTERAI_BASE_URL, Route.baseUrl(dir))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun switchingBackToFreeRestoresRouteway() {
+        val dir = root()
+        try {
+            Route.setVariant(dir, Route.VARIANT_ROUTERAI)
+            Route.setVariant(dir, Route.VARIANT_FREE)
+            assertEquals(Route.ID_ROUTEWAY, Route.providerId(dir))
+            assertEquals(Route.MODEL_FREE, Route.model(dir))
+            assertEquals(Route.ROUTEWAY_BASE_URL, Route.baseUrl(dir))
+            assertTrue(Route.requiresVpn(dir))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun transportSendsTheProviderBaseUrl() {
+        val transport = RepoSources.text("app/src/main/java/com/ruri/Transport.kt")
+        // A hard-coded Routeway URL would silently send routerai requests to the wrong host.
+        assertTrue(transport.contains("baseUrl: String = Route.ROUTEWAY_BASE_URL"))
+        assertTrue(transport.contains("URL(baseUrl.trimEnd('/') + \"/chat/completions\")"))
+        assertFalse(transport.contains("Route.BASE_URL"))
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        assertTrue(engine.contains("Route.baseUrl(root)"))
+    }
+
+    @Test fun theThirdOptionIsReachableFromSettings() {
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        for (method in listOf("routeraiModelId", "setRouteraiModelId", "setRouteraiKey", "routeraiKeyState")) {
+            assertTrue("bridge needs $method", activity.contains("fun $method("))
+        }
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        assertTrue(html.contains("value=\"routerai\""))
+        assertTrue(html.contains("routeraiKeyInput"))
+        assertTrue(html.contains("routeraiModelInput"))
+    }
+
+    @Test fun vpnWarningOnlyAppliesToRouteway() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        // Requiring VPN on routerai would produce a permanent false "no_vpn" failure.
+        assertTrue(engine.contains("Route.requiresVpn(root)"))
+        assertFalse(engine.contains("Route.REQUIRES_VPN"))
+    }
+}
 }

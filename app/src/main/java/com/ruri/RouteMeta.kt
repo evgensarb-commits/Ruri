@@ -120,7 +120,7 @@ object RouteMeta {
      */
     fun autonomyBudgetAvailable(
         root: File,
-        id: String = Route.ID,
+        id: String = Route.ID_ROUTEWAY,
         maxDailyRequests: Int = 40,
         maxDailyTokens: Long = 250_000L
     ): Boolean {
