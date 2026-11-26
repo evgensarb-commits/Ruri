@@ -1069,4 +1069,125 @@ class WebReadToolTest {
         assertTrue(capabilities.contains("Читать страницу по ссылке"))
     }
 }
+
+/**
+ * Documents: PDF/DOCX/ODT/text, read page by page so long files never flood one request.
+ */
+class DocReaderTest {
+    private fun root(): java.io.File = java.nio.file.Files.createTempDirectory("ruri-docs").toFile().also {
+        FileManager.init(it)
+    }
+
+    @Test fun longTextIsPagedInsteadOfTruncated() {
+        val paragraphs = (1..40).joinToString("\n\n") { index ->
+            "Абзац номер $index. " + "Текст повторяется для объёма. ".repeat(8)
+        }
+        val pages = DocReader.paginate(paragraphs, pageChars = 2000)
+        assertTrue("must split into several pages", pages.size > 1)
+        // Nothing may be lost between the windows.
+        val rejoined = pages.joinToString(" ").replace(Regex("\\s+"), " ").trim()
+        val original = paragraphs.replace(Regex("\\s+"), " ").trim()
+        assertEquals(original.length, rejoined.length)
+        assertTrue(pages.all { it.length <= 2100 })
+    }
+
+    @Test fun shortTextStaysOnePage() {
+        val pages = DocReader.paginate("Короткий документ.", pageChars = 2000)
+        assertEquals(1, pages.size)
+    }
+
+    @Test fun textDocumentIsStoredAndReadFromDisk() {
+        val dir = root()
+        try {
+            val stored = DocReader.store(dir, "заметки.txt", "Первая строка.\nВторая строка.".toByteArray())
+            assertEquals("заметки.txt", stored)
+            assertTrue(DocReader.list(dir).contains("заметки.txt"))
+
+            val (ok, text) = DocReader.read(dir, stored, 0)
+            assertTrue(text, ok)
+            assertTrue(text.contains("Первая строка"))
+            assertTrue(text.contains("страница 1"))
+            assertTrue(text.contains("КОНЕЦ ДОКУМЕНТА"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun readingPageZeroOfALongDocumentAnnouncesContinuation() {
+        val dir = root()
+        try {
+            // Must exceed one 6000-character page.
+            val body = (1..1500).joinToString(" ") { "слово$it" }
+            val stored = DocReader.store(dir, "big.txt", body.toByteArray())
+            val (ok, first) = DocReader.read(dir, stored, 0)
+            assertTrue(first, ok)
+            assertTrue("must offer the next page", first.contains("ПРОДОЛЖЕНИЕ"))
+            assertTrue(first.contains("page=1"))
+
+            val (ok2, second) = DocReader.read(dir, stored, 1)
+            assertTrue(second, ok2)
+            assertTrue("page numbering is visible", second.contains("страница 2"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun oversizedAndEmptyFilesAreRefused() {
+        val dir = root()
+        try {
+            val tooBig = ByteArray((12 * 1024 * 1024) + 1) { 65 }
+            val failure = runCatching { DocReader.store(dir, "huge.txt", tooBig) }
+            assertTrue("must refuse a 12 MB+ file", failure.isFailure)
+            val empty = runCatching { DocReader.store(dir, "none.txt", ByteArray(0)) }
+            assertTrue("must refuse an empty file", empty.isFailure)
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun aNameCannotEscapeTheDocumentDirectory() {
+        assertEquals("passwd", DocReader.sanitizeName("../../etc/passwd"))
+        assertEquals("doc.txt", DocReader.sanitizeName("C:\\Windows\\doc.txt"))
+        assertTrue(DocReader.sanitizeName("").isNotBlank())
+        // A traversal attempt must not reach outside the storage folder.
+        val dir = root()
+        try {
+            val stored = DocReader.store(dir, "../../evil.txt", "x".toByteArray())
+            assertFalse(stored.contains(".."))
+            assertFalse(stored.contains("/"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun missingDocumentGivesAnHonestError() {
+        val dir = root()
+        try {
+            val (ok, message) = DocReader.read(dir, "нет-такого.pdf", 0)
+            assertFalse(ok)
+            assertTrue(message.contains("не найден"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun binaryFilesAreNotMistakenForText() {
+        val binary = ByteArray(256) { it.toByte() }
+        assertTrue(DocReader.looksBinary(binary))
+        assertFalse(DocReader.looksBinary("обычный текст".toByteArray()))
+        assertEquals("", DocReader.decodeText(binary))
+    }
+
+    @Test fun pdfDetectionWorksByContentNotExtension() {
+        val pdfHeader = "%PDF-1.7\n".toByteArray()
+        assertTrue(DocReader.looksLikePdf(pdfHeader))
+        assertFalse(DocReader.looksLikePdf("%NOT".toByteArray()))
+    }
+
+    @Test fun theToolIsWiredAndGated() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        assertTrue(engine.contains("\"read_document\" ->"))
+        assertTrue(engine.contains("DocReader.read("))
+        assertTrue(engine.contains("ChatStyle.documentHint"))
+        val loop = RepoSources.text("app/src/main/java/com/ruri/ToolLoop.kt")
+        assertTrue(loop.contains("\"read_document\""))
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        for (method in listOf("saveDocument", "listDocuments", "deleteDocument")) {
+            assertTrue("bridge needs $method", activity.contains("fun $method("))
+        }
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        assertTrue(html.contains("pickDocument"))
+        assertTrue(html.contains("saveDocument"))
+    }
+}
 }

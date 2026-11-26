@@ -115,6 +115,35 @@ object ChatStyle {
             "или сайт не открылся — честно скажи об этом.\n"
     }
 
+    /** True when the Commander asks about an uploaded document. */
+    fun wantsDocumentRead(text: String): Boolean {
+        if (text.isBlank()) return false
+        val lowered = text.lowercase()
+        val markers = listOf(
+            "документ", "файл", "пдф", "pdf", "ворд", "word", "docx", "odt",
+            "прочитай файл", "прочитай документ", "что в файле", "что в документе",
+            "открой файл", "открой документ", "загрузил", "прикрепил", "во вложении",
+            "текст в файле", "посмотри документ", "разбери документ", "содержимое файла"
+        )
+        return markers.any(lowered::contains)
+    }
+
+    /**
+     * Document tool contract, advertised only when a document is actually involved.
+     * Includes the pagination rule so a long file is read page by page.
+     */
+    fun documentHint(commanderText: String, available: List<String>): String {
+        if (available.isEmpty() && !wantsDocumentRead(commanderText)) return ""
+        val list = if (available.isEmpty()) "пока нет" else available.joinToString(", ")
+        return "ДОКУМЕНТЫ. Загруженные файлы: $list.\n" +
+            "Если нужен текст из документа, верни ровно один JSON-объект:\n" +
+            "{\"action\":\"read_document\",\"name\":\"<имя из списка>\",\"page\":0}\n" +
+            "Документ выдаётся по одной странице. Если в ответе инструмента есть " +
+            "«[ПРОДОЛЖЕНИЕ: ... page=N]», вызови read_document с этим page, чтобы прочитать дальше. " +
+            "Не делай выводов о документе, пока не дочитал, и не выдумывай текст, " +
+            "которого не видел. В ответе назови документ, из которого взял информацию.\n"
+    }
+
     fun chatDirective(root: File, commanderText: String = ""): String = when {
         roleplayEnabled(root) -> roleplayDirective()
         wantsDetailedReply(commanderText) -> detailedDirective()

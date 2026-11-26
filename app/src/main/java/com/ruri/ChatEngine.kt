@@ -284,6 +284,8 @@ object ChatEngine {
             ChatStyle.architectureSection() +
             ChatStyle.chatDirective(root, commanderText) +
             ChatStyle.webReadHint(commanderText) +
+            // Only listed when files exist or the Commander mentions one.
+            ChatStyle.documentHint(commanderText, DocReader.list(root)) +
             "Ты общаешься с Командиром в чате приложения. Отвечай обычной прозой, без JSON и без служебных блоков. " +
             "Ниже — ТВОЯ ДОЛГОСРОЧНАЯ ПАМЯТЬ. Это не контекст одного диалога; ты помнишь между сессиями.\n" +
             "ТВОЯ АВТОБИОГРАФИЯ (L3):\n$summary\n" +
@@ -527,6 +529,7 @@ object ChatEngine {
             "remember_fact" -> setOf("action", "text")
             "self_check" -> setOf("action")
             "read_url" -> setOf("action", "url")
+            "read_document" -> setOf("action", "name", "page")
             else -> return null
         }
         val keys = action.keys()
@@ -541,6 +544,10 @@ object ChatEngine {
                 if (url.length > 2048) return null
                 if (!Regex("(?i)^https?://").containsMatchIn(url)) return null
                 if (UrlReader.isDeniedUrl(url)) return null
+            }
+            "read_document" -> {
+                if (action.optString("name").isBlank() || action.optString("name").length > 160) return null
+                if (action.has("page") && action.optInt("page", -1) < 0) return null
             }
             "self_check" -> Unit
         }
@@ -567,6 +574,13 @@ object ChatEngine {
                     // The Commander supplied this address; UrlReader refuses local and
                     // service addresses, so the model cannot probe the phone's network.
                     val (ok, text) = UrlReader.read(root, params.optString("url"))
+                    ok to text
+                }
+                "read_document" -> {
+                    // One page at a time: a long document must never flood a single request.
+                    val (ok, text) = DocReader.read(
+                        root, params.optString("name"), params.optInt("page", 0)
+                    )
                     ok to text
                 }
                 else -> false to "Неизвестное действие"

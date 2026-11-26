@@ -298,6 +298,52 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun readDiagnosticsLog(): String = Diagnostics.readLog(this@MainActivity)
 
+        /** Uploaded documents, newest name last. */
+        @JavascriptInterface
+        fun listDocuments(): String = org.json.JSONArray(DocReader.list(filesDir)).toString()
+
+        /**
+         * Stores a document chosen in the WebView. Bytes arrive base64-encoded because the
+         * JavaScript bridge only carries strings.
+         */
+        @JavascriptInterface
+        fun saveDocument(name: String, base64: String): String {
+            return try {
+                require(name.isNotBlank()) { "Имя файла пусто" }
+                require(base64.isNotBlank()) { "Файл пуст" }
+                val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                val stored = DocReader.store(filesDir, name, bytes)
+                val (ok, preview) = DocReader.read(filesDir, stored, 0)
+                JSONObject()
+                    .put("ok", true)
+                    .put("name", stored)
+                    .put("pages", if (ok) pageCount(stored) else 0)
+                    .put("preview", if (ok) preview.take(400) else "")
+                    .put("error", if (ok) "" else preview)
+                    .toString()
+            } catch (e: Exception) {
+                JSONObject().put("ok", false).put("error", e.message ?: "не удалось сохранить").toString()
+            }
+        }
+
+        private fun pageCount(name: String): Int {
+            val file = File(File(filesDir, DocReader.DIR), name)
+            if (!file.isFile) return 0
+            return runCatching {
+                val text = DocReader.extract(file.readBytes(), name)
+                DocReader.paginate(text).size
+            }.getOrDefault(0)
+        }
+
+        @JavascriptInterface
+        fun deleteDocument(name: String): String {
+            return try {
+                val file = File(File(filesDir, DocReader.DIR), DocReader.sanitizeName(name))
+                if (file.isFile) file.delete()
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "delete failed") }
+        }
+
         /** Rebuild L3 from facts right now, ignoring the daily cooldown. */
         @JavascriptInterface
         fun rebuildAutobiography(): String {
