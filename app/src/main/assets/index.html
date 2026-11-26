@@ -58,6 +58,9 @@ button,input,select,textarea{font-family:inherit}
 .autobio-head .inline-status{margin:0;flex:1 1 auto}
 .journal-expand{cursor:pointer}
 .journal-details{margin:8px 0 0;padding:10px;background:#05070c;border:1px solid var(--line-soft);border-radius:8px;color:#9fb3d1;font:11px/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;max-height:280px;overflow:auto}
+.doc-row{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line-soft)}
+.doc-name{flex:1 1 auto;font-size:13px;color:var(--text-2);overflow-wrap:anywhere}
+.doc-del{flex:0 0 auto}
 .mood-line{font-size:14px;color:var(--text);margin-bottom:12px}
 .mood-row{display:flex;align-items:center;gap:10px;margin:7px 0}
 .mood-name{flex:0 0 96px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
@@ -364,7 +367,18 @@ input:focus,select:focus,textarea:focus{border-color:rgba(167,139,250,.6);box-sh
         <div class="inline-status" id="batteryStatus">Проверяю…</div>
       </div>
 
-      <div class="card">
+            <div class="card">
+        <span class="card-label">ДОКУМЕНТЫ</span>
+        <p class="hint">PDF, Word (.docx), ODF (.odt), текст и Markdown. Длинные документы читаются постранично, поэтому десятки страниц — не проблема.</p>
+        <div class="row-actions">
+          <button class="btn" id="pickDocument" type="button">ЗАГРУЗИТЬ ДОКУМЕНТ</button>
+        </div>
+        <input id="docFile" type="file" accept=".pdf,.docx,.odt,.txt,.md,application/pdf,text/plain" hidden>
+        <div class="inline-status" id="docStatus"></div>
+        <div id="docList" class="small"></div>
+      </div>
+
+<div class="card">
         <span class="card-label">Диагностика</span>
         <p class="hint" id="diagHint">Живая проверка делает настоящий сетевой запрос — до 20 секунд.</p>
         <div class="row-actions">
@@ -1660,6 +1674,62 @@ function importData(file){
 /* ======================================================================
    ОБЩЕЕ
    ====================================================================== */
+/* ----------------------------------------------------------------------
+   Документы: отправляем файл в нативную часть в base64.
+   ---------------------------------------------------------------------- */
+function loadDocuments(){
+  var box = $('docList');
+  if(!box) return;
+  var names = parseJson(call('listDocuments', [], '[]'), []);
+  if(!isArray(names) || !names.length){
+    box.innerHTML = '<div class="placeholder">Документов пока нет.</div>';
+    return;
+  }
+  var html = '';
+  for(var i = 0; i < names.length; i++){
+    var name = String(names[i] || '');
+    if(!name) continue;
+    html += '<div class="doc-row"><span class="doc-name">' + esc(name) + '</span>'
+      + '<button class="btn mini doc-del" type="button" data-name="' + esc(name) + '">×</button></div>';
+  }
+  box.innerHTML = html;
+  each(box.querySelectorAll('.doc-del'), function(btn){
+    btn.addEventListener('click', function(){
+      var name = btn.getAttribute('data-name');
+      var result = call('deleteDocument', [name], 'ERROR');
+      if(isErr(result)){ setStatus('docStatus', errText(result), 'bad'); return; }
+      loadDocuments();
+    });
+  });
+}
+
+function uploadDocument(file){
+  if(!file) return;
+  var status = $('docStatus');
+  setStatus('docStatus', 'Читаю файл…', '');
+  var reader = new FileReader();
+  reader.onload = function(event){
+    try{
+      var dataUrl = String(event.target.result || '');
+      var base64 = dataUrl.substring(dataUrl.indexOf(',') + 1);
+      var result = call('saveDocument', [file.name, base64], 'ERROR');
+      if(isErr(result)){ setStatus('docStatus', errText(result), 'bad'); return; }
+      var data = parseJson(result, {});
+      if(!data || data.ok !== true){
+        setStatus('docStatus', (data && data.error) ? String(data.error) : 'Не получилось.', 'bad');
+        return;
+      }
+      setStatus('docStatus', 'Загружено: ' + String(data.name || file.name)
+        + ' · страниц: ' + String(data.pages || 0), 'good');
+      loadDocuments();
+    }catch(error){
+      setStatus('docStatus', String(error && error.message ? error.message : error), 'bad');
+    }
+  };
+  reader.onerror = function(){ setStatus('docStatus', 'Не удалось прочитать файл.', 'bad'); };
+  reader.readAsDataURL(file);
+}
+
 function loadBackground(){
   var allowed = call('isIgnoringBatteryOptimizations', [], false);
   if(allowed === true){
@@ -1682,6 +1752,7 @@ function refreshSettings(){
   loadModelVariant();
   loadCharacter();
   loadBackups();
+  loadDocuments();
   loadBackground();
   renderDiagState();
 }
@@ -1694,6 +1765,13 @@ function refreshEverything(){
 }
 
 $('batteryAllow').addEventListener('click', allowBackground);
+$('pickDocument').addEventListener('click', function(){ $('docFile').click(); });
+$('docFile').addEventListener('change', function(){
+  var input = $('docFile');
+  var file = input && input.files && input.files[0] ? input.files[0] : null;
+  if(input) input.value = '';
+  uploadDocument(file);
+});
 $('modelVariant').addEventListener('change', changeModelVariant);
 $('savePaidModel').addEventListener('click', savePaidModelId);
 
