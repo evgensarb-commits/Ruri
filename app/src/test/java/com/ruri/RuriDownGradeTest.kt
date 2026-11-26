@@ -1371,18 +1371,23 @@ class RouterAiProviderTest {
         } finally { dir.deleteRecursively() }
     }
 
-    @Test fun keysLiveInSeparateSlotsPerProvider() {
+    @Test fun switchingProvidersNeverCarriesTheOtherKeyAcross() {
         val dir = root()
         try {
-            // Save a routerai key while Routeway stays active.
-            Route.setProviderKey(dir, Route.ID_ROUTERAI, "routerai-secret")
-            assertTrue(Route.hasProviderKey(dir, Route.ID_ROUTERAI))
-
-            // Switching must not carry Routeway's key into routerai's slot and vice versa.
+            // The encrypted store needs the Android keystore, which a JVM test does not have,
+            // so this asserts the routing rule itself: a newly selected provider always starts
+            // with a blank key in the visible config instead of inheriting the previous one.
             Route.setVariant(dir, Route.VARIANT_ROUTERAI)
             assertEquals("", Route.apiKey(dir))
-            // The stored secret still exists under its own id.
-            assertTrue(Route.hasProviderKey(dir, Route.ID_ROUTERAI))
+            val entry = JSONObject(FileManager.read(dir, "core/config.json"))
+                .getJSONArray("models").getJSONObject(0)
+            assertEquals("", entry.optString("api_key"))
+
+            Route.setVariant(dir, Route.VARIANT_FREE)
+            assertEquals("", Route.apiKey(dir))
+            val back = JSONObject(FileManager.read(dir, "core/config.json"))
+                .getJSONArray("models").getJSONObject(0)
+            assertEquals("", back.optString("api_key"))
         } finally { dir.deleteRecursively() }
     }
 
@@ -1412,9 +1417,13 @@ class RouterAiProviderTest {
     @Test fun transportSendsTheProviderBaseUrl() {
         val transport = RepoSources.text("app/src/main/java/com/ruri/Transport.kt")
         // A hard-coded Routeway URL would silently send routerai requests to the wrong host.
+        // The default parameter keeps Routeway working for existing callers, but the request
+        // itself must be built from the parameter, never from a constant.
         assertTrue(transport.contains("baseUrl: String = Route.ROUTEWAY_BASE_URL"))
         assertTrue(transport.contains("URL(baseUrl.trimEnd('/') + \"/chat/completions\")"))
-        assertFalse(transport.contains("Route.ROUTEWAY_BASE_URL"))
+        assertTrue(transport.contains("URL(baseUrl.trimEnd('/') + \"/models\")"))
+        assertFalse("no direct constant use inside the request path",
+            Regex("URL\\(Route\\.ROUTEWAY_BASE_URL").containsMatchIn(transport))
         val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
         assertTrue(engine.contains("Route.baseUrl(root)"))
     }
