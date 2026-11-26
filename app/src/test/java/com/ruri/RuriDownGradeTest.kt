@@ -43,8 +43,8 @@ class RouteCanonicalConfigTest {
             val models = config.getJSONArray("models")
             assertEquals(1, models.length())
             val model = models.getJSONObject(0)
-            assertEquals(Route.ID, model.optString("id"))
-            assertEquals(Route.BASE_URL, model.optString("base_url"))
+            assertEquals(Route.ID_ROUTEWAY, model.optString("id"))
+            assertEquals(Route.ROUTEWAY_BASE_URL, model.optString("base_url"))
             assertEquals(Route.MODEL_FREE, model.optString("model"))
             assertTrue(model.optBoolean("needs_vpn"))
         } finally { dir.deleteRecursively() }
@@ -75,7 +75,7 @@ class RouteCanonicalConfigTest {
     @Test fun canonicalRouteCarriesWhateverKeyItIsGiven() {
         val withKey = Route.canonical("sk-test-key-123")
         assertEquals("sk-test-key-123", withKey.optString("api_key"))
-        assertEquals(Route.BASE_URL, withKey.optString("base_url"))
+        assertEquals(Route.ROUTEWAY_BASE_URL, withKey.optString("base_url"))
         assertEquals(Route.MODEL_FREE, withKey.optString("model"))
         assertTrue(withKey.optBoolean("needs_vpn"))
         assertEquals("", Route.canonical().optString("api_key"))
@@ -91,7 +91,7 @@ class RouteCanonicalConfigTest {
             val onDisk = FileManager.read(dir, "core/config.json")
             assertFalse("plaintext key leaked to config.json", onDisk.contains("sk-must-not-leak"))
             val model = JSONObject(onDisk).getJSONArray("models").getJSONObject(0)
-            assertEquals(Route.ID, model.optString("id"))
+            assertEquals(Route.ID_ROUTEWAY, model.optString("id"))
             assertEquals("", model.optString("api_key"))
         } finally { dir.deleteRecursively() }
     }
@@ -123,7 +123,7 @@ class RouteCanonicalConfigTest {
             val config = JSONObject(FileManager.read(dir, "core/config.json"))
             val models = config.getJSONArray("models")
             assertEquals(1, models.length())
-            assertEquals(Route.ID, models.getJSONObject(0).optString("id"))
+            assertEquals(Route.ID_ROUTEWAY, models.getJSONObject(0).optString("id"))
             for (key in listOf("free_only", "two_route_migration_v1", "routes_v3_no_minimax",
                 "manual_route_order_v1", "routerapi_migration_v2")) {
                 assertFalse("seed must not carry the flag $key", config.has(key))
@@ -379,9 +379,9 @@ class DiagnosticsVerdictTest {
             FileManager.init(dir)
             val snapshot = JSONObject(Diagnostics.snapshot(dir, online = true, vpn = true))
             val route = snapshot.getJSONObject("route")
-            assertEquals(Route.ID, route.optString("id"))
+            assertEquals(Route.ID_ROUTEWAY, route.optString("id"))
             assertEquals(Route.MODEL_FREE, route.optString("model"))
-            assertEquals(Route.BASE_URL, route.optString("base_url"))
+            assertEquals(Route.ROUTEWAY_BASE_URL, route.optString("base_url"))
             assertTrue(route.optBoolean("needs_vpn"))
             assertTrue(snapshot.has("queue"))
             assertTrue(snapshot.has("log_tail"))
@@ -617,7 +617,7 @@ class ChatRecallAndQuotaTest {
         try {
             FileManager.init(dir)
             assertTrue("fresh install has budget", RouteMeta.autonomyBudgetAvailable(dir))
-            repeat(45) { RouteMeta.recordAttempt(dir, Route.ID) }
+            repeat(45) { RouteMeta.recordAttempt(dir, Route.ID_ROUTEWAY) }
             assertFalse("autonomy must stop when the day is spent",
                 RouteMeta.autonomyBudgetAvailable(dir))
             // The chat path must not consult this budget at all: no preflight gates.
@@ -789,7 +789,7 @@ class ModelVariantTest {
             val model = JSONObject(FileManager.read(dir, "core/config.json"))
                 .getJSONArray("models").getJSONObject(0)
             assertEquals(Route.paidModelId(dir), model.optString("model"))
-            assertEquals(Route.ID, model.optString("id"))
+            assertEquals(Route.ID_ROUTEWAY, model.optString("id"))
 
             Route.setVariant(dir, Route.VARIANT_FREE)
             assertEquals(Route.MODEL_FREE, Route.model(dir))
@@ -1414,7 +1414,7 @@ class RouterAiProviderTest {
         // A hard-coded Routeway URL would silently send routerai requests to the wrong host.
         assertTrue(transport.contains("baseUrl: String = Route.ROUTEWAY_BASE_URL"))
         assertTrue(transport.contains("URL(baseUrl.trimEnd('/') + \"/chat/completions\")"))
-        assertFalse(transport.contains("Route.BASE_URL"))
+        assertFalse(transport.contains("Route.ROUTEWAY_BASE_URL"))
         val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
         assertTrue(engine.contains("Route.baseUrl(root)"))
     }
