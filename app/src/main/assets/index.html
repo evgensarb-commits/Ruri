@@ -56,6 +56,8 @@ button,input,select,textarea{font-family:inherit}
 .icon svg{width:17px;height:17px}
 .autobio-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
 .autobio-head .inline-status{margin:0;flex:1 1 auto}
+.journal-expand{cursor:pointer}
+.journal-details{margin:8px 0 0;padding:10px;background:#05070c;border:1px solid var(--line-soft);border-radius:8px;color:#9fb3d1;font:11px/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;max-height:280px;overflow:auto}
 .mood-line{font-size:14px;color:var(--text);margin-bottom:12px}
 .mood-row{display:flex;align-items:center;gap:10px;margin:7px 0}
 .mood-name{flex:0 0 96px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
@@ -1020,13 +1022,26 @@ function renderJournalList(){
     var ev = item.event || item;
     var type = String(item.type || ev.type || 'событие');
     var text = String(item.content || ev.text || ev.reason || ev.action || '');
-    html += '<div class="journal-row">'
+    // The whole record is embedded so a tap can show exactly what happened.
+    var payload = '';
+    try{ payload = JSON.stringify(ev, null, 2); }catch(e){ payload = String(ev); }
+    html += '<div class="journal-row journal-expand" data-open="0">'
       + '<div class="journal-top"><span class="journal-time">' + esc(dateOf(item.ts || ev.ts)) + '</span>'
       + '<span class="badge">' + esc(type) + '</span></div>'
       + (text ? '<div class="journal-text">' + esc(text) + '</div>' : '')
+      + '<pre class="journal-details" hidden>' + esc(payload) + '</pre>'
       + '</div>';
   }
   box.innerHTML = html;
+  each(box.querySelectorAll('.journal-expand'), function(row){
+    row.addEventListener('click', function(){
+      var open = row.getAttribute('data-open') === '1';
+      var details = row.querySelector('.journal-details');
+      if(!details) return;
+      if(open){ details.setAttribute('hidden', ''); row.setAttribute('data-open', '0'); }
+      else{ details.removeAttribute('hidden'); row.setAttribute('data-open', '1'); }
+    });
+  });
 }
 
 function layerJson(layer){
@@ -1127,6 +1142,31 @@ function rebuildAutobiography(){
     setStatus('autobioStatus', String(error && error.message ? error.message : error), 'bad');
     if(button) button.disabled = false;
   }
+}
+
+/* Emotion channel names and the mood label derived from them.
+   Kept in one place: renderEmotions and the header status both read it. */
+var EMOTION_NAMES = {
+  joy: '\u0440\u0430\u0434\u043e\u0441\u0442\u044c', affection: '\u043d\u0435\u0436\u043d\u043e\u0441\u0442\u044c',
+  anger: '\u0437\u043b\u043e\u0441\u0442\u044c', sadness: '\u0433\u0440\u0443\u0441\u0442\u044c',
+  anxiety: '\u0442\u0440\u0435\u0432\u043e\u0433\u0430', interest: '\u0438\u043d\u0442\u0435\u0440\u0435\u0441',
+  boredom: '\u0441\u043a\u0443\u043a\u0430', desire: '\u0436\u0435\u043b\u0430\u043d\u0438\u0435',
+  fatigue: '\u0443\u0441\u0442\u0430\u043b\u043e\u0441\u0442\u044c', longing: '\u0442\u043e\u0441\u043a\u0430'
+};
+
+function moodFrom(values){
+  function v(k){ return Number(values && values[k]) || 0; }
+  if(v('anger') > 60 && v('sadness') > 50) return '\u043e\u0431\u0438\u0436\u0435\u043d\u043d\u0430\u044f';
+  if(v('anger') > 60) return '\u0440\u0430\u0437\u0434\u0440\u0430\u0436\u0451\u043d\u043d\u0430\u044f';
+  if(v('sadness') > 60) return '\u0433\u0440\u0443\u0441\u0442\u043d\u0430\u044f';
+  if(v('longing') > 60) return '\u0442\u043e\u0441\u043a\u0443\u044e\u0449\u0430\u044f';
+  if(v('anxiety') > 60) return '\u0442\u0440\u0435\u0432\u043e\u0436\u043d\u0430\u044f';
+  if(v('joy') > 60 && v('affection') > 60) return '\u043b\u0430\u0441\u043a\u043e\u0432\u0430\u044f';
+  if(v('interest') > 60) return '\u0443\u0432\u043b\u0435\u0447\u0451\u043d\u043d\u0430\u044f';
+  if(v('boredom') > 60) return '\u0441\u043a\u0443\u0447\u0430\u044e\u0449\u0430\u044f';
+  if(v('desire') > 60) return '\u0442\u043e\u043c\u043d\u0430\u044f';
+  if(v('fatigue') > 70) return '\u0443\u0441\u0442\u0430\u0432\u0448\u0430\u044f';
+  return '\u0441\u043e\u0431\u0440\u0430\u043d\u043d\u0430\u044f';
 }
 
 function renderEmotions(view){

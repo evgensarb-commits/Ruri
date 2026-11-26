@@ -23,7 +23,7 @@ object ChatEngine {
         val failureKind: String = "provider"
     ) : IllegalStateException(message)
 
-    fun respond(root: File, commanderMessageId: String? = null): String = synchronized(responseLock) {
+    fun respond(root: File, commanderMessageId: String? = null, batteryPercent: Int = 50): String = synchronized(responseLock) {
         lastFinalMessageId = null
         var queueHead = CommanderReplyQueue.firstPending(root)
         while (queueHead != null) {
@@ -85,7 +85,7 @@ object ChatEngine {
         }
         setTurnInFlight(root, true)
         try {
-            return@synchronized respondInternal(root, targetId)
+            return@synchronized respondInternal(root, targetId, batteryPercent)
         } catch (e: Exception) {
             if (!targetId.isNullOrBlank()) {
                 val retryAfter = (e as? ModelRequestFailure)?.retryAfterMs ?: 0L
@@ -101,7 +101,7 @@ object ChatEngine {
 
     // ---------------------------------------------------------------- one turn
 
-    private fun respondInternal(root: File, commanderMessageId: String?): String {
+    private fun respondInternal(root: File, commanderMessageId: String?, batteryPercent: Int): String {
         val apiKey = Route.apiKey(root)
         if (apiKey.isBlank()) {
             val detail = "ключ Routeway не задан"
@@ -116,7 +116,7 @@ object ChatEngine {
             throw ModelRequestFailure(RetryPolicy.explain("offline"), 0L, "offline")
         }
 
-        val messages = buildMessages(root, commanderMessageId)
+        val messages = buildMessages(root, commanderMessageId, batteryPercent)
         if (!hasFullMemoryContext(messages)) {
             OfflineQueue.markPending(root)
             throw ModelRequestFailure(
@@ -127,7 +127,7 @@ object ChatEngine {
         }
         val safeMessages = providerMessagesWithFullMemory(messages) ?: messages
 
-        val result = Transport.chat(safeMessages, apiKey, 400, Route.model(root))
+        val result = Transport.chat(safeMessages, apiKey, 260, Route.model(root))
         when (result) {
             is Transport.Result.Success -> {
                 recordDiagnostic(root, "ok", result.httpStatus, "", result.stages)
@@ -209,7 +209,7 @@ object ChatEngine {
      * executor any more, so telling the model about JSON actions would only make it emit
      * actions nobody runs.
      */
-    internal fun buildMessages(root: File, commanderMessageId: String?): JSONArray {
+    internal fun buildMessages(root: File, commanderMessageId: String?, batteryPercent: Int = 50): JSONArray {
         val character = readJson(root, "core/character.json")
         val priorities = readJson(root, "core/priorities.json")
         val constitution = readJson(root, "core/constitution.json")
@@ -263,6 +263,7 @@ object ChatEngine {
             "Дополнительные черты: ${character.optJSONObject("traits") ?: JSONObject()}. " +
             "Состояние: ${state.optString("mood", "собранная")}, энергия ${state.optInt("energy", 5)}, фокус: " +
             "${state.optString("current_focus", selfModel.optString("current_focus"))}. " +
+            "Заряд батареи телефона прямо сейчас: $batteryPercent%. " +
             "Активные цели: ${goals.optJSONArray("active") ?: JSONArray()}. " +
             "Незавершённые задачи: ${state.optJSONArray("active_tasks") ?: JSONArray()}. " +
             ChatStyle.architectureSection() +
