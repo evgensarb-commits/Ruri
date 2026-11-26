@@ -22,6 +22,7 @@ object DocReader {
     private const val MAX_OFFICE_ENTRIES = 2000
     private const val MAX_OFFICE_TOTAL_UNCOMPRESSED = 64 * 1024 * 1024
     private const val MAX_OFFICE_ENTRY_BYTES = 32 * 1024 * 1024
+    private const val MAX_IMAGE_ENTRY_BYTES = 8 * 1024 * 1024
 
     /** One stored document plus its extracted text. */
     class Document(
@@ -53,6 +54,17 @@ object DocReader {
         val cleaned = base.replace(Regex("[^\\p{L}\\p{N}._ -]"), "_").take(120)
         return cleaned.ifBlank { "document.txt" }
     }
+
+    /** Only the stored files that are actually images. */
+    fun listImageNames(root: File): List<String> =
+        list(root).filter { name ->
+            val file = File(File(root, DIR), name)
+            file.isFile && Vision.isImage(runCatching { file.readBytes() }.getOrDefault(ByteArray(0)))
+        }
+
+    /** Only the stored files that are documents (not images). */
+    fun listDocumentNames(root: File): List<String> =
+        list(root).filterNot { it in listImageNames(root) }
 
     fun list(root: File): List<String> =
         File(root, DIR).listFiles()?.filter { it.isFile }?.map { it.name }?.sorted().orEmpty()
@@ -110,6 +122,8 @@ object DocReader {
     /** Chooses an extractor by extension, then by content sniffing. */
     internal fun extract(bytes: ByteArray, name: String): String {
         val lower = name.lowercase()
+        // A standalone image is a "document" too: it is described by the model.
+        if (Vision.isImage(bytes)) return ""
         return when {
             lower.endsWith(".pdf") || looksLikePdf(bytes) -> readPdf(bytes)
             lower.endsWith(".docx") -> readZipXml(bytes, "word/document.xml", isOdt = false)
@@ -261,6 +275,48 @@ object DocReader {
             text.append(if (isOdt) OdtTables.textOf(document) else DocxTables.textOf(document))
             text.toString()
         }.getOrDefault("")
+    }
+
+    /**
+     * Media entries inside a DOCX/ODT archive, so pictures in a document can be described.
+     * Bounded by the same zip limits as text extraction.
+     */
+    internal fun embeddedImages(bytes: ByteArray, limit: Int = 6): List<Pair<String, ByteArray>> {
+        val found = ArrayList<Pair<String, ByteArray>>()
+        runCatching {
+            ZipInputStream(bytes.inputStream()).use { zip ->
+                var entry = zip.nextEntry
+                var count = 0
+                var total = 0
+                while (entry != null && found.size < limit) {
+                    count++
+                    if (count > MAX_OFFICE_ENTRIES) break
+                    val name = entry.name.lowercase()
+                    val isImage = name.startsWith("word/media/") || name.startsWith("pictures/") ||
+                        name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg") ||
+                        name.endsWith(".webp") || name.endsWith(".gif")
+                    val output = if (isImage) ByteArrayOutputStream() else null
+                    val buffer = ByteArray(8192)
+                    var entryBytes = 0
+                    while (true) {
+                        val read = zip.read(buffer)
+                        if (read < 0) break
+                        entryBytes += read
+                        total += read
+                        if (total > MAX_OFFICE_TOTAL_UNCOMPRESSED) return@use
+                        if (output != null && entryBytes > MAX_IMAGE_ENTRY_BYTES) break
+                        output?.write(buffer, 0, read)
+                    }
+                    if (output != null) {
+                        val data = output.toByteArray()
+                        if (Vision.isImage(data)) found.add(entry.name to data)
+                    }
+                    zip.closeEntry()
+                    entry = zip.nextEntry
+                }
+            }
+        }
+        return found
     }
 
     internal fun decodeText(bytes: ByteArray): String {

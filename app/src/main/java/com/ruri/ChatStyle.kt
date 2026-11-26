@@ -144,6 +144,70 @@ object ChatStyle {
             "которого не видел. В ответе назови документ, из которого взял информацию.\n"
     }
 
+    /** True when the Commander attached or mentioned an image. */
+    fun wantsImageLook(text: String): Boolean {
+        if (text.isBlank()) return false
+        val lowered = text.lowercase()
+        val markers = listOf(
+            "картинк", "изображен", "фото", "скриншот", "скрин", "снимок", "фотограф",
+            "что на图", "посмотри на", "глянь на фото", "что здесь", "кто на", "мем"
+        )
+        return markers.any(lowered::contains) ||
+            Regex("\\.(png|jpe?g|webp|gif)\\b", RegexOption.IGNORE_CASE).containsMatchIn(text)
+    }
+
+    /**
+     * Image tool contract. Only emitted when an image file exists or the Commander asks about
+     * one, so ordinary chat never spends tokens on vision.
+     */
+    fun imageHint(commanderText: String, imageNames: List<String>, visionOk: Boolean): String {
+        if (imageNames.isEmpty() && !wantsImageLook(commanderText)) return ""
+        if (!visionOk) {
+            return "ИЗОБРАЖЕНИЯ. Текущая модель не принимает картинки, поэтому ты их не видишь. " +
+                "Если Командир спрашивает про изображение — честно скажи, что не можешь его " +
+                "увидеть, и предложи переключиться на мультимодальную модель. Не выдумывай " +
+                "содержимое картинки.\n"
+        }
+        val list = if (imageNames.isEmpty()) "пока нет" else imageNames.joinToString(", ")
+        return "ИЗОБРАЖЕНИЯ. Доступные файлы: $list.\n" +
+            "Если нужно посмотреть картинку, верни ровно один JSON-объект:\n" +
+            "{\"action\":\"look_at_image\",\"name\":\"<имя из списка>\"}\n" +
+            "Опиши, что реально видно; не выдумывай детали. Прикреплённое Командиром " +
+            "изображение уже описано в контексте — опирайся на это описание.\n"
+    }
+
+    /** True when the Commander attached or mentioned an image. */
+    fun wantsImageLook(text: String): Boolean {
+        if (text.isBlank()) return false
+        val lowered = text.lowercase()
+        val markers = listOf(
+            "картинк", "изображен", "фото", "скриншот", "скрин", "снимок", "фотограф",
+            "посмотри на", "глянь на фото", "что здесь", "кто на", "мем"
+        )
+        return markers.any(lowered::contains) ||
+            Regex("\\.(png|jpe?g|webp|gif)\\b", RegexOption.IGNORE_CASE).containsMatchIn(text)
+    }
+
+    /**
+     * Image tool contract. Only emitted when an image file exists or the Commander asks about
+     * one, so ordinary chat never spends tokens on vision.
+     */
+    fun imageHint(commanderText: String, imageNames: List<String>, visionOk: Boolean): String {
+        if (imageNames.isEmpty() && !wantsImageLook(commanderText)) return ""
+        if (!visionOk) {
+            return "ИЗОБРАЖЕНИЯ. Текущая модель не принимает картинки, поэтому ты их не видишь. " +
+                "Если Командир спрашивает про изображение — честно скажи, что не можешь его " +
+                "увидеть, и предложи переключиться на мультимодальную модель. Не выдумывай " +
+                "содержимое картинки.\n"
+        }
+        val list = if (imageNames.isEmpty()) "пока нет" else imageNames.joinToString(", ")
+        return "ИЗОБРАЖЕНИЯ. Доступные файлы: $list.\n" +
+            "Если нужно посмотреть картинку, верни ровно один JSON-объект:\n" +
+            "{\"action\":\"look_at_image\",\"name\":\"<имя из списка>\"}\n" +
+            "Опиши, что реально видно; не выдумывай детали. Прикреплённое Командиром " +
+            "изображение уже описано в контексте — опирайся на это описание.\n"
+    }
+
     fun chatDirective(root: File, commanderText: String = ""): String = when {
         roleplayEnabled(root) -> roleplayDirective()
         wantsDetailedReply(commanderText) -> detailedDirective()

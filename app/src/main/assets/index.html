@@ -245,6 +245,7 @@ input:focus,select:focus,textarea:focus{border-color:rgba(167,139,250,.6);box-sh
         <div class="topbar-title">РУРИ</div>
         <div class="topbar-sub" id="chatStatus">загрузка…</div>
       </div>
+      <button class="icon" id="pickImage" type="button" aria-label="Прикрепить изображение">КАРТ</button>
       <button class="icon style-toggle" id="styleToggle" type="button" aria-pressed="false"
               aria-label="Режим ролевой игры">РП</button>
       <button class="icon" id="refreshChat" type="button" aria-label="Обновить чат">
@@ -374,8 +375,11 @@ input:focus,select:focus,textarea:focus{border-color:rgba(167,139,250,.6);box-sh
           <button class="btn" id="pickDocument" type="button">ЗАГРУЗИТЬ ДОКУМЕНТ</button>
         </div>
         <input id="docFile" type="file" accept=".pdf,.docx,.odt,.txt,.md,application/pdf,text/plain" hidden>
+        <input id="imageFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
         <div class="inline-status" id="docStatus"></div>
         <div id="docList" class="small"></div>
+        <div class="inline-status" id="visionStatus"></div>
+        <div class="row-actions"><button class="btn ghost" id="checkVision" type="button">ПРОВЕРИТЬ КАРТИНКИ</button></div>
       </div>
 
 <div class="card">
@@ -1677,6 +1681,51 @@ function importData(file){
 /* ----------------------------------------------------------------------
    Документы: отправляем файл в нативную часть в base64.
    ---------------------------------------------------------------------- */
+function loadVisionStatus(){
+  var data = parseJson(call('visionStatus', [], '{}'), {});
+  if(!data || typeof data !== 'object') data = {};
+  var line = String(data.line || '');
+  var tone = data.supported === 'true' ? 'good' : (data.supported === 'false' ? 'bad' : '');
+  setStatus('visionStatus', line || 'Изображения: не проверялись.', tone);
+}
+
+function checkVision(){
+  setStatus('visionStatus', 'Проверяю…', '');
+  var raw = call('checkVisionSupport', [], 'ERROR');
+  if(isErr(raw)){ setStatus('visionStatus', errText(raw), 'bad'); return; }
+  var data = parseJson(raw, {});
+  setStatus('visionStatus', String((data && data.line) || 'Проверено.'),
+    data && data.supported === true ? 'good' : 'bad');
+}
+
+function uploadImage(file){
+  if(!file) return;
+  var reader = new FileReader();
+  reader.onload = function(event){
+    try{
+      var dataUrl = String(event.target.result || '');
+      var base64 = dataUrl.substring(dataUrl.indexOf(',') + 1);
+      var raw = call('describeImage', [file.name, base64], 'ERROR');
+      if(isErr(raw)){ alert('Не удалось обработать изображение: ' + errText(raw)); return; }
+      var data = parseJson(raw, {});
+      if(!data || data.ok !== true){
+        alert((data && data.error) ? String(data.error) : 'Не удалось описать изображение.');
+        return;
+      }
+      var text = '[изображение ' + String(data.name || file.name) + '] ' + String(data.text || '');
+      var id = 'm' + Date.now() + Math.random().toString(36).slice(2, 10);
+      appendLog({ type: 'message', who: 'commander', text: text, id: id });
+      var sent = call('completeChat', ['auto', id], 'ERROR');
+      if(isErr(sent)) alert(errText(sent));
+      refreshChat(false, true);
+    }catch(error){
+      alert('Ошибка изображения: ' + String(error && error.message ? error.message : error));
+    }
+  };
+  reader.onerror = function(){ alert('Не удалось прочитать файл изображения.'); };
+  reader.readAsDataURL(file);
+}
+
 function loadDocuments(){
   var box = $('docList');
   if(!box) return;
@@ -1753,6 +1802,7 @@ function refreshSettings(){
   loadCharacter();
   loadBackups();
   loadDocuments();
+  loadVisionStatus();
   loadBackground();
   renderDiagState();
 }
@@ -1766,6 +1816,14 @@ function refreshEverything(){
 
 $('batteryAllow').addEventListener('click', allowBackground);
 $('pickDocument').addEventListener('click', function(){ $('docFile').click(); });
+$('checkVision').addEventListener('click', checkVision);
+$('pickImage').addEventListener('click', function(){ $('imageFile').click(); });
+$('imageFile').addEventListener('change', function(){
+  var input = $('imageFile');
+  var file = input && input.files && input.files[0] ? input.files[0] : null;
+  if(input) input.value = '';
+  uploadImage(file);
+});
 $('docFile').addEventListener('change', function(){
   var input = $('docFile');
   var file = input && input.files && input.files[0] ? input.files[0] : null;

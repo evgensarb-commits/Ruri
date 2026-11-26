@@ -286,6 +286,20 @@ object ChatEngine {
             ChatStyle.webReadHint(commanderText) +
             // Only listed when files exist or the Commander mentions one.
             ChatStyle.documentHint(commanderText, DocReader.list(root)) +
+            ChatStyle.imageHint(
+                commanderText,
+                DocReader.listImageNames(root),
+                Vision.supportState(root) != false
+            ) +
+            ChatStyle.imageHint(
+                commanderText,
+                DocReader.list(root).filter { name ->
+                    Vision.isImage(File(File(root, DocReader.DIR), name).let { f ->
+                        if (!f.isFile) ByteArray(0) else runCatching { f.readBytes() }.getOrDefault(ByteArray(0))
+                    })
+                },
+                Vision.supportState(root) != false
+            ) +
             "Ты общаешься с Командиром в чате приложения. Отвечай обычной прозой, без JSON и без служебных блоков. " +
             "Ниже — ТВОЯ ДОЛГОСРОЧНАЯ ПАМЯТЬ. Это не контекст одного диалога; ты помнишь между сессиями.\n" +
             "ТВОЯ АВТОБИОГРАФИЯ (L3):\n$summary\n" +
@@ -530,6 +544,7 @@ object ChatEngine {
             "self_check" -> setOf("action")
             "read_url" -> setOf("action", "url")
             "read_document" -> setOf("action", "name", "page")
+            "look_at_image" -> setOf("action", "name")
             else -> return null
         }
         val keys = action.keys()
@@ -548,6 +563,9 @@ object ChatEngine {
             "read_document" -> {
                 if (action.optString("name").isBlank() || action.optString("name").length > 160) return null
                 if (action.has("page") && action.optInt("page", -1) < 0) return null
+            }
+            "look_at_image" -> {
+                if (action.optString("name").isBlank() || action.optString("name").length > 160) return null
             }
             "self_check" -> Unit
         }
@@ -582,6 +600,27 @@ object ChatEngine {
                         root, params.optString("name"), params.optInt("page", 0)
                     )
                     ok to text
+                }
+                "look_at_image" -> {
+                    // Standalone image or one inside a document, described by the provider.
+                    val name = DocReader.sanitizeName(params.optString("name"))
+                    val file = File(File(root, DocReader.DIR), name)
+                    if (!file.isFile) {
+                        false to "Изображение «$name» не найдено"
+                    } else {
+                        val bytes = file.readBytes()
+                        val mime = Vision.mimeOf(bytes)
+                        if (mime == null) {
+                            false to "Файл «$name» не является изображением"
+                        } else {
+                            val (text, reason) = Vision.describeDetailed(
+                                root, bytes, mime,
+                                "Опиши изображение подробно: что на нём, люди, текст, стиль. " +
+                                    "Не выдумывай детали."
+                            )
+                            if (text == null) false to reason else true to text
+                        }
+                    }
                 }
                 else -> false to "Неизвестное действие"
             }
