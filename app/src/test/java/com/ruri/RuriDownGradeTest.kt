@@ -1745,4 +1745,33 @@ class ReplyLengthAndStyleTest {
         assertTrue(html.contains("function refreshTokenLimit"))
     }
 }
+
+/**
+ * Markdown files could not be attached: Android has no MIME type for ".md", so the system
+ * picker greyed them out even though the page listed the extension.
+ */
+class DocumentPickerTest {
+    @Test fun markdownIsSelectableNotGreyedOut() {
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        // The filter inherited from the page's accept list must be widened for non-images.
+        assertTrue("document picker must not stay filtered",
+            activity.contains("intent.removeExtra(Intent.EXTRA_MIME_TYPES)"))
+        assertTrue("documents fall back to any type", activity.contains("intent.type = \"*/*\""))
+    }
+
+    @Test fun imagesKeepTheirOwnFilter() {
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        // An unfiltered image picker would also offer PDFs and confuse the vision path.
+        assertTrue(activity.contains("intent.type = \"image/*\""))
+        assertTrue(activity.contains("accept.contains(\"image/\")"))
+    }
+
+    @Test fun markdownStillReadsAsText() {
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        assertTrue(".md is offered by the page", html.contains(".md"))
+        // Non-PDF/non-office input goes through decodeText, so markdown parses as plain text.
+        val reader = RepoSources.text("app/src/main/java/com/ruri/DocReader.kt")
+        assertTrue(reader.contains("else -> decodeText(bytes)"))
+    }
+}
 }

@@ -102,11 +102,26 @@ class MainActivity : AppCompatActivity() {
                     val intent = fileChooserParams?.createIntent()
                         ?: Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                             addCategory(Intent.CATEGORY_OPENABLE)
-                            type = "application/json"
+                            type = "*/*"
                         }
                     if (intent.action == Intent.ACTION_GET_CONTENT ||
                         intent.action == Intent.ACTION_OPEN_DOCUMENT) {
                         intent.addCategory(Intent.CATEGORY_OPENABLE)
+                    }
+                    // The page asks for ".pdf,.docx,.odt,.txt,.md". Android derives MIME filters
+                    // from that list, but ".md" has no registered MIME type here, so the system
+                    // picker greys markdown files out and they cannot be selected at all. Images
+                    // keep their filter; everything else is offered unfiltered and validated by
+                    // content when read.
+                    val accept = fileChooserParams?.acceptTypes?.joinToString(" ")?.lowercase() ?: ""
+                    if (accept.contains("image/")) {
+                        intent.type = "image/*"
+                        intent.removeExtra(Intent.EXTRA_MIME_TYPES)
+                    } else if (accept.isNotBlank()) {
+                        // "*/*" alone still hides nothing, and the extra MIME list would
+                        // re-apply the same broken filter, so both are cleared.
+                        intent.type = "*/*"
+                        intent.removeExtra(Intent.EXTRA_MIME_TYPES)
                     }
                     startActivityForResult(intent, importFileRequestCode)
                     true
