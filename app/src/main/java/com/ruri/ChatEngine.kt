@@ -283,6 +283,7 @@ object ChatEngine {
             "Незавершённые задачи: ${state.optJSONArray("active_tasks") ?: JSONArray()}. " +
             ChatStyle.architectureSection() +
             ChatStyle.chatDirective(root, commanderText) +
+            ChatStyle.webReadHint(commanderText) +
             "Ты общаешься с Командиром в чате приложения. Отвечай обычной прозой, без JSON и без служебных блоков. " +
             "Ниже — ТВОЯ ДОЛГОСРОЧНАЯ ПАМЯТЬ. Это не контекст одного диалога; ты помнишь между сессиями.\n" +
             "ТВОЯ АВТОБИОГРАФИЯ (L3):\n$summary\n" +
@@ -525,6 +526,7 @@ object ChatEngine {
             "recall" -> setOf("action", "query")
             "remember_fact" -> setOf("action", "text")
             "self_check" -> setOf("action")
+            "read_url" -> setOf("action", "url")
             else -> return null
         }
         val keys = action.keys()
@@ -534,6 +536,12 @@ object ChatEngine {
                 if (action.optString("query").isBlank() || action.optString("query").length > 300) return null
             }
             "remember_fact" -> if (action.optString("text").trim().length !in 5..300) return null
+            "read_url" -> {
+                val url = action.optString("url").trim()
+                if (url.length > 2048) return null
+                if (!Regex("(?i)^https?://").containsMatchIn(url)) return null
+                if (UrlReader.isDeniedUrl(url)) return null
+            }
             "self_check" -> Unit
         }
         return action
@@ -555,6 +563,12 @@ object ChatEngine {
                 )
                 "remember_fact" -> true to SecretRedactor.redactText(rememberFact(root, params.optString("text")))
                 "self_check" -> true to OutcomeDigest.build(root)
+                "read_url" -> {
+                    // The Commander supplied this address; UrlReader refuses local and
+                    // service addresses, so the model cannot probe the phone's network.
+                    val (ok, text) = UrlReader.read(root, params.optString("url"))
+                    ok to text
+                }
                 else -> false to "Неизвестное действие"
             }
         } catch (e: Exception) {

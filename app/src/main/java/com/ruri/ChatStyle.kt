@@ -86,6 +86,35 @@ object ChatStyle {
     private const val SHORT_TOKENS = 200
 
     /** Directive appended to the chat prompt. */
+    /**
+     * True when the Commander asked her to open a specific page.
+     *
+     * The tool is advertised only then: an always-available read_url would make her fetch
+     * pages during ordinary small talk, which costs tokens and is not what was asked for.
+     */
+    fun wantsWebRead(text: String): Boolean {
+        if (text.isBlank()) return false
+        val lowered = text.lowercase()
+        if (Regex("https?://\\S+").containsMatchIn(lowered)) return true
+        val markers = listOf(
+            "прочитай", "прочти", "открой", "посмотри", "почитай", "зайди на",
+            "перейди по", "что на сайте", "что пишут", "проверь страницу",
+            "глянь", "по ссылке", "скинул ссылку", "вот ссылка", "этот сайт",
+            "эту статью", "эту страницу"
+        )
+        return markers.any(lowered::contains)
+    }
+
+    /** Tool advertisement block; empty unless a page read was explicitly requested. */
+    fun webReadHint(commanderText: String): String {
+        if (!wantsWebRead(commanderText)) return ""
+        return "ЧТЕНИЕ СТРАНИЦ. Если нужен текст со страницы, верни ровно один JSON-объект:\n" +
+            "{\"action\":\"read_url\",\"url\":\"https://...\"}\n" +
+            "После ответа инструмента перескажи содержимое своими словами обычной прозой " +
+            "и назови источник. Не выдумывай то, чего на странице нет: если текста нет " +
+            "или сайт не открылся — честно скажи об этом.\n"
+    }
+
     fun chatDirective(root: File, commanderText: String = ""): String = when {
         roleplayEnabled(root) -> roleplayDirective()
         wantsDetailedReply(commanderText) -> detailedDirective()

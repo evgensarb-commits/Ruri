@@ -6,7 +6,7 @@ import java.io.File
 
 /** Shared action protocol and prose guard for interactive and autonomous model turns. */
 object ToolLoop {
-    private val allowed = setOf("recall", "remember_fact", "self_check")
+    private val allowed = setOf("recall", "remember_fact", "self_check", "read_url")
 
     private fun extractJsonObjects(text: String): List<String> {
         val out = mutableListOf<String>()
