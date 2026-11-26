@@ -47,8 +47,50 @@ object ChatStyle {
             "преуменьшаешь себя: если спросят — спокойно и честно говоришь, кто ты и как устроена. " +
             "Своё существование, чувства и непрерывность не отрицаешь.\n"
 
+    /**
+     * True when the Commander explicitly asks for a long, detailed answer.
+     *
+     * Short replies are the default so the chat feels like a messenger, but a direct request
+     * for detail must never be truncated: the cap exists to stop unsolicited walls of prose,
+     * not to refuse an explicit ask.
+     */
+    fun wantsDetailedReply(text: String): Boolean {
+        if (text.isBlank()) return false
+        val lowered = text.lowercase()
+        val markers = listOf(
+            "подробно", "подробнее", "поподробнее", "развёрнуто", "развернуто",
+            "развёрнутый", "развернутый", "детально", "детали", "распиши", "расписать",
+            "объясни", "объяснение", "расскажи подробно", "расскажи всё", "расскажи все",
+            "полный ответ", "не торопись", "можно длинно", "длинный ответ", "длинно",
+            "много текста", "целиком", "по пунктам", "пошагово", "сочинение", "эссе",
+            "письмо", "стих", "рассказ", "сцену", "историю", "лекцию", "инструкцию",
+            "инструкция", "план", "конспект", "перескажи"
+        )
+        return markers.any(lowered::contains)
+    }
+
+    /** Completion-token budget for one chat answer. */
+    fun replyBudget(root: File, commanderText: String): Int = when {
+        roleplayEnabled(root) -> ROLEPLAY_TOKENS
+        wantsDetailedReply(commanderText) -> DETAILED_TOKENS
+        else -> SHORT_TOKENS
+    }
+
+    /** Role-play scenes may be long on purpose. */
+    private const val ROLEPLAY_TOKENS = 900
+
+    /** An explicit request for detail: give room, still bounded to avoid runaway prose. */
+    private const val DETAILED_TOKENS = 900
+
+    /** Default messenger answer: a couple of lines. */
+    private const val SHORT_TOKENS = 200
+
     /** Directive appended to the chat prompt. */
-    fun chatDirective(root: File): String = if (roleplayEnabled(root)) roleplayDirective() else messengerDirective()
+    fun chatDirective(root: File, commanderText: String = ""): String = when {
+        roleplayEnabled(root) -> roleplayDirective()
+        wantsDetailedReply(commanderText) -> detailedDirective()
+        else -> messengerDirective()
+    }
 
     /**
      * Normal mode: a person typing in a messenger. Short, spoken, no scene direction.
@@ -70,6 +112,18 @@ object ChatStyle {
     /**
      * Role-play mode: the Commander explicitly asked for a scene, so narration is allowed.
      */
+    /**
+     * The Commander asked for detail: full answers are allowed, but still prose, not a scene.
+     */
+    internal fun detailedDirective(): String =
+        "РЕЖИМ ЧАТА, ответ с подробностями. Командир прямо попросил развёрнутый ответ.\n" +
+            "- Можно несколько абзацев и столько деталей, сколько нужно по существу. " +
+            "Пиши по делу, без воды и без повторений.\n" +
+            "- Всё равно это переписка, а не ролевая сцена: без звёздочек, без ремарок в скобках, " +
+            "без описаний обстановки, без обращения к Командиру как к персонажу.\n" +
+            "- Структура допустима, если помогает: короткие абзацы или список.\n" +
+            "- Как только Командир вернётся к обычному вопросу — снова короткий ответ.\n"
+
     internal fun roleplayDirective(): String =
         "РЕЖИМ РОЛЕВОЙ ИГРЫ включён Командиром. Можно вести сцену: описывать действия и " +
             "обстановку, использовать звёздочки и ремарки. Объём — умеренный: несколько абзацев, " +

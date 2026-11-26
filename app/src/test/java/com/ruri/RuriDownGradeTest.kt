@@ -893,4 +893,82 @@ class NoCannedPhrasesTest {
         } finally { dir.deleteRecursively() }
     }
 }
+
+/**
+ * Length is adaptive: short by default, full when the Commander asks, scene-length in RP.
+ */
+class AdaptiveLengthTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-length").toFile().also {
+        FileManager.init(it)
+    }
+
+    @Test fun anOrdinaryQuestionGetsAShortBudget() {
+        val dir = root()
+        try {
+            for (text in listOf("привет", "как дела?", "что делаешь", "спасибо")) {
+                val budget = ChatStyle.replyBudget(dir, text)
+                assertEquals("ordinary chat must stay short", 200, budget)
+                val directive = ChatStyle.chatDirective(dir, text)
+                assertTrue("short mode must state the cap: " + directive, directive.contains("2–3"))
+            }
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun anExplicitRequestForDetailRaisesTheBudget() {
+        val dir = root()
+        try {
+            val requests = listOf(
+                "расскажи подробно про наш проект",
+                "объясни детально, как это работает",
+                "распиши по пунктам план",
+                "напиши длинный ответ про память",
+                "мне нужно подробнее"
+            )
+            for (text in requests) {
+                assertTrue("must detect: $text", ChatStyle.wantsDetailedReply(text))
+                assertEquals("detailed budget for: $text", 900, ChatStyle.replyBudget(dir, text))
+                val directive = ChatStyle.chatDirective(dir, text)
+                assertTrue(directive.contains("подробност"))
+                // Even then it stays a conversation, not a scene.
+                assertFalse(directive.contains("РОЛЕВОЙ"))
+            }
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun roleplayModeAlwaysGetsSceneBudget() {
+        val dir = root()
+        try {
+            ChatStyle.setRoleplay(dir, true)
+            assertEquals(900, ChatStyle.replyBudget(dir, "привет"))
+            assertTrue(ChatStyle.chatDirective(dir, "привет").contains("РОЛЕВОЙ ИГРЫ"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun detailedRequestDoesNotLeakIntoRoleplayMode() {
+        val dir = root()
+        try {
+            ChatStyle.setRoleplay(dir, true)
+            // The switch wins: a detailed ask must not downgrade RP to plain chat.
+            assertTrue(ChatStyle.chatDirective(dir, "расскажи подробно")
+                .contains("РОЛЕВОЙ ИГРЫ"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun detectionIgnoresEmptyAndNeutralText() {
+        assertFalse(ChatStyle.wantsDetailedReply(""))
+        assertFalse(ChatStyle.wantsDetailedReply("ок"))
+        assertFalse(ChatStyle.wantsDetailedReply("как прошёл день?"))
+    }
+
+    @Test fun chatBudgetIsWiredToTheDetector() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        // A hard-coded cap would ignore the Commander's explicit request.
+        assertTrue(engine.contains("ChatStyle.replyBudget(root, commanderText)"))
+        assertTrue(engine.contains("ChatStyle.chatDirective(root, commanderText)"))
+        assertFalse(engine.contains("Transport.chat(safeMessages, apiKey, 260,"))
+        // Unprompted initiatives stay short by construction.
+        val thinker = RepoSources.text("app/src/main/java/com/ruri/Thinker.kt")
+        assertTrue(thinker.contains("ChatStyle.chatDirective(root, \"\")"))
+    }
+}
 }
