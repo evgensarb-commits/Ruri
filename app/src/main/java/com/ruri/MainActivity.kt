@@ -302,6 +302,54 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun listDocuments(): String = org.json.JSONArray(DocReader.list(filesDir)).toString()
 
+        /** Vision capability: true / false / null (never checked). */
+        @JavascriptInterface
+        fun visionStatus(): String = JSONObject()
+            .put("supported", Vision.supportState(filesDir)?.toString() ?: "unknown")
+            .put("reason", Vision.lastReason(filesDir))
+            .put("line", Vision.statusLine(filesDir))
+            .toString()
+
+        @JavascriptInterface
+        fun checkVisionSupport(): String {
+            return try {
+                val (supported, reason) = Vision.probe(filesDir, force = true)
+                JSONObject().put("supported", supported).put("reason", reason)
+                    .put("line", Vision.statusLine(filesDir)).toString()
+            } catch (e: Exception) {
+                JSONObject().put("supported", false)
+                    .put("reason", e.message ?: "проверка не удалась").toString()
+            }
+        }
+
+        /**
+         * Describes an image the Commander attached. Returns JSON with text or the reason why
+         * it could not be described.
+         */
+        @JavascriptInterface
+        fun describeImage(name: String, base64: String): String {
+            return try {
+                val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                val mime = Vision.mimeOf(bytes)
+                    ?: return JSONObject().put("ok", false)
+                        .put("error", "Это не изображение (PNG, JPEG, WebP или GIF)").toString()
+                val (text, reason) = Vision.describeDetailed(
+                    filesDir, bytes, mime,
+                    "Опиши изображение подробно: что на нём, люди и их позы, текст на картинке, " +
+                        "стиль и настроение. Не выдумывай детали, которых не видно."
+                )
+                if (text == null) {
+                    JSONObject().put("ok", false).put("error", reason).toString()
+                } else {
+                    // The description is the attachment's text, so the chat can persist it.
+                    JSONObject().put("ok", true).put("text", text)
+                        .put("name", name.take(120)).toString()
+                }
+            } catch (e: Exception) {
+                JSONObject().put("ok", false).put("error", e.message ?: "не удалось").toString()
+            }
+        }
+
         /**
          * Stores a document chosen in the WebView. Bytes arrive base64-encoded because the
          * JavaScript bridge only carries strings.

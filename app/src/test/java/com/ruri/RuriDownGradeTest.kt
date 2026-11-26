@@ -399,7 +399,8 @@ class UiBridgeContractTest {
     @Test fun uiIsAMessengerWithoutTheRemovedFeatures() {
         val html = html()
         assertTrue(html.isNotBlank())
-        for (removed in listOf("МАРШРУТЫ", "VISION", "ПОЛКА", "ROUTERAPI", "shelf", "serper", "searxng")) {
+        // Vision is a live capability again, so it is no longer in this list.
+        for (removed in listOf("МАРШРУТЫ", "ПОЛКА", "ROUTERAPI", "shelf", "serper", "searxng")) {
             assertFalse("UI must not mention $removed", html.contains(removed, ignoreCase = true))
         }
         // The three panes of the down-graded app.
@@ -457,7 +458,9 @@ class UiBridgeContractTest {
             "getDiagnostics", "appendEvent", "completeChat", "readMemoryLayer", "readLastEvents")) {
             assertTrue("bridge must expose $method", activity.contains("fun $method("))
         }
-        assertFalse("vision bridge must be gone", activity.contains("fun visionStatus("))
+        // Vision is back, but it must report a real capability state, not a config flag.
+        assertTrue(activity.contains("fun visionStatus("))
+        assertTrue(activity.contains("fun checkVisionSupport("))
         assertFalse("shelf bridge must be gone", activity.contains("fun saveShelfFile("))
         assertFalse("search bridge must be gone", activity.contains("fun searchWeb("))
     }
@@ -475,7 +478,10 @@ class RemovedModulesGoneTest {
         // UrlReader is deliberately absent from this list: page reading came back as a
         // Commander-gated tool (see WebReadToolTest). Search engines, shelves and vision
         // remain removed.
-        for (name in listOf("Vision.kt", "ShelfWatcher.kt", "WebSearch.kt", "SearchRouter.kt",
+        // Vision and UrlReader came back as Commander-gated tools; their own behaviour is
+        // covered by VisionCapabilityTest and WebReadToolTest. Search engines, shelves and the
+        // old routing layer stay removed.
+        for (name in listOf("ShelfWatcher.kt", "WebSearch.kt", "SearchRouter.kt",
             "FreeModelRouter.kt", "Probe.kt", "RouterAPIMigration.kt")) {
             val file = File("app/src/main/java/com/ruri/$name")
             val alt = File("src/main/java/com/ruri/$name")
@@ -1188,6 +1194,130 @@ class DocReaderTest {
         val html = RepoSources.text("app/src/main/assets/index.html")
         assertTrue(html.contains("pickDocument"))
         assertTrue(html.contains("saveDocument"))
+    }
+}
+
+/**
+ * Vision: image understanding driven by a real capability probe, not by a config flag.
+ */
+class VisionCapabilityTest {
+    private fun root(): java.io.File = java.nio.file.Files.createTempDirectory("ruri-vision").toFile().also {
+        FileManager.init(it)
+    }
+
+    @Test fun mimeIsSniffedByContentNotExtension() {
+        val png = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0)
+        val jpeg = byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte(), 0xe0.toByte(), 0, 0)
+        val gif = "GIF89a".toByteArray()
+        assertEquals("image/png", Vision.mimeOf(png))
+        assertEquals("image/jpeg", Vision.mimeOf(jpeg))
+        assertEquals("image/gif", Vision.mimeOf(gif))
+        assertNull(Vision.mimeOf("plain text here".toByteArray()))
+        assertTrue(Vision.isImage(png))
+        assertFalse(Vision.isImage("not an image".toByteArray()))
+    }
+
+    @Test fun supportIsUnknownUntilProbed() {
+        val dir = root()
+        try {
+            // A fresh install must not claim vision works, nor claim it is broken.
+            assertNull(Vision.supportState(dir))
+            assertTrue(Vision.statusLine(dir).contains("не проверялись"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun aRefusalIsRememberedWithAnExplanation() {
+        val dir = root()
+        try {
+            // Without a key the probe cannot succeed; the reason must be actionable.
+            val (supported, reason) = Vision.probe(dir, force = true)
+            assertFalse(supported)
+            assertTrue("must explain why: $reason", reason.isNotBlank())
+            assertEquals(false, Vision.supportState(dir))
+            assertTrue(Vision.lastReason(dir).isNotBlank())
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun describeRefusesOversizedAndNonImageInput() {
+        val dir = root()
+        try {
+            val (text1, reason1) = Vision.describeDetailed(dir, ByteArray(0), "image/png", "опиши")
+            assertNull(text1)
+            assertTrue(reason1.contains("пустое"))
+
+            val (text2, reason2) = Vision.describeDetailed(dir, "text".toByteArray(), "text/plain", "опиши")
+            assertNull(text2)
+            assertTrue(reason2.contains("не изображение"))
+
+            val huge = ByteArray(9 * 1024 * 1024)
+            val (text3, reason3) = Vision.describeDetailed(dir, huge, "image/png", "опиши")
+            assertNull(text3)
+            assertTrue(reason3.contains("8 МБ"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun aKnownRefusalStopsFurtherRequests() {
+        val dir = root()
+        try {
+            // Simulate a provider that already said "no images".
+            FileManager.write(dir, "memory/vision_state.json", org.json.JSONObject()
+                .put("supported", false)
+                .put("reason", "Модель текстовая")
+                .put("checked_at", 1L)
+                .toString())
+            val png = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)
+            val (text, reason) = Vision.describeDetailed(dir, png, "image/png", "опиши")
+            assertNull(text)
+            assertTrue(reason.contains("текстовая"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun imagesAreListedSeparatelyFromDocuments() {
+        val dir = root()
+        try {
+            val png = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0)
+            DocReader.store(dir, "picture.png", png)
+            DocReader.store(dir, "notes.txt", "просто текст".toByteArray())
+            assertEquals(listOf("picture.png"), DocReader.listImageNames(dir))
+            assertEquals(listOf("notes.txt"), DocReader.listDocumentNames(dir))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun theHintIsHonestWhenVisionIsUnavailable() {
+        // With vision known broken the prompt must forbid inventing content.
+        val hint = ChatStyle.imageHint("что на картинке?", listOf("a.png"), visionOk = false)
+        assertTrue(hint.contains("не принимает картинки"))
+        assertTrue(hint.contains("Не выдумывай"))
+        // With vision working it advertises the action instead.
+        val ok = ChatStyle.imageHint("посмотри на фото", listOf("a.png"), visionOk = true)
+        assertTrue(ok.contains("look_at_image"))
+        assertTrue(ok.contains("a.png"))
+        // No image and no mention: nothing is emitted at all.
+        assertTrue(ChatStyle.imageHint("привет", emptyList(), visionOk = true).isEmpty())
+    }
+
+    @Test fun theToolAndBridgeAreWired() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        assertTrue(engine.contains("\"look_at_image\" ->"))
+        assertTrue(engine.contains("Vision.describeDetailed"))
+        assertTrue(engine.contains("ChatStyle.imageHint"))
+        val loop = RepoSources.text("app/src/main/java/com/ruri/ToolLoop.kt")
+        assertTrue(loop.contains("\"look_at_image\""))
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        for (method in listOf("visionStatus", "checkVisionSupport", "describeImage")) {
+            assertTrue("bridge needs $method", activity.contains("fun $method("))
+        }
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        assertTrue(html.contains("pickImage"))
+        assertTrue(html.contains("checkVision"))
+        assertTrue(html.contains("describeImage"))
+    }
+
+    @Test fun documentImagesCanBeFoundInsideArchives() {
+        val reader = RepoSources.text("app/src/main/java/com/ruri/DocReader.kt")
+        // A picture inside a DOCX must be reachable, not silently ignored.
+        assertTrue(reader.contains("fun embeddedImages"))
+        assertTrue(reader.contains("word/media/"))
     }
 }
 }
