@@ -1114,7 +1114,8 @@ class DocReaderTest {
     @Test fun readingPageZeroOfALongDocumentAnnouncesContinuation() {
         val dir = root()
         try {
-            val body = (1..200).joinToString(" ") { "слово$it" }
+            // Must exceed one 6000-character page.
+            val body = (1..1500).joinToString(" ") { "слово$it" }
             val stored = DocReader.store(dir, "big.txt", body.toByteArray())
             val (ok, first) = DocReader.read(dir, stored, 0)
             assertTrue(first, ok)
