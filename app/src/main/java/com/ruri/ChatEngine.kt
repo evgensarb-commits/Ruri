@@ -291,15 +291,6 @@ object ChatEngine {
                 DocReader.listImageNames(root),
                 Vision.supportState(root) != false
             ) +
-            ChatStyle.imageHint(
-                commanderText,
-                DocReader.list(root).filter { name ->
-                    Vision.isImage(File(File(root, DocReader.DIR), name).let { f ->
-                        if (!f.isFile) ByteArray(0) else runCatching { f.readBytes() }.getOrDefault(ByteArray(0))
-                    })
-                },
-                Vision.supportState(root) != false
-            ) +
             "Ты общаешься с Командиром в чате приложения. Отвечай обычной прозой, без JSON и без служебных блоков. " +
             "Ниже — ТВОЯ ДОЛГОСРОЧНАЯ ПАМЯТЬ. Это не контекст одного диалога; ты помнишь между сессиями.\n" +
             "ТВОЯ АВТОБИОГРАФИЯ (L3):\n$summary\n" +
