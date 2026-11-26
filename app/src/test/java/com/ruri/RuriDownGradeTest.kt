@@ -472,12 +472,20 @@ class UiBridgeContractTest {
 
 class RemovedModulesGoneTest {
     @Test fun sourceTreeHasNoRetiredFeatureFiles() {
+        // UrlReader is deliberately absent from this list: page reading came back as a
+        // Commander-gated tool (see WebReadToolTest). Search engines, shelves and vision
+        // remain removed.
         for (name in listOf("Vision.kt", "ShelfWatcher.kt", "WebSearch.kt", "SearchRouter.kt",
-            "UrlReader.kt", "FreeModelRouter.kt", "Probe.kt", "RouterAPIMigration.kt")) {
+            "FreeModelRouter.kt", "Probe.kt", "RouterAPIMigration.kt")) {
             val file = File("app/src/main/java/com/ruri/$name")
             val alt = File("src/main/java/com/ruri/$name")
             assertFalse("$name must be deleted", file.exists() || alt.exists())
         }
+        // The restored reader stays a page reader, never a search engine.
+        val reader = RepoSources.text("app/src/main/java/com/ruri/UrlReader.kt")
+        assertTrue(reader.contains("object UrlReader"))
+        assertFalse(reader.contains("google."))
+        assertFalse(reader.contains("serper"))
     }
 
     @Test fun autonomousLivingIsKept() {
