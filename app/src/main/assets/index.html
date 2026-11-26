@@ -329,7 +329,7 @@ input:focus,select:focus,textarea:focus{border-color:rgba(167,139,250,.6);box-sh
         </div>
         <p class="hint">Если платная модель не отвечает — скопируй точный id из каталога routeway.ai и вставь сюда.</p>
       
-        <div id="routeraiBlock" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--line-soft)">
+        <div id="routeraiBlock" hidden style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line-soft)">
           <label class="field-label" for="routeraiKeyInput">КЛЮЧ ROUTERAI.RU</label>
           <input id="routeraiKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="ключ с routerai.ru">
           <div class="row-actions">
@@ -1397,13 +1397,19 @@ function saveRouteraiModel(){
 
 function loadModelVariant(){
   var variant = String(call('modelVariant', [], 'free') || 'free');
+  // Three options exist now; collapsing anything but 'paid' into 'free' made the routerai
+  // choice impossible to keep.
+  if(variant !== 'paid' && variant !== 'routerai') variant = 'free';
   var select = $('modelVariant');
-  if(select) select.value = (variant === 'paid') ? 'paid' : 'free';
+  if(select) select.value = variant;
   var input = $('paidModelInput');
   if(input) input.value = String(call('paidModelId', [], '') || '');
-  setStatus('modelStatus',
-    variant === 'paid' ? '\u0410\u043a\u0442\u0438\u0432\u043d\u0430 \u043f\u043b\u0430\u0442\u043d\u0430\u044f \u043c\u043e\u0434\u0435\u043b\u044c.' : '\u0410\u043a\u0442\u0438\u0432\u043d\u0430 \u0431\u0435\u0441\u043f\u043b\u0430\u0442\u043d\u0430\u044f \u043c\u043e\u0434\u0435\u043b\u044c.',
-    variant === 'paid' ? 'good' : '');
+  var labels = {
+    free: 'Активна бесплатная модель.',
+    paid: 'Активна платная модель.',
+    routerai: 'Активен routerai.ru — нужны ключ и id модели.'
+  };
+  setStatus('modelStatus', labels[variant] || '', variant === 'free' ? '' : 'good');
 }
 
 function changeModelVariant(){
