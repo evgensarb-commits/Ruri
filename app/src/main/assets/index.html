@@ -320,6 +320,7 @@ input:focus,select:focus,textarea:focus{border-color:rgba(167,139,250,.6);box-sh
           <option value="free">Gemma 4 26B MeroMero — бесплатно (дневной лимит токенов)</option>
           <option value="paid">Gemma 4 31B SDFT Heretic RP — платно (без лимита, по факту)</option>
           <option value="routerai">routerai.ru — другой провайдер (свой ключ, без VPN)</option>
+          <option value="closerouter">closerouter.dev — другой провайдер (свой ключ, без VPN)</option>
         </select>
         <div class="inline-status" id="modelStatus">Проверяю…</div>
         <label class="field-label" for="paidModelInput">Идентификатор платной модели</label>
@@ -343,6 +344,20 @@ input:focus,select:focus,textarea:focus{border-color:rgba(167,139,250,.6);box-sh
           </div>
           <p class="hint">Здесь нет предзаполненной модели: скопируй точный id из каталога routerai.ru и вставь его выше. Без id запросы не отправляются. Этот провайдер работает без VPN.</p>
         </div></div>
+        <div id="closerouterBlock" hidden style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line-soft)">
+          <label class="field-label" for="closeRouterKeyInput">КЛЮЧ CLOSEROUTER.DEV</label>
+          <input id="closeRouterKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="ключ с closerouter.dev">
+          <div class="row-actions">
+            <button class="btn ghost" id="saveCloseRouterKey" type="button">Сохранить ключ</button>
+          </div>
+          <div class="inline-status" id="closeRouterKeyStatus"></div>
+          <label class="field-label" for="closeRouterModelInput">МОДЕЛЬ НА CLOSEROUTER</label>
+          <input id="closeRouterModelInput" type="text" autocomplete="off" spellcheck="false" placeholder="вставь id модели из каталога">
+          <div class="row-actions">
+            <button class="btn ghost" id="saveCloseRouterModel" type="button">Сохранить модель</button>
+          </div>
+          <p class="hint">Здесь нет предзаполненной модели: скопируй точный id из каталога closerouter.dev/models и вставь выше. Без id запросы не отправляются. Работает без VPN.</p>
+        </div>
 
       <div class="card">
         <span class="card-label">Личность</span>
@@ -1349,6 +1364,52 @@ function setStatus(id, message, tone){
    НАСТРОЙКИ: личность
    ====================================================================== */
 /* Active provider model: free tier or the paid 31B variant. */
+function loadCloseRouter(){
+  var data = parseJson(call('closeRouterKeyState', [], '{}'), {});
+  if(!data || typeof data !== 'object') data = {};
+  var block = $('closerouterBlock');
+  var select = $('modelVariant');
+  var active = select && select.value === 'closerouter';
+  if(block) setHidden(block, !active);
+  var model = $('closeRouterModelInput');
+  if(model && !model.value) model.value = String(data.model || '');
+  if(active){
+    var hasKey = data.has_key === true;
+    var hasModel = String(data.model || '').replace(/\s/g, '') !== '';
+    if(!hasKey && !hasModel){
+      setStatus('closeRouterKeyStatus', 'Нужны ключ и идентификатор модели — вставь оба.', 'bad');
+    }else if(!hasKey){
+      setStatus('closeRouterKeyStatus', 'Модель выбрана, но ключ closerouter не задан.', 'bad');
+    }else if(!hasModel){
+      setStatus('closeRouterKeyStatus', 'Ключ сохранён, но идентификатор модели не задан — без него запросы не уйдут.', 'bad');
+    }else{
+      setStatus('closeRouterKeyStatus', 'Всё готово: ключ и модель заданы.', 'good');
+    }
+  }
+}
+
+function saveCloseRouterKey(){
+  var input = $('closeRouterKeyInput');
+  var key = input ? String(input.value || '').replace(/^\s+|\s+$/g, '') : '';
+  if(!key){ setStatus('closeRouterKeyStatus', 'Ключ пуст.', 'bad'); return; }
+  var result = call('setCloseRouterKey', [key], 'ERROR');
+  if(isErr(result)){ setStatus('closeRouterKeyStatus', errText(result), 'bad'); return; }
+  if(input) input.value = '';
+  setStatus('closeRouterKeyStatus', 'Ключ сохранён.', 'good');
+  loadCloseRouter();
+  refreshStatus();
+}
+
+function saveCloseRouterModel(){
+  var input = $('closeRouterModelInput');
+  var value = input ? String(input.value || '').replace(/^\s+|\s+$/g, '') : '';
+  if(!value){ setStatus('closeRouterKeyStatus', 'Вставь идентификатор модели.', 'bad'); return; }
+  var result = call('setCloseRouterModelId', [value], 'ERROR');
+  if(isErr(result)){ setStatus('closeRouterKeyStatus', errText(result), 'bad'); return; }
+  setStatus('closeRouterKeyStatus', 'Модель сохранена.', 'good');
+  refreshStatus();
+}
+
 function loadRouterai(){
   var data = parseJson(call('routeraiKeyState', [], '{}'), {});
   if(!data || typeof data !== 'object') data = {};
@@ -1419,6 +1480,7 @@ function changeModelVariant(){
   if(isErr(result)){ setStatus('modelStatus', errText(result), 'bad'); return; }
   loadModelVariant();
   loadRouterai();
+  loadCloseRouter();
   refreshStatus();
 }
 
@@ -1868,6 +1930,7 @@ function refreshSettings(){
   loadConnection();
   loadModelVariant();
   loadRouterai();
+  loadCloseRouter();
   loadCharacter();
   loadBackups();
   loadDocuments();
@@ -1903,6 +1966,8 @@ $('modelVariant').addEventListener('change', changeModelVariant);
 $('savePaidModel').addEventListener('click', savePaidModelId);
 $('saveRouteraiKey').addEventListener('click', saveRouteraiKey);
 $('saveRouteraiModel').addEventListener('click', saveRouteraiModel);
+$('saveCloseRouterKey').addEventListener('click', saveCloseRouterKey);
+$('saveCloseRouterModel').addEventListener('click', saveCloseRouterModel);
 
 function showTab(name){
   var key = name || 'chat';

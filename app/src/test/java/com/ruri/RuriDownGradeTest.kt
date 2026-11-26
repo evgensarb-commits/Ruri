@@ -1533,5 +1533,91 @@ class RouterAiUiReachabilityTest {
         assertTrue(html.contains("setRouteraiModelId"))
         assertTrue(html.contains("routeraiKeyState"))
     }
+
+    @Test fun theFourthOptionExistsWithItsOwnFields() {
+        val html = html()
+        assertTrue("dropdown needs the closerouter option", html.contains("value=\"closerouter\""))
+        assertTrue("hidden by attribute", html.contains("id=\"closerouterBlock\" hidden"))
+        assertFalse("no inline display:none", html.contains("closerouterBlock\" style=\"display:none"))
+        for (id in listOf("closeRouterKeyInput", "closeRouterModelInput", "saveCloseRouterKey", "saveCloseRouterModel")) {
+            assertTrue("missing field " + id, html.contains("id=\"" + id + "\""))
+        }
+        assertTrue(html.contains("setCloseRouterKey"))
+        assertTrue(html.contains("setCloseRouterModelId"))
+        assertTrue(html.contains("closeRouterKeyState"))
+    }
+}
+
+/**
+ * Fourth provider: closerouter.dev, same slot scheme as routerai.
+ */
+class CloseRouterProviderTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-closerouter").toFile().also {
+        FileManager.init(it)
+    }
+
+    @Test fun switchingChangesProviderUrlModelAndVpnRule() {
+        val dir = root()
+        try {
+            Route.setVariant(dir, Route.VARIANT_CLOSEROUTER)
+            assertTrue(Route.isCloseRouter(dir))
+            assertEquals(Route.ID_CLOSEROUTER, Route.providerId(dir))
+            assertEquals(Route.CLOSEROUTER_BASE_URL, Route.baseUrl(dir))
+            // Aggregators are reachable without a tunnel.
+            assertFalse("closerouter must not require VPN", Route.requiresVpn(dir))
+            val entry = JSONObject(FileManager.read(dir, "core/config.json"))
+                .getJSONArray("models").getJSONObject(0)
+            assertEquals(Route.ID_CLOSEROUTER, entry.optString("id"))
+            assertEquals(Route.CLOSEROUTER_BASE_URL, entry.optString("base_url"))
+            assertFalse(entry.optBoolean("needs_vpn", true))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun theModelIdStartsEmptyAndIsEditable() {
+        val dir = root()
+        try {
+            Route.setVariant(dir, Route.VARIANT_CLOSEROUTER)
+            assertEquals("", Route.closeRouterModelId(dir))
+            assertEquals("", Route.model(dir))
+            assertTrue(Route.modelLabel(dir).contains("не выбрана"))
+
+            Route.setCloseRouterModelId(dir, "anthropic/claude-sonnet-5.5")
+            assertEquals("anthropic/claude-sonnet-5.5", Route.model(dir))
+            val entry = JSONObject(FileManager.read(dir, "core/config.json"))
+                .getJSONArray("models").getJSONObject(0)
+            assertEquals("anthropic/claude-sonnet-5.5", entry.optString("model"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun allFourVariantsRoundTrip() {
+        val dir = root()
+        try {
+            for (variant in listOf(Route.VARIANT_PAID, Route.VARIANT_ROUTERAI,
+                Route.VARIANT_CLOSEROUTER, Route.VARIANT_FREE)) {
+                Route.setVariant(dir, variant)
+                assertEquals(variant, Route.variant(dir))
+            }
+            // Back to the start: the free model and its tunnel rule are restored.
+            assertEquals(Route.MODEL_FREE, Route.model(dir))
+            assertTrue(Route.requiresVpn(dir))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun secretSlotsAreDistinctPerProvider() {
+        val route = RepoSources.text("app/src/main/java/com/ruri/Route.kt")
+        // Every provider maps to its own secret id, so keys never overwrite each other.
+        assertTrue(route.contains("fun secretIdFor(providerId: String)"))
+        for (id in listOf("ID_ROUTERAI -> ID_ROUTERAI", "ID_CLOSEROUTER -> ID_CLOSEROUTER",
+            "else -> ID_ROUTEWAY")) {
+            assertTrue("slot mapping needs: " + id, route.contains(id))
+        }
+    }
+
+    @Test fun theBridgeAndTheUiAreWired() {
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        for (method in listOf("closeRouterModelId", "setCloseRouterModelId", "setCloseRouterKey", "closeRouterKeyState")) {
+            assertTrue("bridge needs " + method, activity.contains("fun " + method + "("))
+        }
+    }
 }
 }

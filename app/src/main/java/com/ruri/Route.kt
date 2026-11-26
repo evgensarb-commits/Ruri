@@ -22,9 +22,11 @@ object Route {
 
     const val ID_ROUTEWAY = "routeway"
     const val ID_ROUTERAI = "routerai"
+    const val ID_CLOSEROUTER = "closerouter"
 
     const val ROUTEWAY_BASE_URL = "https://api.routeway.ai/v1"
     const val ROUTERAI_BASE_URL = "https://routerai.ru/api/v1"
+    const val CLOSEROUTER_BASE_URL = "https://api.closerouter.dev/v1"
 
     /** Free-tier MeroMero (A4B, ~4B active parameters). */
     const val MODEL_FREE = "gemma-4-26b-a4b-it-meromero:free"
@@ -41,6 +43,7 @@ object Route {
     const val VARIANT_FREE = "free"
     const val VARIANT_PAID = "paid"
     const val VARIANT_ROUTERAI = "routerai"
+    const val VARIANT_CLOSEROUTER = "closerouter"
 
     /** Routeway's MeroMero is reachable from this region only through a VPN tunnel. */
     const val ROUTEWAY_REQUIRES_VPN = true
@@ -52,6 +55,7 @@ object Route {
     private const val VARIANT_KEY = "model_variant"
     private const val PAID_MODEL_KEY = "paid_model_id"
     private const val ROUTERAI_MODEL_KEY = "routerai_model_id"
+    private const val CLOSEROUTER_MODEL_KEY = "closerouter_model_id"
 
     /** Retired feature keys removed on every [ensure]. */
     private val retiredKeys = listOf(
@@ -77,6 +81,7 @@ object Route {
     fun variant(root: File): String = when (publicConfig(root).optString(VARIANT_KEY, VARIANT_FREE)) {
         VARIANT_PAID -> VARIANT_PAID
         VARIANT_ROUTERAI -> VARIANT_ROUTERAI
+        VARIANT_CLOSEROUTER -> VARIANT_CLOSEROUTER
         else -> VARIANT_FREE
     }
 
@@ -84,17 +89,29 @@ object Route {
 
     fun isRouterAI(root: File): Boolean = variant(root) == VARIANT_ROUTERAI
 
+    fun isCloseRouter(root: File): Boolean = variant(root) == VARIANT_CLOSEROUTER
+
     /** Which provider the active variant talks to. */
-    fun providerId(root: File): String = if (isRouterAI(root)) ID_ROUTERAI else ID_ROUTEWAY
+    fun providerId(root: File): String = when (variant(root)) {
+        VARIANT_ROUTERAI -> ID_ROUTERAI
+        VARIANT_CLOSEROUTER -> ID_CLOSEROUTER
+        else -> ID_ROUTEWAY
+    }
 
-    fun baseUrl(root: File): String = if (isRouterAI(root)) ROUTERAI_BASE_URL else ROUTEWAY_BASE_URL
+    fun baseUrl(root: File): String = when (variant(root)) {
+        VARIANT_ROUTERAI -> ROUTERAI_BASE_URL
+        VARIANT_CLOSEROUTER -> CLOSEROUTER_BASE_URL
+        else -> ROUTEWAY_BASE_URL
+    }
 
-    fun requiresVpn(root: File): Boolean = !isRouterAI(root) && ROUTEWAY_REQUIRES_VPN
+    /** Only Routeway's MeroMero needs the tunnel; both aggregators are reachable directly. */
+    fun requiresVpn(root: File): Boolean = !isRouterAI(root) && !isCloseRouter(root) && ROUTEWAY_REQUIRES_VPN
 
     /** Provider model id for the active variant. */
     fun model(root: File): String = when (variant(root)) {
         VARIANT_PAID -> paidModelId(root)
         VARIANT_ROUTERAI -> routerAiModelId(root)
+        VARIANT_CLOSEROUTER -> closeRouterModelId(root)
         else -> MODEL_FREE
     }
 
@@ -103,6 +120,10 @@ object Route {
         VARIANT_ROUTERAI -> {
             val id = routerAiModelId(root)
             if (id.isBlank()) "routerai · модель не выбрана" else "routerai · $id"
+        }
+        VARIANT_CLOSEROUTER -> {
+            val id = closeRouterModelId(root)
+            if (id.isBlank()) "closerouter · модель не выбрана" else "closerouter · $id"
         }
         else -> MODEL_FREE_LABEL
     }
@@ -125,11 +146,13 @@ object Route {
         val target = when (variant) {
             VARIANT_PAID -> VARIANT_PAID
             VARIANT_ROUTERAI -> VARIANT_ROUTERAI
+            VARIANT_CLOSEROUTER -> VARIANT_CLOSEROUTER
             else -> VARIANT_FREE
         }
         val modelId = when (target) {
             VARIANT_PAID -> paidModelId(root)
             VARIANT_ROUTERAI -> routerAiModelId(root)
+            VARIANT_CLOSEROUTER -> closeRouterModelId(root)
             else -> MODEL_FREE
         }
         val config = readConfig(root).put(VARIANT_KEY, target)
@@ -163,6 +186,19 @@ object Route {
         persist(root, config)
     }
 
+    /** Model id on closerouter.dev. Empty until the Commander supplies it, like routerai. */
+    fun closeRouterModelId(root: File): String =
+        publicConfig(root).optString(CLOSEROUTER_MODEL_KEY).trim()
+
+    fun setCloseRouterModelId(root: File, id: String) {
+        val trimmed = id.trim()
+        val config = readConfig(root).put(CLOSEROUTER_MODEL_KEY, trimmed)
+        if (isCloseRouter(root)) {
+            config.put("models", JSONArray().put(entryFor(VARIANT_CLOSEROUTER, "", trimmed)))
+        }
+        persist(root, config)
+    }
+
     fun setRouterAiModelId(root: File, id: String) {
         val trimmed = id.trim()
         val config = readConfig(root).put(ROUTERAI_MODEL_KEY, trimmed)
@@ -176,14 +212,18 @@ object Route {
 
     /** One provider entry as stored in `core/config.json`. */
     private fun entryFor(variant: String, apiKey: String, modelId: String): JSONObject {
-        val isRouter = variant == VARIANT_ROUTERAI
+        val (id, name, base, needsVpn) = when (variant) {
+            VARIANT_ROUTERAI -> listOf(ID_ROUTERAI, "routerai.ru", ROUTERAI_BASE_URL, false)
+            VARIANT_CLOSEROUTER -> listOf(ID_CLOSEROUTER, "closerouter.dev", CLOSEROUTER_BASE_URL, false)
+            else -> listOf(ID_ROUTEWAY, "Routeway", ROUTEWAY_BASE_URL, ROUTEWAY_REQUIRES_VPN)
+        }
         return JSONObject()
-            .put("id", if (isRouter) ID_ROUTERAI else ID_ROUTEWAY)
-            .put("name", if (isRouter) "routerai.ru" else "Routeway")
-            .put("base_url", if (isRouter) ROUTERAI_BASE_URL else ROUTEWAY_BASE_URL)
+            .put("id", id)
+            .put("name", name)
+            .put("base_url", base)
             .put("model", modelId)
             .put("api_key", apiKey)
-            .put("needs_vpn", !isRouter && ROUTEWAY_REQUIRES_VPN)
+            .put("needs_vpn", needsVpn)
             .put("context_length", 131072)
     }
 
@@ -233,8 +273,15 @@ object Route {
     }
 
     /** Saves a provider key in its own slot, without switching the active provider. */
+    /** Resolves which secret slot a provider id stores its key in. */
+    fun secretIdFor(providerId: String): String = when (providerId) {
+        ID_ROUTERAI -> ID_ROUTERAI
+        ID_CLOSEROUTER -> ID_CLOSEROUTER
+        else -> ID_ROUTEWAY
+    }
+
     fun setProviderKey(root: File, providerId: String, key: String) {
-        val secretId = if (providerId == ID_ROUTERAI) ID_ROUTERAI else ID_ROUTEWAY
+        val secretId = secretIdFor(providerId)
         SecretStore.setModelKey(root, secretId, key)
         // If that provider is active right now, the visible entry must reflect the change.
         if (secretId == providerId(root)) {
@@ -246,7 +293,7 @@ object Route {
     }
 
     fun hasProviderKey(root: File, providerId: String): Boolean =
-        SecretStore.hasModelKey(root, if (providerId == ID_ROUTERAI) ID_ROUTERAI else ID_ROUTEWAY)
+        SecretStore.hasModelKey(root, secretIdFor(providerId))
 
     // ---------------------------------------------------------------- ensure
 
