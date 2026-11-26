@@ -694,9 +694,11 @@ class ChatStyleModesTest {
             assertTrue(ChatStyle.roleplayEnabled(dir))
             val directive = ChatStyle.chatDirective(dir)
             assertTrue(directive.contains("РОЛЕВОЙ ИГРЫ"))
-            assertTrue(directive.contains("звёздочки"))
+            assertTrue(directive.contains("звёздочк"))
+            // It must require staged action, not merely allow it.
+            assertTrue(directive.contains("ДЕЛАЕШЬ"))
             // It must still keep her in character rather than becoming a narrator.
-            assertTrue(directive.contains("остаёшься собой"))
+            assertTrue(directive.contains("ты Рури") || directive.contains("рассказчика"))
 
             ChatStyle.setRoleplay(dir, false)
             assertFalse(ChatStyle.roleplayEnabled(dir))
@@ -953,7 +955,9 @@ class AdaptiveLengthTest {
         val dir = root()
         try {
             ChatStyle.setRoleplay(dir, true)
-            assertEquals(900, ChatStyle.replyBudget(dir, "привет"))
+            // A scene needs room for staged action, not just a longer chat line.
+            assertTrue("scene budget must allow described action",
+                ChatStyle.replyBudget(dir, "привет") >= 1200)
             assertTrue(ChatStyle.chatDirective(dir, "привет").contains("РОЛЕВОЙ ИГРЫ"))
         } finally { dir.deleteRecursively() }
     }
@@ -1669,8 +1673,13 @@ class ReplyLengthAndStyleTest {
             ChatStyle.setRoleplay(dir, true)
             assertEquals(3000, ChatStyle.replyBudget(dir, "сцена"))
 
-            // Zero hands control back to the mode defaults.
+            // Zero hands control back to the mode defaults. Compare against the default for the
+            // *current* mode: the role-play budget is different from the messenger one.
             ChatStyle.setManualTokenLimit(dir, 0)
+            assertEquals(0, ChatStyle.manualTokenLimit(dir))
+            val sceneAuto = ChatStyle.replyBudget(dir, "привет")
+            assertTrue("role-play default must allow a scene", sceneAuto >= 1200)
+            ChatStyle.setRoleplay(dir, false)
             assertEquals(auto, ChatStyle.replyBudget(dir, "привет"))
         } finally { dir.deleteRecursively() }
     }
