@@ -32,12 +32,6 @@ object Route {
     /** Paid variant chosen by the Commander. Overridable via [paidModelId]. */
     const val MODEL_PAID_DEFAULT = "gemma-4-31b-sdft-heretic-rp"
 
-    /**
-     * Default model on routerai.ru: a Gemma-family model of comparable size, so the character
-     * voice survives the move. Overridable from settings — the catalogue changes.
-     */
-    const val MODEL_ROUTERAI_DEFAULT = "google/gemma-3-27b-it"
-
     /** Ids an earlier build wrote by guessing. Never kept: they point at nothing real. */
     private val MODEL_PAID_LEGACY_IDS = listOf(
         "gemma-4-31b-it-meromero",
@@ -106,9 +100,16 @@ object Route {
 
     fun modelLabel(root: File): String = when (variant(root)) {
         VARIANT_PAID -> MODEL_PAID_LABEL
-        VARIANT_ROUTERAI -> "routerai · ${routerAiModelId(root)}"
+        VARIANT_ROUTERAI -> {
+            val id = routerAiModelId(root)
+            if (id.isBlank()) "routerai · модель не выбрана" else "routerai · $id"
+        }
         else -> MODEL_FREE_LABEL
     }
+
+    /** True when routerai is active but the Commander has not supplied the model id yet. */
+    fun routerAiUnconfigured(root: File): Boolean =
+        isRouterAI(root) && routerAiModelId(root).isBlank()
 
     private const val MODEL_FREE_LABEL = "Gemma 4 26B MeroMero (free)"
     private const val MODEL_PAID_LABEL = "Gemma 4 31B SDFT Heretic RP (paid)"
@@ -146,8 +147,12 @@ object Route {
         return stored
     }
 
+    /**
+     * Model id on routerai.ru. Deliberately empty by default: the catalogue is external and
+     * guessing an id only produces a confusing 404. The Commander supplies key and id.
+     */
     fun routerAiModelId(root: File): String =
-        publicConfig(root).optString(ROUTERAI_MODEL_KEY).trim().ifBlank { MODEL_ROUTERAI_DEFAULT }
+        publicConfig(root).optString(ROUTERAI_MODEL_KEY).trim()
 
     fun setPaidModelId(root: File, id: String) {
         val trimmed = id.trim()
@@ -188,6 +193,7 @@ object Route {
 
     /** Guess which provider a model id belongs to, so `canonical` stays usable in tests. */
     private fun variantOf(modelId: String): String = when {
+        modelId.isBlank() -> VARIANT_FREE
         modelId == MODEL_FREE || modelId == MODEL_PAID_DEFAULT -> VARIANT_FREE
         modelId.contains("gemma-4", ignoreCase = true) -> VARIANT_FREE
         else -> VARIANT_ROUTERAI

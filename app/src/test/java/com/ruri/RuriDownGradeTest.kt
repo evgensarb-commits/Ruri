@@ -1346,7 +1346,9 @@ class RouterAiProviderTest {
             assertTrue(Route.isRouterAI(dir))
             assertEquals(Route.ID_ROUTERAI, Route.providerId(dir))
             assertEquals(Route.ROUTERAI_BASE_URL, Route.baseUrl(dir))
-            assertEquals(Route.routerAiModelId(dir), Route.model(dir))
+            // No model id is pre-filled: the Commander supplies it from the catalogue.
+            assertEquals("", Route.routerAiModelId(dir))
+            assertEquals("", Route.model(dir))
             // routerai.ru is a Russian provider: no tunnel required.
             assertFalse("routerai must not require VPN", Route.requiresVpn(dir))
             // The stored entry must follow, or ensure() would revert it on next start.
@@ -1356,6 +1358,42 @@ class RouterAiProviderTest {
             assertEquals(Route.ROUTERAI_BASE_URL, entry.optString("base_url"))
             assertFalse(entry.optBoolean("needs_vpn", true))
         } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun routeraiStartsUnconfiguredAndSaysSo() {
+        val dir = root()
+        try {
+            Route.setVariant(dir, Route.VARIANT_ROUTERAI)
+            // A guessed id would only produce a confusing 404, so nothing is pre-filled.
+            assertTrue("must report an unconfigured provider", Route.routerAiUnconfigured(dir))
+            assertTrue(Route.modelLabel(dir).contains("не выбрана"))
+
+            Route.setRouterAiModelId(dir, "qwen/qwen3.8-27b")
+            assertFalse(Route.routerAiUnconfigured(dir))
+            assertTrue(Route.modelLabel(dir).contains("qwen/qwen3.8-27b"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun theOtherTwoOptionsStillHaveTheirModels() {
+        val dir = root()
+        try {
+            // The two Routeway options stay ready out of the box.
+            assertEquals(Route.MODEL_FREE, Route.model(dir))
+            assertFalse(Route.routerAiUnconfigured(dir))
+
+            Route.setVariant(dir, Route.VARIANT_PAID)
+            assertEquals(Route.MODEL_PAID_DEFAULT, Route.model(dir))
+            assertFalse(Route.routerAiUnconfigured(dir))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun anUnconfiguredProviderIsRefusedBeforeAnyRequest() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        // Sending anyway would surface as a provider error instead of a settings hint.
+        assertTrue(engine.contains("Route.routerAiUnconfigured(root)"))
+        assertTrue(engine.contains("идентификатор модели не задан"))
+        val route = RepoSources.text("app/src/main/java/com/ruri/Route.kt")
+        assertFalse("no guessed default may return", route.contains("MODEL_ROUTERAI_DEFAULT"))
     }
 
     @Test fun theRouteraiModelIdIsEditable() {
