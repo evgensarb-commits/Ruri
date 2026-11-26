@@ -1516,15 +1516,31 @@ class RouterAiUiReachabilityTest {
         }
     }
 
-    @Test fun theChoiceIsNotCollapsedBackToFree() {
+    @Test fun everyOptionSurvivesTheLoader() {
         val html = html()
-        // The loader used to map every non-paid value to 'free', so selecting routerai in the
-        // dropdown immediately snapped back and looked like the option was dead.
+        // This used to pin the exact old condition, which meant the test happily agreed with a
+        // loader that silently collapsed the newest provider back to 'free'. Now the option list
+        // is read from the markup and every value must be accepted by the loader's whitelist.
+        val options = Regex("""<option value="([a-z]+)">""").findAll(html)
+            .map { it.groupValues[1] }.toSet()
+        assertTrue("dropdown must offer more than one provider", options.size >= 4)
+
+        val whitelist = Regex("""var KNOWN_VARIANTS = \[([^\]]*)\]""").find(html)
+        assertTrue("loader needs an explicit whitelist", whitelist != null)
+        val known = Regex("""'([a-z]+)'""").findAll(whitelist!!.groupValues[1])
+            .map { it.groupValues[1] }.toSet()
+
+        for (option in options) {
+            assertTrue("option '$option' would collapse back to free", known.contains(option))
+        }
+
+        // Guard against the next regression: with a whitelist, the loader cannot special-case
+        // one provider and forget the others.
         val loader = html.substringAfter("function loadModelVariant(){")
             .substringBefore("function changeModelVariant")
-        assertTrue(loader.contains("variant !== 'paid' && variant !== 'routerai'"))
+        assertFalse("no per-provider chain of != checks", loader.contains("!== 'paid' &&"))
+        assertTrue(loader.contains("KNOWN_VARIANTS.indexOf(variant) === -1"))
         assertTrue(loader.contains("select.value = variant"))
-        assertFalse(loader.contains("? 'paid' : 'free'"))
     }
 
     @Test fun savingTheRouteraiFieldsCallsTheBridge() {

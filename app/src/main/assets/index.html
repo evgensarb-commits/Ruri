@@ -343,7 +343,7 @@ input:focus,select:focus,textarea:focus{border-color:rgba(167,139,250,.6);box-sh
             <button class="btn ghost" id="saveRouteraiModel" type="button">Сохранить модель</button>
           </div>
           <p class="hint">Здесь нет предзаполненной модели: скопируй точный id из каталога routerai.ru и вставь его выше. Без id запросы не отправляются. Этот провайдер работает без VPN.</p>
-        </div></div>
+        </div>
         <div id="closerouterBlock" hidden style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line-soft)">
           <label class="field-label" for="closeRouterKeyInput">КЛЮЧ CLOSEROUTER.DEV</label>
           <input id="closeRouterKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="ключ с closerouter.dev">
@@ -358,6 +358,7 @@ input:focus,select:focus,textarea:focus{border-color:rgba(167,139,250,.6);box-sh
           </div>
           <p class="hint">Здесь нет предзаполненной модели: скопируй точный id из каталога closerouter.dev/models и вставь выше. Без id запросы не отправляются. Работает без VPN.</p>
         </div>
+      </div>
 
       <div class="card">
         <span class="card-label">Личность</span>
@@ -1456,11 +1457,13 @@ function saveRouteraiModel(){
   refreshStatus();
 }
 
+// Whitelist, not a chain of != checks: every new provider used to collapse back to
+// 'free' here because the condition was written per-provider and forgotten.
+var KNOWN_VARIANTS = ['free', 'paid', 'routerai', 'closerouter'];
+
 function loadModelVariant(){
   var variant = String(call('modelVariant', [], 'free') || 'free');
-  // Three options exist now; collapsing anything but 'paid' into 'free' made the routerai
-  // choice impossible to keep.
-  if(variant !== 'paid' && variant !== 'routerai') variant = 'free';
+  if(KNOWN_VARIANTS.indexOf(variant) === -1) variant = 'free';
   var select = $('modelVariant');
   if(select) select.value = variant;
   var input = $('paidModelInput');
@@ -1468,7 +1471,8 @@ function loadModelVariant(){
   var labels = {
     free: 'Активна бесплатная модель.',
     paid: 'Активна платная модель.',
-    routerai: 'Активен routerai.ru — нужны ключ и id модели.'
+    routerai: 'Активен routerai.ru — нужны ключ и id модели.',
+    closerouter: 'Активен closerouter.dev — нужны ключ и id модели.'
   };
   setStatus('modelStatus', labels[variant] || '', variant === 'free' ? '' : 'good');
 }
