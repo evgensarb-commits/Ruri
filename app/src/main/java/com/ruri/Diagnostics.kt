@@ -45,7 +45,7 @@ object Diagnostics {
             is Transport.Result.Success -> {
                 record.put("http_status", result.httpStatus)
                     .put("error_kind", "ok")
-                    .put("verdict", verdict("ok", result.httpStatus, "", NetState.online, NetState.vpn, apiKey))
+                    .put("verdict", verdict("ok", result.httpStatus, "", NetState.online, NetState.vpn, apiKey, Route.requiresVpn(root)))
                 // A successful probe is worth remembering: it is evidence, not a guess.
                 runCatching {
                     NetworkDiagnostics.record(root, JSONObject()
@@ -69,7 +69,7 @@ object Diagnostics {
                     .put("error_kind", result.kind)
                     .put("detail", result.detail)
                     .put("verdict", verdict(result.kind, result.httpStatus, result.detail,
-                        NetState.online, NetState.vpn, apiKey))
+                        NetState.online, NetState.vpn, apiKey, Route.requiresVpn(root)))
                 runCatching {
                     NetworkDiagnostics.record(root, JSONObject()
                         .put("timestamp", System.currentTimeMillis())
@@ -189,13 +189,14 @@ object Diagnostics {
         detail: String,
         online: Boolean,
         vpn: Boolean,
-        apiKey: String
+        apiKey: String,
+        requiresVpn: Boolean = true
     ): String = when {
         !online ->
             "Нет интернета: Android не видит активную сеть. Проверь Wi-Fi/мобильные данные."
         apiKey.isBlank() ->
             "Ключ Routeway не задан. Настройки → Подключение → вставь ключ и сохрани."
-        !vpn && Route.requiresVpn(root) && kind != "ok" ->
+        requiresVpn && !vpn && kind != "ok" ->
             "VPN не обнаружен, а Gemma MeroMero работает только через VPN. " +
                 RetryPolicy.explain(kind, httpStatus, detail)
         kind == "ok" ->
