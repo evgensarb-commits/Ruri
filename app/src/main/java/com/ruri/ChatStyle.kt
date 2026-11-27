@@ -96,19 +96,41 @@ object ChatStyle {
             "смысле — между сообщениями работает планировщик, который решает, когда тебе дать " +
             "слово. Если не уверена в деталях своего устройства — так и скажи, а не сочиняй.\n"
 
-    /** Human-readable names for the appearance fields, so the prompt is not raw keys. */
-    private val APPEARANCE_LABELS = listOf(
+    /**
+     * Tier 1 — always in the prompt. This is what she looks like in ordinary conversation:
+     * silhouette, face styling, how she moves. Enough for her to answer "what do you look like"
+     * without turning every messenger reply sexual, and cheap in tokens.
+     */
+    private val APPEARANCE_PUBLIC = listOf(
         "description" to "в целом",
         "height" to "рост",
+        "figure" to "фигура",
         "build" to "телосложение",
+        "skin" to "кожа",
+        "face" to "лицо и макияж",
         "hair" to "волосы",
         "eyes" to "глаза",
-        "face" to "лицо",
-        "skin" to "кожа",
         "clothing" to "одежда",
         "accessories" to "аксессуары",
         "mannerisms" to "привычные движения",
-        "voice" to "голос"
+        "voice" to "голос",
+        "legs" to "ноги"
+    )
+
+    /**
+     * Tier 2 — included only while role-play is enabled.
+     *
+     * This is the Commander's full description of her body, including explicit anatomy. It is
+     * deliberately withheld from ordinary chat: injecting it into every messenger reply would
+     * dominate the context, cost tokens on every turn, and make casual talk read as a scene.
+     */
+    private val APPEARANCE_EXPLICIT = listOf(
+        "bust" to "грудь",
+        "waist" to "талия и живот",
+        "hips" to "бёдра и задница",
+        "pubic" to "лобок и татуировка",
+        "intimate" to "интимные особенности",
+        "underarms" to "подмышки и запах"
     )
 
     /**
@@ -123,7 +145,7 @@ object ChatStyle {
             org.json.JSONObject(FileManager.read(root, "core/appearance.json"))
         }.getOrNull() ?: return ""
         val parts = ArrayList<String>()
-        for ((key, label) in APPEARANCE_LABELS) {
+        for ((key, label) in APPEARANCE_PUBLIC) {
             val value = appearance.optString(key).trim()
             if (value.isNotBlank()) parts.add("$label: $value")
         }
@@ -137,6 +159,36 @@ object ChatStyle {
             parts.joinToString("\n") { "- $it" } + "\n" +
             "Это постоянные черты, а не случайный выбор на сегодня. В ролевых сценах описывай " +
             "свои движения и вид согласно этому.\n"
+    }
+
+    /**
+     * The whole appearance block for the current mode.
+     *
+     * The rule lives here rather than at each call site: silhouette always, explicit anatomy only
+     * while role-play is on. Two call sites deciding this independently is how the tiers would
+     * drift apart.
+     */
+    fun appearanceForMode(root: File): String =
+        appearanceSection(root) +
+            (if (roleplayEnabled(root)) explicitAppearanceSection(root) else "")
+
+    /**
+     * The explicit half of her body, for role-play only.
+     *
+     * She still owns these facts about herself — they are simply not narrated unprompted.
+     */
+    fun explicitAppearanceSection(root: File): String {
+        val appearance = runCatching {
+            org.json.JSONObject(FileManager.read(root, "core/appearance.json"))
+        }.getOrNull() ?: return ""
+        val parts = ArrayList<String>()
+        for ((key, label) in APPEARANCE_EXPLICIT) {
+            val value = appearance.optString(key).trim()
+            if (value.isNotBlank()) parts.add("$label: $value")
+        }
+        if (parts.isEmpty()) return ""
+        return "ТВОЁ ТЕЛО ПОДРОБНО (знай это о себе; описывай уместно сцене, а не в каждом ответе):\n" +
+            parts.joinToString("\n") { "- $it" } + "\n"
     }
 
     /**
