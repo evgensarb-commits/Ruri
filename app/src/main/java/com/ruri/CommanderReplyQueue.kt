@@ -42,6 +42,21 @@ object CommanderReplyQueue {
         (readState(root).optJSONArray("pending")?.length() ?: 0) > 0
     }
 
+    /**
+     * Is there anything the app will retry on its own?
+     *
+     * A message parked for a manual retry (terminal provider failure, or 60 attempts spent) stays
+     * in `pending` until the Commander presses the button. Treating that as "busy" suspended her
+     * diary, her initiative and the next message as well — she went silent indefinitely.
+     */
+    fun hasAutoRetryPending(root: File): Boolean = synchronized(lock) {
+        val pending = readState(root).optJSONArray("pending") ?: return@synchronized false
+        (0 until pending.length()).any { index ->
+            val item = pending.optJSONObject(index) ?: return@any false
+            !item.optBoolean("manual_retry", false)
+        }
+    }
+
     fun pendingCount(root: File): Int = synchronized(lock) {
         readState(root).optJSONArray("pending")?.length() ?: 0
     }

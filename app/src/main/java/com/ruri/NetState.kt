@@ -48,8 +48,19 @@ object NetState {
         if (changed) fire()
     }
 
+    /**
+     * How many owners currently need the callback.
+     *
+     * The callback is process-wide, so a plain unregister from the activity tore it down while
+     * the foreground service still relied on it. After swiping the task away no network change
+     * fired any more, NetState.vpn stayed stale, and a transient network failure was then
+     * misread as terminal "no VPN" — which silently stopped the ten-second retry.
+     */
+    private var owners = 0
+
     @Synchronized
     fun register(context: Context) {
+        owners++
         if (callback != null) {
             refresh(context)
             return
@@ -83,6 +94,9 @@ object NetState {
 
     @Synchronized
     fun unregister() {
+        // Only the last owner may tear the callback down; others still depend on it.
+        owners = (owners - 1).coerceAtLeast(0)
+        if (owners > 0) return
         val manager = connectivity
         val registered = callback
         if (manager != null && registered != null) {

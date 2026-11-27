@@ -173,12 +173,12 @@ object EmotionEngine {
         if (dtH > 0) {
             val fatigue = readValues(root).optDouble("fatigue", 0.0)
             delta.put("fatigue", -minOf(fatigue, (100.0 / d.optDouble("fatigue_recovery_h", 7.0)) * dtH))
-            val silenceH = if (lastSeen > 0L) (now - lastSeen) / HOUR else 0.0
-            if (silenceH > 0.0) {
-                val growth = (100.0 / d.optDouble("silence_growth_h", 9.0)) * dtH
-                delta.put("boredom", growth)
-                delta.put("longing", growth)
-            }
+            // Grow unconditionally. Requiring a known last_seen meant a fresh install (or an L4
+            // recovery that zeroes it) never accumulated pressure at all: boredom and longing
+            // are the only producers of the initiative pressure, so she could never speak first.
+            val growth = (100.0 / d.optDouble("silence_growth_h", 9.0)) * dtH
+            delta.put("boredom", growth)
+            delta.put("longing", growth)
             val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
             if (hour in 20..23 || hour in 0..4) delta.put("desire", d.optDouble("desire_evening_per_h", 1.5) * dtH)
             if (readValues(root).optDouble("affection", 0.0) > 70.0)

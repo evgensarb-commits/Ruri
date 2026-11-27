@@ -121,12 +121,17 @@ object RouteMeta {
     fun autonomyBudgetAvailable(
         root: File,
         id: String = Route.ID_ROUTEWAY,
-        maxDailyRequests: Int = 40,
-        maxDailyTokens: Long = 250_000L
+        maxDailyRequests: Int = 200,
+        maxDailyTokens: Long = 1_000_000L
     ): Boolean {
         val route = runCatching { route(root, id) }.getOrNull() ?: return true
         val today = utcDay()
-        val requests = if (route.optString("day_key") == today) route.optInt("day_count", 0) else 0
+        // Counts only her own cycles. The Commander's messages and tool hops use `day_count`,
+        // and sharing one counter meant his conversation exhausted her allowance: after roughly
+        // forty requests in a day she stopped thinking until midnight UTC.
+        val requests = if (route.optString("autonomy_day_key") == today) {
+            route.optInt("autonomy_day_count", 0)
+        } else 0
         val tokens = tokensToday(root, id)
         return requests < maxDailyRequests && tokens < maxDailyTokens
     }
@@ -159,6 +164,21 @@ object RouteMeta {
     fun tokensToday(root: File, id: String): Long {
         val route = runCatching { route(root, id) }.getOrNull() ?: return 0L
         return if (route.optString("tokens_day_key") == tokenDay(root, id)) route.optLong("tokens_today", 0L) else 0L
+    }
+
+    /**
+     * Counts one autonomous cycle.
+     *
+     * Kept apart from [recordAttempt] so the Commander's own traffic cannot consume her budget.
+     * Called only from the Thinker path.
+     */
+    fun recordAutonomousAttempt(root: File, id: String) = update(root, id) {
+        val today = utcDay()
+        if (it.optString("autonomy_day_key") != today) {
+            it.put("autonomy_day_key", today)
+            it.put("autonomy_day_count", 0)
+        }
+        it.put("autonomy_day_count", it.optInt("autonomy_day_count", 0) + 1)
     }
 
     /** Counts every outbound provider request, including probes and unsuccessful attempts. */
