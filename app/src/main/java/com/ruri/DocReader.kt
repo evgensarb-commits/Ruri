@@ -297,7 +297,14 @@ object DocReader {
             }
             text.append(if (isOdt) OdtTables.textOf(document) else DocxTables.textOf(document))
             text.toString()
-        }.getOrDefault("")
+        }.getOrElse {
+            // A parse failure is not an empty document. Reporting "" made a corrupt file
+            // indistinguishable from a scanned one ("страниц: 0" with no reason), while the
+            // caller already knows how to display a failure.
+            throw IllegalStateException(
+                "не удалось разобрать документ: ${it.message ?: it.javaClass.simpleName}"
+            )
+        }
     }
 
     /**

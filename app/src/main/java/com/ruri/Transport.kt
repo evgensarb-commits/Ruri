@@ -63,6 +63,18 @@ object Transport {
             }
             addStage(stages, "KEY", true, 0L, "ключ присутствует (${apiKey.length} символов)")
 
+            // Last line of defence: an empty model id must never be posted. Every provider is
+            // guarded upstream, but a new one would otherwise silently send {"model": ""} and the
+            // Commander would see an opaque 400 instead of "paste the model id".
+            if (modelId.isBlank()) {
+                addStage(stages, "CONFIG", false, elapsed(startedAt), "пустой идентификатор модели")
+                return Result.Failure(
+                    "config", null,
+                    "Пустой идентификатор модели: запрос не отправлен.",
+                    stages, elapsed(startedAt)
+                )
+            }
+
             var stageAt = System.nanoTime()
             val addresses = try {
                 InetAddress.getAllByName(host)
@@ -202,6 +214,18 @@ object Transport {
                 return Result.Failure("no_key", null, "ключ не задан", stages, elapsed(startedAt))
             }
             addStage(stages, "KEY", true, 0L, "ключ присутствует (${apiKey.length} символов)")
+
+            // Last line of defence: an empty model id must never be posted. Every provider is
+            // guarded upstream, but a new one would otherwise silently send {"model": ""} and the
+            // Commander would see an opaque 400 instead of "paste the model id".
+            if (modelId.isBlank()) {
+                addStage(stages, "CONFIG", false, elapsed(startedAt), "пустой идентификатор модели")
+                return Result.Failure(
+                    "config", null,
+                    "Пустой идентификатор модели: запрос не отправлен.",
+                    stages, elapsed(startedAt)
+                )
+            }
 
             var stageAt = System.nanoTime()
             val addresses = try {

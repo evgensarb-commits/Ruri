@@ -94,7 +94,10 @@ object ToolLoop {
                 JSONObject().put("type", "tool_call").put("action", name).put("params", params)
             ))
             val result = performTool?.invoke(name, params) ?: executeTool(root, name, params)
-            val safeText = SecretRedactor.redactText(result.second).take(4000)
+            // Was a bare 4000-char cut with no marker preservation, and a document page is 6000 —
+            // so the diary and initiative paths got silent mid-text truncation of a memory she
+            // then reasoned from. Same treatment as the chat path.
+            val safeText = ChatEngine.trimKeepingMarker(SecretRedactor.redactText(result.second))
             FileManager.appendEvent(root, SecretRedactor.redactEvent(
                 JSONObject().put("type", "tool_result").put("action", name)
                     .put("ok", result.first).put("text", safeText)

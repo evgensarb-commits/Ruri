@@ -122,6 +122,8 @@ object ChatEngine {
             throw e
         } finally {
             setTurnInFlight(root, false)
+            // A stale question would make the next turn use the previous budget and directive.
+            turnCommanderText = null
         }
     }
 
@@ -135,14 +137,14 @@ object ChatEngine {
             OfflineQueue.markPending(root)
             throw ModelRequestFailure(RetryPolicy.explain("no_key"), 0L, "no_key")
         }
-        if (Route.routerAiUnconfigured(root)) {
-            // Ascertainable problem, not a transient one: explain it instead of sending a
-            // request the provider would reject with an unclear 404.
-            val detail = "routerai выбран, но модель не задана"
+        Route.unconfiguredProvider(root)?.let { provider ->
+            // Ascertainable problem, not a transient one: explain it instead of sending a request
+            // the provider would reject with an unclear 400/404.
+            val detail = "$provider выбран, но модель не задана"
             recordDiagnostic(root, "config", null, detail, JSONArray())
             throw ModelRequestFailure(
-                "Выбран routerai.ru, но идентификатор модели не задан. " +
-                    "Открой «Настройки» → «Модель» и вставь точный id из каталога routerai.ru.",
+                "Выбран $provider, но идентификатор модели не задан. " +
+                    "Открой «Настройки» → «Модель» и вставь точный id из каталога $provider.",
                 0L,
                 "config"
             )
@@ -154,8 +156,10 @@ object ChatEngine {
             throw ModelRequestFailure(RetryPolicy.explain("offline"), 0L, "offline")
         }
 
+        // Resolve once, while the id is known, so every later reader in this turn agrees.
+        turnCommanderText = commanderTextFor(root, commanderMessageId)
         val messages = buildMessages(root, commanderMessageId, batteryPercent)
-        if (!hasFullMemoryContext(messages)) {
+        if (!hasFullMemoryContext(messages, root)) {
             OfflineQueue.markPending(root)
             throw ModelRequestFailure(
                 "Полная память не собрана: в контексте нет обязательных слоёв L0–L3. Запрос к модели не отправлен.",
@@ -370,7 +374,12 @@ object ChatEngine {
         // from stripActions() is the source of truth for the first hop.
         var queued: List<JSONObject> = requests
         while (hops < MAX_TOOL_HOPS) {
+            // On every hop, not just the first: `parseAction` accepts only a bare object, so a
+            // model that answers with prose plus a JSON block had its request dropped from hop 2
+            // onward and was never even told the request was ignored.
+            val fromProse = ToolLoop.stripActions(current).third
             val action = queued.firstOrNull { ChatEngine.parseAction(it.toString()) != null }
+                ?: fromProse.firstOrNull { ChatEngine.parseAction(it.toString()) != null }
                 ?: parseAction(current)
                 ?: break
             val name = action.optString("action")
@@ -437,11 +446,32 @@ object ChatEngine {
         return resolveChatReply(cleaned, diaryAgain.firstOrNull().orEmpty())
     }
 
+    /**
+     * The Commander's current question.
+     *
+     * A fixed one-thousand-line window silently failed on a busy journal, and the consequences
+     * were worse than a wrong length: the refusal check received an empty string (so a refusal
+     * could be published as a normal answer) and the detailed-answer directive was never issued.
+     * Resolved once per turn and then reused, so tool hops do not rescan the journal.
+     */
+    @Volatile private var turnCommanderText: String? = null
+
     private fun currentCommanderText(root: File): String =
-        FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 1000)
-            .asReversed().asSequence().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+        turnCommanderText ?: commanderTextFor(root, null).also { turnCommanderText = it }
+
+    internal fun commanderTextFor(root: File, messageId: String?): String {
+        if (!messageId.isNullOrBlank()) {
+            findEventById(root, messageId)?.let { return it.optString("text") }
+        }
+        return newestCommanderEvent(root)?.optString("text").orEmpty()
+    }
+
+    /** Newest Commander message, found by scanning a tail large enough for a busy journal. */
+    internal fun newestCommanderEvent(root: File): JSONObject? =
+        FileManager.readLastLines(
+            root, "memory/L0_raw.jsonl", maxLines = 12000, maxBytes = 8 * 1024 * 1024
+        ).asReversed().asSequence().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
             .firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" }
-            ?.optString("text").orEmpty()
 
     // ---------------------------------------------------------------- context
 
@@ -642,15 +672,35 @@ object ChatEngine {
      * NOT look for tool keywords any more: tools are gone, so requiring a mention of them
      * would reject every well-formed request.
      */
-    internal fun hasFullMemoryContext(messages: JSONArray): Boolean {
+    /**
+     * Is the context actually complete?
+     *
+     * The old check tested for the literal substrings L0..L3 in the system text. The architecture
+     * section is always appended and mentions those layers, so the check could never fail — a
+     * request whose persona, facts, diary and autobiography had all failed to load was still sent
+     * and logged as "full memory". It now looks at the data: a broken file is an error, not a
+     * silent downgrade.
+     */
+    internal fun hasFullMemoryContext(messages: JSONArray, root: File? = null): Boolean {
         if (messages.length() < 2) return false
         val system = messages.optJSONObject(0)?.optString("content").orEmpty()
-        val hasMemoryLayers = listOf("L0", "L1", "L2", "L3").all(system::contains)
         val hasConversation = (1 until messages.length()).any {
             val role = messages.optJSONObject(it)?.optString("role")
             role == "user" || role == "assistant"
         }
-        return hasMemoryLayers && hasConversation
+        if (!hasConversation) return false
+        if (root == null) return system.contains("ТВОЯ АВТОБИОГРАФИЯ")
+        // A file that exists but will not parse is corruption, and must be reported rather than
+        // quietly producing a companion with no personality.
+        for (path in listOf(
+            "core/character.json", "memory/L1_facts.json",
+            "memory/L2_diary.json", "memory/L3_summary.json"
+        )) {
+            val raw = FileManager.read(root, path)
+            if (raw.isBlank()) continue
+            if (runCatching { JSONObject(raw) }.isFailure) return false
+        }
+        return system.contains("ТВОЯ АВТОБИОГРАФИЯ")
     }
 
     // ---------------------------------------------------------------- diagnostics
@@ -704,19 +754,23 @@ object ChatEngine {
             ?.optString("id")?.takeIf { it.isNotBlank() }
 
     private fun findSavedReply(root: File, commanderMessageId: String): Pair<String, String>? =
-        FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 2000)
+        // Wider than before: tool traffic and wakes can push a real reply past a small window,
+        // and missing it makes the queue re-answer a message that was already answered.
+        FileManager.readLastLines(
+            root, "memory/L0_raw.jsonl", maxLines = 12000, maxBytes = 8 * 1024 * 1024
+        )
             .asReversed().asSequence().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
             .firstOrNull { it.optString("type") == "message" && it.optString("who") == "ruri" &&
                 it.optString("reply_to") == commanderMessageId }
             ?.let { it.optString("id") to it.optString("text") }
 
     private fun updateLastSeenCommander(root: File, messageId: String) {
-        val commander = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 5000)
-            .asReversed().asSequence().mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
-            .firstOrNull {
-                it.optString("id") == messageId && it.optString("type") == "message" &&
-                    it.optString("who") == "commander"
-            } ?: return
+        // Direct lookup by id: a silent miss here leaves the app believing the Commander has been
+        // quiet, which drives longing and can fire an unprompted initiative.
+        val commander = findEventById(root, messageId) ?: return
+        if (commander.optString("type") != "message" ||
+            commander.optString("who") != "commander"
+        ) return
         val commanderTs = commander.optLong("ts", commander.optLong("timestamp", System.currentTimeMillis()))
         FileManager.updateL4State(root) { state ->
             state.put("last_seen_commander", maxOf(state.optLong("last_seen_commander", 0L), commanderTs))
@@ -992,7 +1046,13 @@ object ChatEngine {
                         )
                         ok to text
                     } else {
-                        val (text, pages) = readWholeDocument(root, params.optString("name"))
+                        // Read no more than can actually be delivered: reading 120k and then
+                        // cutting to 9k produced a reply that said "read in full" about a
+                        // truncated body, and made the advertised page=N escape hatch unreachable.
+                        val (text, pages) = readWholeDocument(
+                            root, params.optString("name"),
+                            maxChars = TOOL_RESULT_LIMIT - 800
+                        )
                         (pages > 0) to text
                     }
                 }
@@ -1073,7 +1133,14 @@ object ChatEngine {
         for (i in 1 until messages.length()) {
             val m = messages.optJSONObject(i) ?: continue
             val role = m.optString("role"); val content = m.optString("content")
-            if (role == "user" && !content.startsWith("[ИНСТРУМЕНТ")) lastCommander = m
+            // The chat path emits "РЕЗУЛЬТАТ ИНСТРУМЕНТА" / "ИНСТРУМЕНТ НЕ СРАБОТАЛ", while
+            // ToolLoop's own marker is "[ИНСТРУМЕНТ". Matching only the bracket form let a tool
+            // result be treated as the question, so the request dropped the Commander's message
+            // and answered from the tool output alone.
+            val isToolResult = content.startsWith("[ИНСТРУМЕНТ") ||
+                content.startsWith("РЕЗУЛЬТАТ ИНСТРУМЕНТА") ||
+                content.startsWith("ИНСТРУМЕНТ НЕ СРАБОТАЛ")
+            if (role == "user" && !isToolResult) lastCommander = m
             if (role == "user" && content.startsWith("[ИНСТРУМЕНТ")) toolResults.add(m)
         }
         if (lastCommander != null) out.put(lastCommander)
