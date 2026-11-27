@@ -548,6 +548,7 @@ object ChatEngine {
         val lines = FileManager.readLastLines(
             root, "memory/L0_raw.jsonl", maxLines = 12000, maxBytes = 8 * 1024 * 1024
         )
+        // Mutable: a message found by direct lookup is prepended below.
         val newestFirstHistory = lines.asReversed().mapNotNull { line ->
             try {
                 val event = JSONObject(line)
@@ -558,7 +559,7 @@ object ChatEngine {
                 JSONObject().put("role", role).put("content", text)
                     .put("_ruri_event_id", event.optString("id"))
             } catch (_: Exception) { null }
-        }
+        }.toMutableList()
         var targetPosition = if (commanderMessageId.isNullOrBlank()) 0
             else newestFirstHistory.indexOfFirst { it.optString("_ruri_event_id") == commanderMessageId }
 
