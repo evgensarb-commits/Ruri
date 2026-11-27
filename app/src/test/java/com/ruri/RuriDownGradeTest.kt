@@ -255,10 +255,12 @@ class FullMemoryGuardTest {
             val messages = ChatEngine.buildMessages(dir, "c1")
             assertTrue(ChatEngine.hasFullMemoryContext(messages))
             val prompt = messages.getJSONObject(0).optString("content")
-            // No tool protocol may be advertised: the executors no longer exist.
-            for (removed in listOf("\"action\":\"search\"", "read_shelf", "list_shelf", "read_url")) {
+            // Removed organs must stay removed, and a tool that was not offered on this turn must
+            // not be named either. read_url is advertised only when the Commander pastes a link.
+            for (removed in listOf("\"action\":\"search\"", "read_shelf", "list_shelf")) {
                 assertFalse("prompt must not advertise $removed", prompt.contains(removed))
             }
+            assertFalse("an unoffered tool must not be named", prompt.contains("read_url"))
         } finally { dir.deleteRecursively() }
     }
 }
@@ -624,7 +626,12 @@ class ChatRecallAndQuotaTest {
         try {
             FileManager.init(dir)
             assertTrue("fresh install has budget", RouteMeta.autonomyBudgetAvailable(dir))
-            repeat(45) { RouteMeta.recordAttempt(dir, Route.ID_ROUTEWAY) }
+            // The Commander's own traffic must not touch her allowance.
+            repeat(300) { RouteMeta.recordAttempt(dir, Route.ID_ROUTEWAY) }
+            assertTrue("his chat must not exhaust her budget",
+                RouteMeta.autonomyBudgetAvailable(dir))
+            // Only her own cycles count, and a runaway loop is still bounded.
+            repeat(200) { RouteMeta.recordAutonomousAttempt(dir, Route.ID_ROUTEWAY) }
             assertFalse("autonomy must stop when the day is spent",
                 RouteMeta.autonomyBudgetAvailable(dir))
             // The chat path must not consult this budget at all: no preflight gates.
@@ -1981,7 +1988,8 @@ class EmotionDeltaReachableTest {
         assertFalse("a blanket JSON ban must be gone",
             engine.contains("Отвечай обычной прозой, без JSON и без служебных блоков"))
         assertTrue("the exception must be stated",
-            engine.contains("Единственное исключение — служебная строка EMOTION_DELTA"))
+            engine.contains("ИСКЛЮЧЕНИЯ, и только они"))
+        assertTrue("and must include the emotion line", engine.contains("EMOTION_DELTA"))
     }
 
     @Test fun bothPromptsStillAdvertiseEmotionDelta() {
@@ -3163,8 +3171,8 @@ class AlwaysWorkingTest {
         val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
         // A blanket ban on tool JSON silently disabled every tool, exactly as it once did for
         // EMOTION_DELTA.
-        assertTrue("the exception must list the tools",
-            engine.contains("read_document") && engine.contains("challenge_claim"))
+        assertTrue("the exception must allow the advertised actions",
+            engine.contains("действия, перечисленные выше в этом сообщении"))
         assertFalse("no blanket ban may remain",
             engine.contains("без JSON-объектов инструментов. \" +"))
     }

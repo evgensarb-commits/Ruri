@@ -536,9 +536,11 @@ object ChatEngine {
             // is now stated instead of left to be guessed.
             "Ты общаешься с Командиром в чате приложения. Отвечай обычной прозой, без " +
             "служебных блоков и без посторонних JSON-объектов. " +
-            "ИСКЛЮЧЕНИЯ, и только они: действия, описанные выше — read_raw, read_document, " +
-            "read_url, look_at_image, recall, remember_fact, self_check, challenge_claim — " +
-            "и служебная строка EMOTION_DELTA в конце, если она нужна. " +
+            // Named generically on purpose: a hardcoded list would advertise read_url or
+            // read_document even on a turn where nothing offered them, which is its own lie.
+            "ИСКЛЮЧЕНИЯ, и только они: действия, перечисленные выше в этом сообщении " +
+            "(их может и не быть — вызывай только те, что там есть), и служебная строка " +
+            "EMOTION_DELTA в конце, если она нужна. " +
             "Всё остальное — прозой, и служебные строки Командиру не показываются. " +
             "Ниже — ТВОЯ ДОЛГОСРОЧНАЯ ПАМЯТЬ. Это не контекст одного диалога; ты помнишь между сессиями.\n" +
             "ТВОЯ АВТОБИОГРАФИЯ (L3):\n$summary\n" +
