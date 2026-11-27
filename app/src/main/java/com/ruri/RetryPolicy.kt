@@ -68,14 +68,16 @@ object RetryPolicy {
     fun explain(kind: String, httpStatus: Int? = null, detail: String = ""): String {
         val tail = if (detail.isBlank()) "" else " Ответ провайдера: $detail"
         return when (kind) {
+            // Provider-neutral: this text is shown for every provider, and naming Routeway sent
+            // a routerai or closerouter user to a card they could not even save a key from.
             "no_key" ->
-                "Не задан API-ключ Routeway. Открой «Настройки» → «Подключение» и вставь ключ с routeway.ai."
+                "Не задан API-ключ провайдера. Открой «Настройки» → «Подключение» и вставь ключ для выбранной модели."
             "offline" ->
                 "Android сообщает, что интернета нет. Включи сеть — запрос уйдёт, как только связь появится."
             "no_vpn" ->
                 "Gemma MeroMero доступна только через VPN. Включи VPN и нажми «ПОВТОРИТЬ»: без туннеля провайдер не ответит."
             "auth" ->
-                "Провайдер отклонил ключ (HTTP 401). Ключ неверный или отозван — проверь его на routeway.ai и сохрани заново."
+                "Провайдер отклонил ключ (HTTP 401). Ключ неверный или отозван — проверь его у провайдера и сохрани заново."
             "no_credits" ->
                 "На балансе Routeway нет кредитов (HTTP 402). Пополни баланс, иначе запросы не пройдут."
             "quota" ->

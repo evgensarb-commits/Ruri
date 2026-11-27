@@ -113,6 +113,11 @@ object ChatEngine {
         try {
             return@synchronized respondInternal(root, targetId, batteryPercent)
         } catch (e: Exception) {
+            // A pre-flight "not due yet" is not a provider failure. Recording it rewrote
+            // last_error_kind with the label "queued" and pushed next_attempt_at forward, so
+            // merely reopening the app replaced the real error and delayed the retry.
+            val failure = e as? ModelRequestFailure
+            if (failure?.failureKind == "queued") throw e
             if (!targetId.isNullOrBlank()) {
                 val retryAfter = (e as? ModelRequestFailure)?.retryAfterMs ?: 0L
                 val kind = (e as? ModelRequestFailure)?.failureKind ?: "unexpected"
@@ -970,13 +975,6 @@ object ChatEngine {
         return action
     }
 
-    internal fun runToolLoop(
-        root: File,
-        initialReply: String,
-        messages: JSONArray,
-        meta: JSONObject? = null,
-        requestNext: (JSONArray) -> String?
-    ): String = ToolLoop.runToolLoop(root, initialReply, messages, meta, requestNext = requestNext)
 
     internal fun executeTool(root: File, action: String, params: JSONObject): Pair<Boolean, String> {
         return try {

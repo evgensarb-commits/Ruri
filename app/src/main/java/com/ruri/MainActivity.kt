@@ -199,8 +199,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        mainHandler.removeCallbacks(autoRetry)
-        NetState.unregister()
+        // Without this, every configuration change leaked an Activity, a WebView and a worker
+        // thread, and a turn finishing afterwards called into a destroyed Activity.
+        runCatching { mainHandler.removeCallbacksAndMessages(null) }
+        runCatching { chatExecutor.shutdownNow() }
+        runCatching { if (::web.isInitialized) web.destroy() }
+        // Reference counted: the foreground service keeps its own registration.
+        runCatching { NetState.unregister() }
         super.onDestroy()
     }
 

@@ -2573,7 +2573,8 @@ class FullSearchTest {
     @Test fun recallAndSearchShareOneRanking() {
         val reader = RepoSources.text("app/src/main/java/com/ruri/MemoryRetriever.kt")
         // Two copies of the scoring logic drifted apart before; recall now delegates.
-        assertTrue("recall must reuse collect", reader.contains("val hits = collect(root, query, SCOPE_ALL)"))
+        assertTrue("recall must reuse collect",
+            reader.contains("val hits = collect(root, query, SCOPE_ALL, fullScan = false)"))
         assertTrue("search must exist", reader.contains("fun search("))
     }
 
@@ -3528,6 +3529,234 @@ class CopyButtonTest {
         // Deleting a message splices the array without a re-render, so data-index goes stale.
         assertTrue("the button must carry the id", html.contains("data-action=\"copy\" data-index=\"' + i + '\" data-mid="))
         assertTrue("and the copy must re-resolve it", fn.contains("data-mid"))
+    }
+}
+
+/** Batch 4: the long tail of the audit. */
+class MemoryMaintenanceRepairTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-b4").toFile().also {
+        FileManager.init(it)
+    }
+
+    @Test fun theAutobiographyUsesTheStrongestFacts() {
+        val consolidator = RepoSources.text("app/src/main/java/com/ruri/MemoryConsolidator.kt")
+        // Taking the first 80 by array position meant only the OLDEST facts could ever reach L3.
+        assertTrue("must rank by weight", consolidator.contains("sortedByDescending { MemoryWeight.weightOf(it) }"))
+        assertFalse("must not slice by position", consolidator.contains("until minOf(facts.length(), 80)"))
+    }
+
+    @Test fun theFactCountComparedIsTheRealOne() {
+        val consolidator = RepoSources.text("app/src/main/java/com/ruri/MemoryConsolidator.kt")
+        // Storing the capped number made it differ from facts.length() forever, so a rebuild
+        // looked due every day and spent a model call for nothing.
+        assertTrue("must store the total", consolidator.contains(".put(\"source_fact_count\", facts.length())"))
+        assertTrue("and the used count separately", consolidator.contains("used_fact_count"))
+    }
+
+    @Test fun theJournalCursorNeverRunsPastTheEnd() {
+        val reader = RepoSources.text("app/src/main/java/com/ruri/RawLog.kt")
+        // Assuming a newline pushed the cursor beyond EOF on a torn read; the next call then saw
+        // cursor > length and restarted from the beginning of the journal.
+        assertTrue("must measure the terminator", reader.contains("val endOfLine ="))
+        assertTrue("and never advance blindly", reader.contains("var terminator = 0"))
+        assertFalse("must not assume one", reader.contains("cursor += lineLength + 1L"))
+    }
+
+    @Test fun reflectionAdvancesOnlyPastWhatItRead() {
+        val pass = RepoSources.text("app/src/main/java/com/ruri/ReflectionPass.kt")
+        // Using the window end skipped everything the byte budget excluded.
+        assertTrue("must advance to the last consumed entry", pass.contains("bounded.lastOrNull()"))
+    }
+
+    @Test fun searchIsThoroughAndRecallStaysCheap() {
+        val retriever = RepoSources.text("app/src/main/java/com/ruri/MemoryRetriever.kt")
+        assertTrue("the explicit search scans everything",
+            retriever.contains("collect(root, query, wanted, fullScan = true)"))
+        assertTrue("prompt enrichment reads a tail",
+            retriever.contains("collect(root, query, SCOPE_ALL, fullScan = false)"))
+        assertTrue("and pages the journal in batches", retriever.contains("readL0Batch"))
+    }
+
+    @Test fun provenanceLookupActuallyStopsEarly() {
+        val reader = RepoSources.text("app/src/main/java/com/ruri/RawLog.kt")
+        // existingIds is the last function in the file, so the body runs to the end.
+        val fn = reader.substringAfter("fun existingIds(")
+        // `return@forEach` only skipped a line, so the "early exit" re-read the whole journal.
+        assertFalse("the helper must not use a per-line skip", fn.contains("return@forEach"))
+        assertTrue("it must stop once every id is found", fn.contains("while (found.size < wanted.size)"))
+    }
+
+    @Test fun aMissingKeyDoesNotNameTheWrongProvider() {
+        for (file in listOf("RetryPolicy.kt", "Diagnostics.kt")) {
+            val src = RepoSources.text("app/src/main/java/com/ruri/" + file)
+            assertFalse(file + " must not promise a Routeway key",
+                src.contains("API-ключ Routeway") || src.contains("Ключ Routeway не задан"))
+        }
+    }
+
+    @Test fun aParkedRetryIsNotRecordedAsAFailure() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        // Recording the pre-flight "not due yet" rewrote the real error with the label "queued"
+        // and pushed the retry forward every time the app was reopened.
+        assertTrue(engine.contains("if (failure?.failureKind == \"queued\") throw e"))
+    }
+
+    @Test fun wakeReasonsAreMatchedStructurally() {
+        val scheduler = RepoSources.text("app/src/main/java/com/ruri/LifeScheduler.kt")
+        // The display string is truncated to 300 chars, so matching on it could drop a wake.
+        assertTrue(scheduler.contains("reasonKeys"))
+        assertTrue(scheduler.contains("shouldRunRemoteCognition(appContext, reasonKeys)"))
+        assertFalse(scheduler.contains("shouldRunRemoteCognition(appContext, reason)"))
+    }
+}
+
+/** Batch 4: interface and lifecycle leftovers. */
+class InterfaceRepairTest {
+    @Test fun aChallengedClaimCanBeRejected() {
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        // The verdict control did not exist, so "rejected" was unreachable from the interface.
+        assertTrue("a reject button must exist", html.contains("data-insight=\"reject\""))
+        assertTrue("with a handler", html.contains("function rejectInsight("))
+        assertTrue("and a dispatch branch", html.contains("kind === 'reject'"))
+        assertTrue("calling the bridge", html.contains("call('rejectClaim'"))
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        assertTrue("the bridge must exist", activity.contains("fun rejectClaim("))
+    }
+
+    @Test fun theResumeCallbackExists() {
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        // The app calls window.refreshOnboarding on every resume; only startOnboarding was defined.
+        assertTrue(html.contains("window.refreshOnboarding ="))
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        assertTrue(activity.contains("window.refreshOnboarding"))
+    }
+
+    @Test fun theCorruptedMarkerIsGone() {
+        val style = RepoSources.text("app/src/main/java/com/ruri/ChatStyle.kt")
+        // A CJK character sat in a Russian marker list, so that branch could never match.
+        assertFalse("no CJK may remain", style.contains("что на图"))
+        assertTrue(style.contains("что на фото"))
+    }
+
+    @Test fun rolePlayErrorsAppearWhereTheButtonIs() {
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        val fn = html.substringAfter("function toggleStyle(")
+            .substringBefore("function refreshQueue(")
+        // #dataStatus is on the Settings tab while the button is in the chat header.
+        assertFalse(fn.contains("setStatus('dataStatus'"))
+        assertTrue(fn.contains("pushError("))
+    }
+
+    @Test fun theWebViewIsTornDown() {
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        val destroy = activity.substringAfter("override fun onDestroy()")
+            .substringBefore("private fun requestNotificationPermission(")
+        for (call in listOf("removeCallbacksAndMessages", "chatExecutor.shutdownNow()", "web.destroy()")) {
+            assertTrue("onDestroy must call $call", destroy.contains(call))
+        }
+    }
+
+    @Test fun cleartextTrafficIsOff() {
+        val manifest = RepoSources.text("app/src/main/AndroidManifest.xml")
+        // Every configured endpoint is https; the flag only widened the attack surface.
+        assertFalse(manifest.contains("usesCleartextTraffic=\"true\""))
+    }
+
+    @Test fun theDeadCodeIsGone() {
+        val extractor = RepoSources.text("app/src/main/java/com/ruri/FactExtractor.kt")
+        assertFalse("unused constant", extractor.contains("MIN_COMMANDER_MESSAGES"))
+        val reader = RepoSources.text("app/src/main/java/com/ruri/RawLog.kt")
+        assertFalse("documented but nonexistent index", reader.contains("INDEX_PATH"))
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        assertFalse("dead wrapper", engine.contains("internal fun runToolLoop("))
+        val queue = RepoSources.text("app/src/main/java/com/ruri/CommanderReplyQueue.kt")
+        assertFalse("unused jitter helper", queue.contains("fun delayWithJitter("))
+        val provenance = RepoSources.text("app/src/main/java/com/ruri/Provenance.kt")
+        assertFalse("unreachable helper", provenance.contains("fun pending("))
+        assertFalse("unreachable helper", provenance.contains("fun restore("))
+    }
+
+    @Test fun theJournalIndexIsActuallyShown() {
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        // The bridge existed with no caller, so the cheapest health signal was invisible.
+        assertTrue(html.contains("rawJournalIndex"))
+        val reader = RepoSources.text("app/src/main/java/com/ruri/UrlReader.kt")
+        assertTrue("URL reads re-validate before connecting",
+            reader.contains("re-check the host immediately before the connection"))
+    }
+}
+
+/**
+ * Regression for a hang: the cursor must advance past the terminator, and must not assume one.
+ *
+ * Reading the terminator sequentially (readLine has already consumed it) made the advance wrong
+ * on every line, so the loop never moved and the unit-test job spun until it was cancelled.
+ */
+class JournalCursorTerminationTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-cursor").toFile().also {
+        FileManager.init(it)
+    }
+
+    @Test fun anUnterminatedLastLineDoesNotSpin() {
+        val dir = root()
+        try {
+            // The shape a journal has while an append is in flight: the last line has no newline,
+            // and RandomAccessFile.readLine returns it anyway.
+            val file = java.io.File(dir, "memory/L0_raw.jsonl")
+            file.parentFile?.mkdirs()
+            file.writeText(
+                "{\"id\":\"a\",\"type\":\"message\",\"who\":\"commander\",\"text\":\"один\"}\n" +
+                    "{\"id\":\"b\",\"type\":\"message\",\"who\":\"commander\",\"text\":\"два\"}"
+            )
+
+            val (entries, cursor) = RawLog.read(dir, afterOffset = 0L, limit = 10)
+            assertEquals("both lines must be returned", 2, entries.size)
+            assertTrue("the cursor may not pass the end", cursor <= file.length())
+
+            // And reading again from there must terminate immediately.
+            val (again, cursor2) = RawLog.read(dir, afterOffset = cursor, limit = 10)
+            assertTrue("nothing left to read", again.isEmpty())
+            assertEquals(cursor, cursor2)
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun carriageReturnLinesAreConsumedInOneStep() {
+        val dir = root()
+        try {
+            val file = java.io.File(dir, "memory/L0_raw.jsonl")
+            file.parentFile?.mkdirs()
+            // CRLF endings, written whole: every line must be read exactly once.
+            file.writeText(
+                "{\"id\":\"a\",\"type\":\"message\",\"who\":\"commander\",\"text\":\"один\"}\r\n" +
+                    "{\"id\":\"b\",\"type\":\"message\",\"who\":\"commander\",\"text\":\"два\"}\r\n"
+            )
+            val (entries, _) = RawLog.read(dir, afterOffset = 0L, limit = 10)
+            assertEquals(2, entries.size)
+            assertEquals(listOf("a", "b"), entries.map { it.id })
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun pagingStaysConsistentAcrossManyLines() {
+        val dir = root()
+        try {
+            repeat(20) { i ->
+                FileManager.appendEvent(dir, JSONObject()
+                    .put("type", "message").put("who", "commander").put("text", "строка $i"))
+            }
+            val seen = ArrayList<String>()
+            var cursor = 0L
+            var guard = 0
+            while (guard < 50) {
+                val (page, next) = RawLog.read(dir, afterOffset = cursor, limit = 3)
+                if (page.isEmpty()) break
+                seen.addAll(page.map { it.id })
+                assertTrue("the cursor must advance", next > cursor)
+                cursor = next
+                guard++
+            }
+            assertEquals("every line exactly once", 20, seen.size)
+            assertEquals("no duplicates", 20, seen.distinct().size)
+        } finally { dir.deleteRecursively() }
     }
 }
 }

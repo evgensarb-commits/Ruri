@@ -139,11 +139,17 @@ object MemoryConsolidator {
             )
         ) return false
 
+        // Ranked by weight, not by array position. Taking the first 80 meant the OLDEST facts
+        // fed the autobiography and the newest could not appear in it until enough old ones were
+        // evicted.
+        val ranked = (0 until facts.length())
+            .mapNotNull { facts.optJSONObject(it) }
+            .sortedByDescending { MemoryWeight.weightOf(it) }
         val safeFacts = JSONArray()
-        for (index in 0 until minOf(facts.length(), 80)) {
-            val fact = facts.optJSONObject(index) ?: continue
+        for (fact in ranked.take(80)) {
             val text = SecretRedactor.redactText(fact.optString("text"))
             if (text.isBlank() || text.contains(SecretRedactor.PLACEHOLDER)) continue
+            @Suppress("UNUSED_EXPRESSION")
             safeFacts.put(
                 JSONObject()
                     .put("id", fact.optString("id"))
@@ -218,7 +224,11 @@ object MemoryConsolidator {
             .put("summary", summaryText)
             .put("sections", sections)
             .put("last_compressed", now)
-            .put("source_fact_count", safeFacts.length())
+            // The TOTAL number of known facts. Storing the number actually included (capped at
+            // 80) made it differ from facts.length() forever, so a rebuild looked due every single
+            // day and spent a model call for nothing.
+            .put("source_fact_count", facts.length())
+            .put("used_fact_count", safeFacts.length())
             .put("total_facts", facts.length())
             .put("source_fact_ids", factIds)
             .put("method", method)

@@ -96,7 +96,11 @@ object ReflectionPass {
             if (store(root, candidate, now)) written++ else skipped++
         }
 
-        setCursor(root, nextOffset, bounded.size, written)
+        // Advance only past the entries actually consumed. Using the end of the whole window
+        // skipped everything the byte budget had excluded: she silently never reflected on that
+        // stretch of her life.
+        val consumed = bounded.lastOrNull()?.let { it.offset + it.length + 1L } ?: nextOffset
+        setCursor(root, consumed, bounded.size, written)
         return PassResult(
             readEvents = bounded.size,
             written = written,

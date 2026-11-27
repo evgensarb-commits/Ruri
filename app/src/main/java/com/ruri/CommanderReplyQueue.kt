@@ -132,11 +132,6 @@ object CommanderReplyQueue {
         }
     }
 
-    /** Exponential backoff with up to 20% positive jitter; Retry-After wins, capped at 24h. */
-    internal fun delayWithJitter(backoffMs: Long, retryAfterMs: Long, random: Double = Math.random()): Long {
-        val jitter = (backoffMs * 0.2 * random).toLong()
-        return maxOf(backoffMs + jitter, retryAfterMs.coerceAtLeast(0L)).coerceAtMost(24L * 60L * 60L * 1000L)
-    }
 
     /**
      * Records a failed attempt and schedules the next one.

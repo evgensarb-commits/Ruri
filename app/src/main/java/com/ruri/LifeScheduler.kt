@@ -109,6 +109,9 @@ class RuriLifeWorker(
             }
 
             // Update local state before replying; this path does not require a model request.
+            // Keep the reasons themselves: the display string is truncated to 300 chars, so
+            // matching on it could drop a genuine wake whose own reason had been cut off.
+            val reasonKeys = pending.map { it.optString("reason") }.filter { it.isNotBlank() }.toSet()
             LifeStateEngine.process(appContext, reason)
 
             // Rehydrate the durable per-message outbox from L0 after process death. New
@@ -193,7 +196,7 @@ class RuriLifeWorker(
             // Only an item the app will actually retry may delay her inner life. A parked one
             // waits for the «ПОВТОРИТЬ» button and must not suspend cognition meanwhile.
             val commanderReplyPending = CommanderReplyQueue.hasAutoRetryPending(root)
-            if (!commanderReplyPending && shouldRunRemoteCognition(appContext, reason)) {
+            if (!commanderReplyPending && shouldRunRemoteCognition(appContext, reasonKeys)) {
                 if (!Thinker.runScheduledCycle(appContext, reason)) return Result.retry()
             }
 
@@ -217,10 +220,12 @@ class RuriLifeWorker(
      * `drive_check`, and [EmotionEngine.initiativeGate] / [EmotionEngine.thoughtGate]
      * inside [Thinker] decide alone whether she writes, thinks or stays silent.
      */
-    private fun shouldRunRemoteCognition(context: Context, reason: String): Boolean {
-        val notificationEvent = reason.contains("phone_notification") && !reason.contains("removed")
-        val explicitSelfTask = reason.contains("research_task") || reason.contains("capability_gap")
-        val driveCheckEvent = reason.contains("drive_check")
+    private fun shouldRunRemoteCognition(context: Context, reasons: Set<String>): Boolean {
+        // Matched on the reason keys themselves, not on the truncated display string.
+        fun anyReason(predicate: (String) -> Boolean) = reasons.any(predicate)
+        val notificationEvent = anyReason { it.contains("phone_notification") && !it.contains("removed") }
+        val explicitSelfTask = anyReason { it.contains("research_task") || it.contains("capability_gap") }
+        val driveCheckEvent = anyReason { it.contains("drive_check") }
 
         if (!driveCheckEvent && !notificationEvent && !explicitSelfTask) return false
         if (!Route.hasKey(context.filesDir)) return false

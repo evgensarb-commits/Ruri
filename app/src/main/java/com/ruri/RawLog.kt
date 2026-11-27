@@ -17,7 +17,6 @@ import java.io.File
  */
 object RawLog {
 
-    private const val INDEX_PATH = "memory/L0_index.json"
     private const val SCHEMA = 1
 
     /**
@@ -98,7 +97,28 @@ object RawLog {
                     // readLine() decodes as ISO-8859-1; the journal is UTF-8, so re-read the
                     // exact byte range and decode it properly. Cyrillic would be mojibake otherwise.
                     val lineLength = raw.toByteArray(Charsets.ISO_8859_1).size
-                    cursor += lineLength + 1L
+                    // Advance past the terminator, but only when one is actually there:
+                    // readLine() has already consumed it, so the byte is checked at its exact
+                    // offset. Assuming a newline pushed the cursor past EOF on a torn read (an
+                    // append in flight), and the next call then saw cursor > length and restarted
+                    // from the beginning of the journal. Never advancing would loop forever, so
+                    // the terminator length is measured rather than guessed.
+                    val endOfLine = lineStart + lineLength
+                    var terminator = 0
+                    if (endOfLine < length) {
+                        raf.seek(endOfLine)
+                        val first = raf.read()
+                        if (first == '\n'.code) {
+                            terminator = 1
+                        } else if (first == '\r'.code) {
+                            terminator = 1
+                            if (endOfLine + 1 < length) {
+                                raf.seek(endOfLine + 1)
+                                if (raf.read() == '\n'.code) terminator = 2
+                            }
+                        }
+                    }
+                    cursor = endOfLine + terminator
                     nextCursor = cursor
                     if (lineStart >= length) break
 
@@ -203,11 +223,13 @@ object RawLog {
         val found = HashSet<String>()
         val target = File(root, "memory/L0_raw.jsonl")
         if (!target.isFile) return found
+        // A plain loop rather than useLines: the per-line skip form only skipped one line, so the
+        // "early exit" re-read the entire journal on every provenance check.
         runCatching {
-            target.bufferedReader(Charsets.UTF_8).useLines { seq ->
-                seq.forEach { line ->
-                    if (found.size >= wanted.size) return@forEach
-                    val json = runCatching { JSONObject(line) }.getOrNull() ?: return@forEach
+            target.bufferedReader(Charsets.UTF_8).use { reader ->
+                while (found.size < wanted.size) {
+                    val line = reader.readLine() ?: break
+                    val json = runCatching { JSONObject(line) }.getOrNull() ?: continue
                     val id = json.optString("id")
                     if (id in wanted) found.add(id)
                 }
