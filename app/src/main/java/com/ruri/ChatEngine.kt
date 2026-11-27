@@ -1003,17 +1003,42 @@ object ChatEngine {
                         is JSONArray -> for (i in 0 until raw.length()) types.add(raw.optString(i))
                         is String -> raw.split(',').map { it.trim() }.filter { it.isNotEmpty() }.forEach { types.add(it) }
                     }
-                    val (entries, next) = RawLog.read(
-                        root = root,
-                        afterOffset = params.optLong("after_offset", 0L),
-                        limit = params.optInt("limit", 30),
-                        types = types,
-                        fromTs = params.optLong("from_ts", 0L),
-                        toTs = params.optLong("to_ts", 0L)
-                    )
+                    val limit = params.optInt("limit", 20)
+                    val explicitOffset = params.optLong("after_offset", -1L)
+                    // Without an explicit cursor this shows the NEWEST entries. Defaulting to the
+                    // start of the journal meant "read your journal" returned two-week-old
+                    // messages, and she answered those as if they had just arrived.
+                    val entries = if (explicitOffset >= 0L) {
+                        RawLog.read(
+                            root = root,
+                            afterOffset = explicitOffset,
+                            limit = limit,
+                            types = types,
+                            fromTs = params.optLong("from_ts", 0L),
+                            toTs = params.optLong("to_ts", 0L)
+                        ).first
+                    } else {
+                        RawLog.readRecent(
+                            root = root,
+                            limit = limit,
+                            types = types,
+                            fromTs = params.optLong("from_ts", 0L),
+                            toTs = params.optLong("to_ts", 0L)
+                        )
+                    }
                     val body = StringBuilder()
-                    body.append("ЖУРНАЛ, ${entries.size} записей. Следующий после_смещения: $next ")
-                    body.append("(всего ${RawLog.sizeBytes(root)} байт)\n")
+                    body.append(
+                        if (explicitOffset >= 0L) {
+                            "ЖУРНАЛ с указанного места, ${entries.size} записей.\n"
+                        } else {
+                            "ЖУРНАЛ, ПОСЛЕДНИЕ ${entries.size} записей.\n"
+                        }
+                    )
+                    body.append(
+                        "ЭТО ИСТОРИЯ, А НЕ ТЕКУЩИЙ РАЗГОВОР. Отвечай на то, что Командир " +
+                            "спрашивает сейчас; не отвечай на эти старые записи как на новые " +
+                            "сообщения.\n"
+                    )
                     for (entry in entries) body.append(RawLog.describe(entry)).append('\n')
                     if (entries.isEmpty()) body.append("В этом окне подходящих записей нет.\n")
                      true to body.toString()
@@ -1139,7 +1164,11 @@ object ChatEngine {
                 content.startsWith("РЕЗУЛЬТАТ ИНСТРУМЕНТА") ||
                 content.startsWith("ИНСТРУМЕНТ НЕ СРАБОТАЛ")
             if (role == "user" && !isToolResult) lastCommander = m
-            if (role == "user" && content.startsWith("[ИНСТРУМЕНТ")) toolResults.add(m)
+            // The same flag, not a second prefix test: the chat path emits "РЕЗУЛЬТАТ
+            // ИНСТРУМЕНТА" and only the bracket form was collected, so in chat the tool output
+            // was dropped from the follow-up and she answered without the material she had just
+            // asked for.
+            if (role == "user" && isToolResult) toolResults.add(m)
         }
         if (lastCommander != null) out.put(lastCommander)
         toolResults.takeLast(6).forEach { out.put(it) }

@@ -3759,4 +3759,111 @@ class JournalCursorTerminationTest {
         } finally { dir.deleteRecursively() }
     }
 }
+
+/**
+ * She called read_raw at random and then answered two-week-old messages.
+ *
+ * Two causes: read_raw started at offset 0, so "read the journal" returned the OLDEST entries;
+ * and the chat path's tool result was dropped from the follow-up request, so she answered
+ * without the material she had just fetched.
+ */
+class JournalReadScopeTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-scope").toFile().also {
+        FileManager.init(it)
+    }
+
+    private fun say(root: java.io.File, text: String, who: String = "commander") {
+        FileManager.appendEvent(root, JSONObject()
+            .put("type", "message").put("who", who).put("text", text))
+    }
+
+    @Test fun theRecentWindowReturnsTheNewestEntries() {
+        val dir = root()
+        try {
+            say(dir, "старое сообщение двухнедельной давности")
+            repeat(50) { say(dir, "обычная болтовня $it") }
+            say(dir, "САМОЕ НОВОЕ сообщение")
+
+            val recent = RawLog.readRecent(dir, limit = 5)
+            assertEquals(5, recent.size)
+            assertTrue("the newest entry must be present",
+                recent.any { it.json.optString("text") == "САМОЕ НОВОЕ сообщение" })
+            assertFalse("the oldest must not be in a small recent window",
+                recent.any { it.json.optString("text").contains("двухнедельной") })
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun theRecentWindowIsInChronologicalOrder() {
+        val dir = root()
+        try {
+            repeat(20) { say(dir, "строка $it") }
+            val recent = RawLog.readRecent(dir, limit = 5)
+            val texts = recent.map { it.json.optString("text") }
+            assertEquals(listOf("строка 15", "строка 16", "строка 17", "строка 18", "строка 19"), texts)
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun pagingStillWorksFromAnExplicitOffset() {
+        val dir = root()
+        try {
+            repeat(10) { say(dir, "запись $it") }
+            val (entries, next) = RawLog.read(dir, afterOffset = 0L, limit = 3)
+            assertEquals(3, entries.size)
+            assertTrue("an explicit cursor still reads forward", next > 0L)
+            assertEquals("запись 0", entries.first().json.optString("text"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun theRecentWindowNeverStartsMidLine() {
+        val dir = root()
+        try {
+            // Long lines make a byte-budget boundary land in the middle of one.
+            repeat(40) { say(dir, "длинная строка номер $it " + "слово ".repeat(400)) }
+            val recent = RawLog.readRecent(dir, limit = 3)
+            assertEquals(3, recent.size)
+            for (entry in recent) {
+                assertTrue("a line must be parsed whole",
+                    entry.json.optString("text").startsWith("длинная строка номер"))
+            }
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun sheIsToldTheJournalIsHistory() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        // The delivered text must say what it is, so the model cannot treat old entries as new
+        // messages.
+        assertTrue("the window must be described", engine.contains("ЖУРНАЛ, ПОСЛЕДНИЕ"))
+        assertTrue("and labelled as history", engine.contains("ЭТО ИСТОРИЯ, А НЕ ТЕКУЩИЙ РАЗГОВОР"))
+        assertTrue("defaulting to recent, not to offset zero",
+            engine.contains("RawLog.readRecent("))
+    }
+
+    @Test fun thePromptSaysHowTheToolBehaves() {
+        val style = ChatStyle.memorySelfServiceSection()
+        assertTrue("must state the default window", style.contains("ПОСЛЕДНИЕ записи"))
+        assertTrue("must warn not to answer old messages",
+            style.contains("не отвечай на них как на только что пришедшие"))
+        assertTrue("must prefer recall for remembering",
+            style.contains("ДЛЯ ВОСПОМИНАНИЙ ИСПОЛЬЗУЙ recall"))
+    }
+
+    @Test fun theToolResultActuallyReachesTheModel() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        val fn = engine.substringAfter("internal fun leanFollowup(")
+            .substringBefore("internal fun isActionJson(")
+        // The collection used a second, bracket-only prefix test, so in the chat path the tool
+        // output was dropped and the follow-up carried the question with no material.
+        assertTrue("must collect by the shared flag", fn.contains("if (role == \"user\" && isToolResult) toolResults.add(m)"))
+        assertFalse("must not re-test one prefix", fn.contains("content.startsWith(\"[ИНСТРУМЕНТ\")"))
+    }
+
+    @Test fun aToolFollowUpKeepsTheCurrentQuestion() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        val fn = engine.substringAfter("internal fun leanFollowup(")
+            .substringBefore("internal fun isActionJson(")
+        // The question must survive, otherwise she answers whatever the tool happened to return.
+        assertTrue(fn.contains("if (lastCommander != null) out.put(lastCommander)"))
+        assertTrue(fn.contains("toolResults.takeLast(6)"))
+    }
+}
 }
