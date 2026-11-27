@@ -545,7 +545,10 @@ object ChatEngine {
             "ПОСЛЕДНИЕ СОБЫТИЯ ТВОЕГО ТЕЛА (L0):\n$bodyEventContext"
 
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", system))
-        val lines = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 4000)
+        val lines = FileManager.readLastLines(
+            root, "memory/L0_raw.jsonl", maxLines = 12000, maxBytes = 8 * 1024 * 1024
+        )
+        // Mutable: a message found by direct lookup is prepended below.
         val newestFirstHistory = lines.asReversed().mapNotNull { line ->
             try {
                 val event = JSONObject(line)
@@ -556,9 +559,31 @@ object ChatEngine {
                 JSONObject().put("role", role).put("content", text)
                     .put("_ruri_event_id", event.optString("id"))
             } catch (_: Exception) { null }
-        }
-        val targetPosition = if (commanderMessageId.isNullOrBlank()) 0
+        }.toMutableList()
+        var targetPosition = if (commanderMessageId.isNullOrBlank()) 0
             else newestFirstHistory.indexOfFirst { it.optString("_ruri_event_id") == commanderMessageId }
+
+        // The window above is a fixed number of lines, but L0 also records tool traffic, wakes
+        // and emotion arithmetic. A message sent seconds ago can therefore already sit outside
+        // the window while the reply queue still references it — which produced "Сообщение
+        // Командира не найдено в L0" on the first attempt and a successful retry once the next
+        // write pushed it back into view. Read the tail directly from the file instead of giving
+        // up: an identified message that exists must be used.
+        if (targetPosition < 0 && !commanderMessageId.isNullOrBlank()) {
+            val direct = findEventById(root, commanderMessageId)
+            if (direct != null) {
+                val text = direct.optString("text").trim()
+                if (text.isNotBlank()) {
+                    // Put it at the front: it is the newest thing we know about, and the history
+                    // that follows is older by construction.
+                    newestFirstHistory.add(0, JSONObject()
+                        .put("role", "user")
+                        .put("content", text)
+                        .put("_ruri_event_id", direct.optString("id")))
+                    targetPosition = 0
+                }
+            }
+        }
         if (!commanderMessageId.isNullOrBlank() && targetPosition < 0) {
             throw IllegalStateException("Сообщение Командира не найдено в L0; оно осталось в очереди")
         }
@@ -694,16 +719,34 @@ object ChatEngine {
         }
     }
 
+    /**
+     * Is this id really a Commander message?
+     *
+     * This is the preflight that produced "Commander message not found in L0". It scanned a fixed
+     * 5000-line window, but L0 also receives tool calls, wakes, emotion deltas and diary links —
+     * a busy stretch can push a just-sent message past that window before the reply starts, so
+     * the first attempt failed and the retry succeeded once a later write moved things around.
+     *
+     * Resolution order: the fast window first, then a direct lookup by id over a much larger tail.
+     */
     internal fun isCommanderMessage(root: File, messageId: String): Boolean {
         if (messageId.isBlank()) return false
-        return FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 5000)
+        val quick = FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 5000)
             .any { line ->
                 runCatching { JSONObject(line) }.getOrNull()?.let { event ->
                     event.optString("id") == messageId &&
                         event.optString("type") == "message" &&
-                        event.optString("who") == "commander"
+                        event.optString("who") == "commander" &&
+                        // A deleted message must be refused on both paths, not only the slow one.
+                        !Tombstone.isDeleted(root, messageId)
                 } == true
             }
+        if (quick) return true
+        // Not in the window does not mean gone: check the id directly before rejecting the turn.
+        val direct = findEventById(root, messageId) ?: return false
+        return direct.optString("type") == "message" &&
+            direct.optString("who") == "commander" &&
+            !Tombstone.isDeleted(root, messageId)
     }
 
     internal fun setTurnInFlight(root: File, value: Boolean) {
@@ -711,6 +754,25 @@ object ChatEngine {
     }
 
     internal fun lastSavedReplyId(): String? = lastFinalMessageId
+
+    /**
+     * Finds one event by id by scanning the journal tail, newest first.
+     *
+     * Used when the cached history window does not contain the requested message. Bounded on
+     * purpose: an unbounded scan on a large journal would stall a reply, and a message older
+     * than this many lines is old enough that the ordinary window already covers the case.
+     */
+    internal fun findEventById(root: File, id: String): JSONObject? {
+        if (id.isBlank()) return null
+        val tail = FileManager.readLastLines(
+            root, "memory/L0_raw.jsonl", maxLines = 20000, maxBytes = 8 * 1024 * 1024
+        )
+        for (line in tail.asReversed()) {
+            val event = runCatching { JSONObject(line) }.getOrNull() ?: continue
+            if (event.optString("id") == id) return event
+        }
+        return null
+    }
 
     internal fun shouldIncludeInChatHistory(root: File, event: JSONObject): Boolean =
         event.optString("type") == "message" && !Tombstone.isDeleted(root, event.optString("id"))

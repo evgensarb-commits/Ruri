@@ -2842,4 +2842,75 @@ class AppearanceTest {
         assertTrue("initiative must include it", thinker.contains("ChatStyle.appearanceSection(root)"))
     }
 }
+
+/**
+ * "Commander message not found in L0" fired on the first attempt and the retry worked, because
+ * the lookup scanned a fixed window that technical noise had already pushed the message out of.
+ */
+class CommanderMessageLookupTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-lookup").toFile().also {
+        FileManager.init(it)
+    }
+
+    @Test fun aMessageOutsideTheFastWindowIsStillFound() {
+        val dir = root()
+        try {
+            val id = JSONObject(FileManager.appendEvent(dir, JSONObject()
+                .put("type", "message").put("who", "commander").put("text", "важное сообщение")))
+                .optString("id")
+            // Bury it under far more than the quick window holds, the way a busy day does.
+            repeat(6000) {
+                FileManager.appendEvent(dir, JSONObject()
+                    .put("type", "tool_call").put("action", "read_document"))
+            }
+            // The fast window cannot see it...
+            val quick = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+            assertTrue("a direct lookup must exist", quick.contains("fun findEventById("))
+            // ...but the direct lookup must.
+            val direct = ChatEngine.findEventById(dir, id)
+            assertNotNull("the message must be found by id", direct)
+            assertEquals("важное сообщение", direct!!.optString("text"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun identificationUsesTheDirectLookupAsFallback() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        val fn = engine.substringAfter("internal fun isCommanderMessage(")
+            .substringBefore("internal fun setTurnInFlight(")
+        // The preflight used to answer "not found" purely from a fixed window.
+        assertTrue("must fall back to the id lookup", fn.contains("findEventById(root, messageId)"))
+        assertTrue("and still verify the role", fn.contains("\"commander\""))
+    }
+
+    @Test fun deletedMessagesAreStillRefused() {
+        val dir = root()
+        try {
+            val id = JSONObject(FileManager.appendEvent(dir, JSONObject()
+                .put("type", "message").put("who", "commander").put("text", "удалённое")))
+                .optString("id")
+            assertTrue(ChatEngine.isCommanderMessage(dir, id))
+            Tombstone.add(dir, id)
+            assertFalse("a tombstoned message must not be answered",
+                ChatEngine.isCommanderMessage(dir, id))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun aRuriMessageIsNotMistakenForACommanderOne() {
+        val dir = root()
+        try {
+            val id = JSONObject(FileManager.appendEvent(dir, JSONObject()
+                .put("type", "message").put("who", "ruri").put("text", "мой ответ")))
+                .optString("id")
+            assertFalse(ChatEngine.isCommanderMessage(dir, id))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun theHistoryWindowIsLargeEnoughForABusyDay() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        val window = Regex("maxLines = (\\d+), maxBytes = 8 \\* 1024 \\* 1024")
+            .find(engine)?.groupValues?.get(1)?.toInt()
+        assertNotNull("history window must be explicit", window)
+        assertTrue("a few thousand lines is not enough for a busy day", window!! >= 10000)
+    }
+}
 }
