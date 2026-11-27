@@ -26,132 +26,176 @@ object MemoryRetriever {
         val emotionAfter: JSONObject? = null
     )
 
-    fun recall(root: File, query: String, limit: Int = 6): String {
+    /**
+     * Full search across every source she owns.
+     *
+     * The old entry point capped results at five and searched one fixed mix of layers, so a
+     * question spanning months of conversation could not be answered at all. This one takes an
+     * explicit scope, allows far more results, and reports where each hit came from.
+     *
+     * @param scope one of [SCOPE_ALL], [SCOPE_MESSAGES], [SCOPE_FACTS], [SCOPE_DIARY],
+     *        [SCOPE_NOTES]; unknown values fall back to all
+     */
+    fun search(root: File, query: String, scope: String = SCOPE_ALL, limit: Int = 12): String {
+        val bounded = limit.coerceIn(1, SCOPE_MAX_RESULTS)
+        val wanted = scope.lowercase().ifBlank { SCOPE_ALL }
+        val hits = collect(root, query, wanted)
+        if (hits.isEmpty()) {
+            return "По запросу «$query» ничего не найдено в области: $wanted."
+        }
+        val sorted = hits.sortedByDescending { it.second }.take(bounded)
+        val builder = StringBuilder()
+        builder.append("НАЙДЕНО ${sorted.size} из ${hits.size} совпадений (область: $wanted).\n")
+        for ((memory, _) in sorted) {
+            val when_ = if (memory.timestamp > 0L) {
+                java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale("ru"))
+                    .format(java.util.Date(memory.timestamp))
+            } else "дата неизвестна"
+            builder.append("- [${memory.kind}] $when_: ${memory.text.take(320)}\n")
+        }
+        if (hits.size > sorted.size) {
+            builder.append("(показаны сильнейшие совпадения; уточни запрос или увеличь limit)\n")
+        }
+        return builder.toString()
+    }
+
+    /** Raw scored hits before trimming, so search and recall share one ranking. */
+    private fun collect(root: File, query: String, scope: String): List<Pair<Memory, Double>> {
         val queryEmotions = EmotionEngine.queryEmotions(root, query)
         val terms = tokenize(query)
-        if (terms.isEmpty()) return ""
+        if (terms.isEmpty()) return emptyList()
         val memories = ArrayList<Memory>()
         val deletedIds = Tombstone.ids(root)
+        val wantMessages = scope == SCOPE_ALL || scope == SCOPE_MESSAGES
+        val wantFacts = scope == SCOPE_ALL || scope == SCOPE_FACTS
+        val wantDiary = scope == SCOPE_ALL || scope == SCOPE_DIARY
+        val wantNotes = scope == SCOPE_ALL || scope == SCOPE_NOTES
 
-        val facts = readJson(root, "memory/L1_facts.json").optJSONArray("facts") ?: JSONArray()
-        for (i in 0 until facts.length()) {
-            val fact = facts.optJSONObject(i) ?: continue
-            val text = fact.optString("text").trim()
-            if (text.isNotBlank()) memories.add(
-                Memory("устойчивый факт", text, fact.optLong("updated_at", fact.optLong("created_at", 0L)),
-                    fact.optDouble("confidence", 1.0))
+        // Deliberately NOT limited to recent lines: the whole point of the tool is to reach
+        // things that fell out of the prompt, so it scans the journal from the start.
+        if (wantMessages || wantNotes) {
+            val events = FileManager.readLastLines(
+                root, "memory/L0_raw.jsonl", maxLines = 200000, maxBytes = 32 * 1024 * 1024
             )
+            for (line in events) {
+                val event = runCatching { JSONObject(line) }.getOrNull() ?: continue
+                val type = event.optString("type")
+                val id = event.optString("id")
+                if (id.isNotBlank() && id in deletedIds) continue
+                when (type) {
+                    "message" -> {
+                        if (!wantMessages) continue
+                        val text = event.optString("text").trim()
+                        if (text.isBlank()) continue
+                        memories.add(
+                            Memory(
+                                if (event.optString("who") == "ruri") "моя реплика" else "реплика Командира",
+                                text,
+                                event.optLong("timestamp", event.optLong("ts", 0L)),
+                                emotionAfter = event.optJSONObject("emotion_after")
+                                    ?.let { JSONObject(it.toString()) }
+                            )
+                        )
+                    }
+                    "phone_notification" -> {
+                        if (!wantNotes) continue
+                        val text = listOf(
+                            event.optString("package"), event.optString("title"), event.optString("text")
+                        ).filter { it.isNotBlank() }.joinToString(" — ")
+                        if (text.isBlank()) continue
+                        memories.add(
+                            Memory("уведомление телефона", text,
+                                event.optLong("timestamp", event.optLong("ts", 0L)))
+                        )
+                    }
+                }
+            }
         }
 
-        val diary = readJson(root, "memory/L2_diary.json").optJSONArray("entries") ?: JSONArray()
-        for (i in 0 until diary.length()) {
-            val entry = diary.optJSONObject(i) ?: continue
-            if (entry.optString("id").isNotBlank() && entry.optString("id") in deletedIds) continue
-            val text = entry.optString("text").trim()
-            if (text.isNotBlank()) memories.add(
-                Memory(
-                    "эпизод дневника", text, entry.optLong("ts", 0L),
-                    emotionAfter = entry.optJSONObject("emotion_after")?.let { JSONObject(it.toString()) }
-                )
-            )
-        }
-
-        val events = FileManager.readLastLines(
-            root, "memory/L0_raw.jsonl", maxLines = 20000, maxBytes = 4 * 1024 * 1024
-        )
-        val parsedEvents = events.mapNotNull { line ->
-            runCatching { JSONObject(line) }.getOrNull()
-        }
-        val messageEvents = parsedEvents.filter {
-            it.optString("type") == "message" &&
-                (it.optString("id").isBlank() || it.optString("id") !in deletedIds)
-        }
-        // Recent conversation is already supplied as chat history; recall older episodes here.
-        for (event in messageEvents.dropLast(14)) {
-            val text = event.optString("text").trim()
-            if (text.isNotBlank()) memories.add(
-                Memory(
-                    if (event.optString("who") == "ruri") "прошлый ответ Рури" else "прошлая реплика Командира",
-                    text, event.optLong("timestamp", event.optLong("ts", 0L)),
-                    emotionAfter = event.optJSONObject("emotion_after")?.let { JSONObject(it.toString()) }
-                )
-            )
-        }
-
-        // Older notification bodies remain searchable in local L0, not just the last
-        // few notifications copied into a live model prompt.
-        for (event in parsedEvents.filter { it.optString("type") == "phone_notification" }) {
-            val packageName = event.optString("package")
-            val title = event.optString("title").trim()
-            val body = event.optString("text").trim()
-            val text = listOf(packageName, title, body).filter { it.isNotBlank() }.joinToString(" — ")
-            if (text.isNotBlank() && terms.intersect(tokenize(text)).isNotEmpty()) {
+        if (wantFacts) {
+            val facts = readJson(root, "memory/L1_facts.json").optJSONArray("facts") ?: JSONArray()
+            for (i in 0 until facts.length()) {
+                val fact = facts.optJSONObject(i) ?: continue
+                // Rejected claims are not evidence: searching must never resurrect them silently.
+                if (fact.optString("status") == "rejected") continue
+                val text = fact.optString("text").trim()
+                if (text.isBlank()) continue
+                val label = if (fact.optString("status") == "assumption") "предположение" else "факт"
                 memories.add(
-                    Memory(
-                        "уведомление телефона",
-                        text,
-                        event.optLong("timestamp", event.optLong("ts", 0L))
-                    )
+                    Memory(label, text,
+                        fact.optLong("updated_at", fact.optLong("created_at", 0L)),
+                        fact.optDouble("confidence", 0.6))
+                )
+            }
+        }
+
+        if (wantDiary) {
+            val diary = readJson(root, "memory/L2_diary.json").optJSONArray("entries") ?: JSONArray()
+            for (i in 0 until diary.length()) {
+                val entry = diary.optJSONObject(i) ?: continue
+                val id = entry.optString("id")
+                if (id.isNotBlank() && id in deletedIds) continue
+                if (entry.optString("status") == "rejected") continue
+                val text = entry.optString("text").trim()
+                if (text.isBlank()) continue
+                memories.add(
+                    Memory("дневник", text, entry.optLong("ts", 0L),
+                        emotionAfter = entry.optJSONObject("emotion_after")
+                            ?.let { JSONObject(it.toString()) })
                 )
             }
         }
 
         val now = System.currentTimeMillis()
-        val tokenizedMemories = memories.map { memory -> memory to tokenize(memory.text) }
-        val direct = tokenizedMemories.mapNotNull { (memory, memoryTerms) ->
-            val overlapTerms = terms.intersect(memoryTerms)
-            if (overlapTerms.isEmpty()) return@mapNotNull null
-            val coverage = overlapTerms.size.toDouble() / terms.size.toDouble()
-            val density = overlapTerms.size.toDouble() / memoryTerms.size.coerceAtLeast(1).toDouble()
-            val ageDays = if (memory.timestamp > 0L) ((now - memory.timestamp).coerceAtLeast(0L) / 86400000.0) else 3650.0
+        val tokenized = memories.map { it to tokenize(it.text) }
+        val scored = ArrayList<Pair<Memory, Double>>()
+        for ((memory, memoryTerms) in tokenized) {
+            val overlap = terms.intersect(memoryTerms)
+            if (overlap.isEmpty()) continue
+            val coverage = overlap.size.toDouble() / terms.size.toDouble()
+            val density = overlap.size.toDouble() / memoryTerms.size.coerceAtLeast(1).toDouble()
+            val ageDays = if (memory.timestamp > 0L) {
+                (now - memory.timestamp).coerceAtLeast(0L) / 86_400_000.0
+            } else 3650.0
             val recency = 1.0 / (1.0 + ageDays / 365.0)
             var score = coverage * 3.0 + density + recency * 0.15 +
                 memory.confidence.coerceIn(0.0, 1.0) * 0.1
             memory.emotionAfter?.let { episodeEmotion ->
-                for (emotion in queryEmotions) if (episodeEmotion.optDouble(emotion, 0.0) > 50.0) score += 2.0
+                for (emotion in queryEmotions) {
+                    if (episodeEmotion.optDouble(emotion, 0.0) > 50.0) score += 2.0
+                }
             }
-            Triple(memory, score, overlapTerms)
-        }.sortedByDescending { it.second }
-
-        // Build a small, transient association network from the strongest direct matches.
-        // It is derived from source memories on each recall, so it cannot become stale.
-        val seeds = direct.take(3)
-        val expandedTerms = seeds.flatMap { seed ->
-            tokenize(seed.first.text)
-        }.toSet() - terms
-        val documentFrequency = HashMap<String, Int>()
-        tokenizedMemories.forEach { (_, memoryTerms) ->
-            memoryTerms.forEach { term -> documentFrequency[term] = (documentFrequency[term] ?: 0) + 1 }
+            scored.add(memory to score)
         }
-        // Common words are weak links; retain terms that occur in only a minority of memories.
-        val maxLinkFrequency = maxOf(2, memories.size / 3)
-        val associationTerms = expandedTerms.filter {
-            it.length >= 5 && (documentFrequency[it] ?: 0) <= maxLinkFrequency
-        }.toSet()
-        val directMemories = direct.map { it.first }.toSet()
-        val associated = if (associationTerms.isEmpty()) emptyList() else tokenizedMemories.mapNotNull { (memory, memoryTerms) ->
-            if (memory in directMemories) return@mapNotNull null
-            val links = associationTerms.intersect(memoryTerms)
-            if (links.isEmpty()) return@mapNotNull null
-            val ageDays = if (memory.timestamp > 0L) ((now - memory.timestamp).coerceAtLeast(0L) / 86400000.0) else 3650.0
-            val recency = 1.0 / (1.0 + ageDays / 365.0)
-            var score = 0.55 + links.size.coerceAtMost(3) * 0.18 + recency * 0.05
-            memory.emotionAfter?.let { episodeEmotion ->
-                for (emotion in queryEmotions) if (episodeEmotion.optDouble(emotion, 0.0) > 50.0) score += 2.0
-            }
-            Triple(memory, score, links)
-        }.sortedByDescending { it.second }
+        return scored
+    }
 
-        // Reserve room for associative hops; otherwise many direct hits can hide every link.
-        val selected = (direct.take(3).map { Triple(it.first, it.second, "прямое совпадение") } +
-            associated.map { Triple(it.first, it.second, "связано через: " + it.third.sorted().take(4).joinToString(", ")) })
-            .take(limit.coerceIn(1, 12))
-        return selected.joinToString("\n") { (memory, score, relation) ->
-            val date = if (memory.timestamp > 0L) java.text.SimpleDateFormat(
-                "yyyy-MM-dd", java.util.Locale.ROOT
-            ).format(java.util.Date(memory.timestamp)) else "дата неизвестна"
-            "- [${memory.kind}; ${date}; ${relation}; оценка ${"%.2f".format(java.util.Locale.ROOT, score)}] ${memory.text}"
+    const val SCOPE_ALL = "all"
+    const val SCOPE_MESSAGES = "messages"
+    const val SCOPE_FACTS = "facts"
+    const val SCOPE_DIARY = "diary"
+    const val SCOPE_NOTES = "notes"
+
+    /** Generous on purpose: the Commander accepts the token cost of a deep search. */
+    const val SCOPE_MAX_RESULTS = 60
+
+    /**
+     * Automatic recall used when building the prompt.
+     *
+     * It used to carry its own copy of the ranking logic, which drifted from the tool version.
+     * Now it delegates, so a fix in one place fixes both — the only difference is that this
+     * entry point stays silent when nothing matches.
+     */
+    fun recall(root: File, query: String, limit: Int = 6): String {
+        val terms = tokenize(query)
+        if (terms.isEmpty()) return ""
+        val hits = collect(root, query, SCOPE_ALL)
+        if (hits.isEmpty()) return ""
+        val builder = StringBuilder()
+        for ((memory, _) in hits.sortedByDescending { it.second }.take(limit.coerceIn(1, 30))) {
+            builder.append("- [${memory.kind}] ${memory.text.take(300)}\n")
         }
+        return builder.toString()
     }
 
     private fun tokenize(value: String): Set<String> =
