@@ -205,7 +205,16 @@ object EmotionEngine {
             .put("boredom", -d.optDouble("boredom_solo_relief", 4.0)), "active_task")
     }
 
-    @Synchronized
+    /**
+     * Deliberately NOT `@Synchronized`.
+     *
+     * LifeStateEngine holds the L4 file lock and calls in here, while this method reads L4 and
+     * writes the emotion marker. Holding the emotion monitor across those L4 accesses acquired
+     * the two locks in opposite orders in the two threads — a real deadlock: the reply never came
+     * (no error at all) and the worker was killed as an ANR. The L4 touches are now outside any
+     * emotion monitor, and duplicate application is still prevented by the dedupe marker in
+     * [applyDeltaOnce].
+     */
     fun onCommanderMessage(root: File, text: String, msgId: String = "") {
         val l4 = runCatching {
             JSONObject(FileManager.read(root, "memory/L4_state.json"))
@@ -234,7 +243,7 @@ object EmotionEngine {
         }
     }
 
-    @Synchronized
+    /** Not `@Synchronized`: see [onCommanderMessage] — same L4 ordering rule. */
     fun onCommanderReply(root: File, msgId: String = "") {
         val l4 = runCatching {
             JSONObject(FileManager.read(root, "memory/L4_state.json"))

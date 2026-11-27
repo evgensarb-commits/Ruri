@@ -435,6 +435,28 @@ class MainActivity : AppCompatActivity() {
         fun roleplayMode(): Boolean = ChatStyle.roleplayEnabled(filesDir)
 
         /** Commander-set completion cap. 0 keeps the per-mode default. */
+        /**
+         * Saves the Routeway key regardless of which provider is active.
+         *
+         * The key card used to require a route entry with id "routeway", but the config always
+         * holds exactly one entry — the active provider's. Selecting routerai therefore made the
+         * main key both invisible and unsaveable.
+         */
+        @JavascriptInterface
+        fun setRoutewayKey(key: String): String {
+            return try {
+                require(key.trim().isNotBlank()) { "Ключ пуст" }
+                Route.setProviderKey(filesDir, Route.ID_ROUTEWAY, key)
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "key save failed") }
+        }
+
+        @JavascriptInterface
+        fun routewayKeyState(): String = JSONObject()
+            .put("has_key", Route.hasProviderKey(filesDir, Route.ID_ROUTEWAY))
+            .put("active", Route.providerId(filesDir) == Route.ID_ROUTEWAY)
+            .toString()
+
         /** Copies text to the system clipboard; the WebView clipboard API is unavailable here. */
         // ------------------------------------------------------------ insights / provenance
 
@@ -468,11 +490,18 @@ class MainActivity : AppCompatActivity() {
                     (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() }.toSet()
                 }
                 if (ids.isEmpty()) return "[]"
-                val (entries, _) = RawLog.read(filesDir, afterOffset = 0L, limit = 200)
+                // Scan the tail, newest first. Reading forward from offset 0 returned the 200
+                // OLDEST events, so claim sources — which always point at recent events — were
+                // never found and the provenance view always said "not found".
                 val out = JSONArray()
-                for (entry in entries) {
-                    if (entry.id !in ids) continue
-                    out.put(entry.json.put("offset", entry.offset))
+                val lines = FileManager.readLastLines(
+                    filesDir, "memory/L0_raw.jsonl", maxLines = 20000, maxBytes = 16 * 1024 * 1024
+                )
+                for (line in lines.asReversed()) {
+                    if (out.length() >= ids.size) break
+                    val event = runCatching { JSONObject(line) }.getOrNull() ?: continue
+                    if (event.optString("id") !in ids) continue
+                    out.put(event)
                 }
                 out.toString()
             } catch (e: Exception) { "[]" }

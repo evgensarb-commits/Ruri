@@ -132,6 +132,18 @@ object Route {
     fun routerAiUnconfigured(root: File): Boolean =
         isRouterAI(root) && routerAiModelId(root).isBlank()
 
+    /**
+     * The provider name that is active but missing its model id, or null when all is well.
+     *
+     * One helper for every provider: the guard existed for routerai only, so closerouter could
+     * send {"model": ""} and the Commander got an opaque 400 instead of "paste the model id".
+     */
+    fun unconfiguredProvider(root: File): String? = when {
+        routerAiUnconfigured(root) -> "routerai.ru"
+        isCloseRouter(root) && closeRouterModelId(root).isBlank() -> "closerouter.dev"
+        else -> null
+    }
+
     private const val MODEL_FREE_LABEL = "Gemma 4 26B MeroMero (free)"
     private const val MODEL_PAID_LABEL = "Gemma 4 31B SDFT Heretic RP (paid)"
 

@@ -715,7 +715,7 @@ function renderChat(animateAll, forceBottom){
       + '<div class="bubble">' + esc(ev.text) + '</div>'
       + '<div class="meta"><span class="time">' + timeOf(ev.ts) + '</span>' + ticks
       // Copy first: it is the action used most often, and on her messages it is the only one.
-      + '<button class="copy" type="button" data-action="copy" data-index="' + i + '" aria-label="Скопировать сообщение">⧉</button>'
+      + '<button class="copy" type="button" data-action="copy" data-index="' + i + '" data-mid="' + esc(ev.id || '') + '" aria-label="Скопировать сообщение">⧉</button>'
       + (ev.id ? '<button class="del" type="button" data-action="delete" aria-label="Удалить сообщение">×</button>' : '')
       + '</div></div>';
   }
@@ -966,6 +966,14 @@ function copyMessage(index){
   var events = chatState.events || [];
   var ev = events[pos];
   if(!ev || !ev.text) return;
+  // Guard against a stale index: deleting a message splices the array without a re-render, so
+  // every later button kept an index that now points at a different message.
+  var node = doc.querySelector('[data-action="copy"][data-index="' + pos + '"]');
+  if(node && node.getAttribute('data-mid') && ev.id && node.getAttribute('data-mid') !== ev.id){
+    for(var i = 0; i < events.length; i++){
+      if(events[i].id === node.getAttribute('data-mid')){ ev = events[i]; pos = i; break; }
+    }
+  }
   var text = String(ev.text);
   var done = function(ok){
     if(ok) flashCopied(pos);
@@ -1011,6 +1019,8 @@ function deleteMessage(node){
   for(var i = 0; i < chatState.events.length; i++){
     if(chatState.events[i].id === mid){ chatState.events.splice(i, 1); break; }
   }
+  // The list is not re-rendered here (that would lose the scroll position), so the remaining
+  // buttons keep stale data-index values. copyMessage re-resolves the text by data-mid.
   chatState.seen[mid] = true;
   if(node.parentNode) node.parentNode.removeChild(node);
   else refreshChat(false, false);
@@ -1490,10 +1500,11 @@ function hasKeyNow(cfg, route){
 }
 
 function loadConnection(){
-  var cfg = parseJson(call('readPublicRuntimeConfig', [], '{}'), {});
-  if(!cfg || typeof cfg !== 'object') cfg = {};
-  var route = findRouteModel(cfg);
-  var known = hasKeyNow(cfg, route);
+  // Presence comes from the keystore slot, not from the active route entry: the config holds one
+  // entry (the active provider), so the old check reported "no key" while the key was still saved.
+  var state = parseJson(call('routewayKeyState', [], '{}'), {});
+  if(!state || typeof state !== 'object') state = {};
+  var known = state.has_key === true;
   setText($('keyState'), known
     ? 'Ключ задан. Сам ключ приложение никогда не показывает.'
     : 'Ключ не задан. Вставь ключ Routeway, чтобы Рури могла отвечать.');
@@ -1505,12 +1516,8 @@ function saveKey(){
   var input = $('keyInput');
   var key = input ? String(input.value || '').replace(/^\s+|\s+$/g, '') : '';
   if(!key){ setStatus('keyStatus', 'Введи ключ.', 'bad'); return; }
-  var cfg = parseJson(call('readPublicRuntimeConfig', [], '{}'), {});
-  if(!cfg || typeof cfg !== 'object'){ setStatus('keyStatus', 'Не удалось прочитать настройки.', 'bad'); return; }
-  var route = findRouteModel(cfg);
-  if(!route){ setStatus('keyStatus', 'В настройках нет подключения Routeway.', 'bad'); return; }
-  route.api_key = key;
-  var saved = call('saveRuntimeConfig', [JSON.stringify(cfg)], 'ERROR: мост Ruri недоступен');
+  // Saved straight into the provider's own keystore slot, so it works whatever else is selected.
+  var saved = call('setRoutewayKey', [key], 'ERROR: мост Ruri недоступен');
   if(isErr(saved)){ setStatus('keyStatus', 'Ключ не сохранён: ' + errText(saved), 'bad'); return; }
   if(input) input.value = '';
   setStatus('keyStatus', 'Ключ сохранён.', 'good');

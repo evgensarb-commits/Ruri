@@ -3355,4 +3355,175 @@ class WeightRespectsStatusTest {
         assertEquals(withStatus, withoutStatus, 0.000001)
     }
 }
+
+/** Batch 3: the ways a reply could still go wrong. */
+class ReplyPathRepairTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-reply3").toFile().also {
+        FileManager.init(it)
+        EmotionEngine.ensure(it)
+    }
+
+    @Test fun noLockOrderCycleBetweenEmotionAndState() {
+        val emotions = RepoSources.text("app/src/main/java/com/ruri/EmotionEngine.kt")
+        // LifeStateEngine holds the L4 lock and calls in here; these two also touch L4, so holding
+        // the emotion monitor across that access deadlocked both threads.
+        val message = emotions.substringAfter("fun onCommanderMessage(")
+            .substringBefore("fun onCommanderReply(")
+        val reply = emotions.substringAfter("fun onCommanderReply(")
+            .substringBefore("fun onIgnored(")
+        for ((name, body) in listOf("onCommanderMessage" to message, "onCommanderReply" to reply)) {
+            assertFalse("$name must not hold the emotion monitor across L4",
+                body.contains("@Synchronized"))
+        }
+        assertTrue("the reason must be documented", emotions.contains("deadlock"))
+    }
+
+    @Test fun theQuestionSurvivesAToolCall() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        val fn = engine.substringAfter("internal fun leanFollowup(")
+            .substringBefore("internal fun isActionJson(")
+        // The chat path emits "РЕЗУЛЬТАТ ИНСТРУМЕНТА"; matching only "[ИНСТРУМЕНТ" let a tool
+        // result become "the question", so the request lost the Commander's message.
+        assertTrue(fn.contains("РЕЗУЛЬТАТ ИНСТРУМЕНТА"))
+        assertTrue(fn.contains("ИНСТРУМЕНТ НЕ СРАБОТАЛ"))
+    }
+
+    @Test fun everyHopSeesProsePlusJson() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        val loop = engine.substringAfter("private fun runToolRequests(")
+            .substringBefore("private fun currentCommanderText(")
+        assertTrue("must consult stripActions on each hop",
+            loop.contains("ToolLoop.stripActions(current).third"))
+    }
+
+    @Test fun theDocumentBudgetMatchesDelivery() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        val call = engine.substringAfter("\"read_document\" -> {")
+            .substringBefore("\"look_at_image\" -> {")
+        // Reading more than can be delivered produced "read in full" about a truncated body.
+        assertTrue("must cap by the delivery limit", call.contains("maxChars = TOOL_RESULT_LIMIT"))
+    }
+
+    @Test fun theDiaryToolPathKeepsMarkersToo() {
+        val loop = RepoSources.text("app/src/main/java/com/ruri/ToolLoop.kt")
+        // The 4000-char cut without markers survived here while the chat path was fixed.
+        assertFalse(loop.contains(".take(4000)"))
+        assertTrue(loop.contains("trimKeepingMarker"))
+    }
+
+    @Test fun theMemoryGuardCanActuallyFail() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        val guard = engine.substringAfter("internal fun hasFullMemoryContext(")
+            .substringBefore("// ---------------------------------------------------------------- diagnostics")
+        // It used to test for the literal substrings L0..L3, which the architecture section
+        // always provides, so it could never fail.
+        assertTrue("must inspect the files", guard.contains("JSONObject(raw)"))
+        assertTrue("and report corruption", guard.contains("isFailure"))
+    }
+}
+
+/** Every provider must be guarded, not just the first one that had the bug. */
+class ProviderGuardTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-provider").toFile().also {
+        FileManager.init(it)
+    }
+
+    @Test fun closerouterWithoutAModelIsReported() {
+        val dir = root()
+        try {
+            Route.setVariant(dir, Route.VARIANT_CLOSEROUTER)
+            assertEquals("closerouter.dev", Route.unconfiguredProvider(dir))
+            Route.setCloseRouterModelId(dir, "some/model")
+            assertEquals(null, Route.unconfiguredProvider(dir))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun routeraiWithoutAModelIsStillReported() {
+        val dir = root()
+        try {
+            Route.setVariant(dir, Route.VARIANT_ROUTERAI)
+            assertEquals("routerai.ru", Route.unconfiguredProvider(dir))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun aConfiguredProviderIsNotReported() {
+        val dir = root()
+        try {
+            assertEquals(null, Route.unconfiguredProvider(dir))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun transportRefusesToPostAnEmptyModel() {
+        val transport = RepoSources.text("app/src/main/java/com/ruri/Transport.kt")
+        assertTrue("the last line of defence must exist",
+            transport.contains("Пустой идентификатор модели: запрос не отправлен."))
+        // The kind must be "config" and the message must be the detail, in that order.
+        assertTrue("arguments must be in the right order",
+            transport.contains("\"config\", null,"))
+    }
+}
+
+/** A corrupt document must say so instead of looking empty. */
+class DocumentFailureReportTest {
+    @Test fun aParseFailureIsNotAnEmptyDocument() {
+        val reader = RepoSources.text("app/src/main/java/com/ruri/DocReader.kt")
+        val fn = reader.substringAfter("internal fun readZipXml(")
+            .substringBefore("internal fun embeddedImages(")
+        // getOrDefault("") turned a parse crash into "no readable text", which reads as an empty
+        // or scanned file — the Commander could not tell a broken file from a real failure.
+        assertFalse("must not swallow the parse error", fn.contains(".getOrDefault(\"\")"))
+        assertTrue("must surface it", fn.contains("не удалось разобрать документ"))
+    }
+}
+
+/** The Routeway key must be saveable no matter which provider is selected. */
+class RoutewayKeyCardTest {
+    @Test fun theBridgeSavesIntoItsOwnSlot() {
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        assertTrue(activity.contains("fun setRoutewayKey("))
+        assertTrue("must use the provider slot",
+            activity.contains("Route.setProviderKey(filesDir, Route.ID_ROUTEWAY, key)"))
+        assertTrue(activity.contains("fun routewayKeyState("))
+    }
+
+    @Test fun thePageNoLongerDependsOnTheActiveRouteEntry() {
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        // Scoped by the surrounding function names; the body is short and self-contained.
+        val save = html.substringAfter("function saveKey(){")
+            .substringBefore("\nfunction ")
+        assertFalse("must not look for a routeway entry", save.contains("findRouteModel"))
+        assertTrue("must call the dedicated bridge", save.contains("setRoutewayKey"))
+
+        val load = html.substringAfter("function loadConnection(){")
+            .substringBefore("\nfunction ")
+        assertFalse("presence must not come from the active route entry", load.contains("findRouteModel"))
+        assertTrue("presence comes from the slot", load.contains("routewayKeyState"))
+    }
+}
+
+/** The provenance view must find recent sources. */
+class ProvenanceViewTest {
+    @Test fun sourcesAreLookedUpFromTheTail() {
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        val fn = activity.substringAfter("fun readEventsByIds(")
+            .substringBefore("fun challengeClaim(")
+        // Reading forward from offset 0 returned the 200 oldest events, so sources pointing at
+        // recent events were never found and the view always said "not found".
+        assertFalse("must not scan from the start", fn.contains("afterOffset = 0L"))
+        assertTrue("must read the tail", fn.contains("readLastLines"))
+        assertTrue("newest first", fn.contains("asReversed()"))
+    }
+}
+
+/** Copying must never take a neighbour's text. */
+class CopyButtonTest {
+    @Test fun aStaleIndexIsResolvedById() {
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        val fn = html.substringAfter("function copyMessage(")
+            .substringBefore("function flashCopied(")
+        // Deleting a message splices the array without a re-render, so data-index goes stale.
+        assertTrue("the button must carry the id", html.contains("data-action=\"copy\" data-index=\"' + i + '\" data-mid="))
+        assertTrue("and the copy must re-resolve it", fn.contains("data-mid"))
+    }
+}
 }
