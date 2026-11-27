@@ -18,8 +18,27 @@ object ChatEngine {
     /** Bound on tool round-trips in one turn: a confused model must not loop forever. */
     private const val MAX_TOOL_HOPS = 8
 
-    /** Tool output injected back into the context, in characters. */
-    private const val TOOL_RESULT_LIMIT = 4000
+    /**
+     * Tool output injected back into the context, in characters.
+     *
+     * Must stay above DocReader.PAGE_CHARS. It used to be 4000 against a 6000-character page, so
+     * every document page was cut and its trailing "[ПРОДОЛЖЕНИЕ: page=N]" marker was cut with
+     * it. She could not see that a next page existed, so she never asked for one.
+     */
+    private const val TOOL_RESULT_LIMIT = 9000
+
+    /**
+     * A long document is walked in one go, up to this many pages.
+     *
+     * Paired with the character budget below: 25 pages × 6000 chars would be 150k, so the
+     * character cap is what actually stops a runaway file. Keeping these two consistent matters
+     * — an earlier pair (40 pages against 24k chars) silently cut documents at four pages while
+     * claiming a much larger limit.
+     */
+    private const val MAX_AUTO_PAGES = 25
+
+    /** Total characters of document text handed over in one turn (~30 pages of prose). */
+    private const val MAX_AUTO_CHARS = 120_000
 
     @Volatile private var lastFinalMessageId: String? = null
     private val responseLock = Any()
@@ -247,6 +266,94 @@ object ChatEngine {
     /** Test-only seam: exercises the remember-fact rules without a provider call. */
     internal fun rememberFactForTest(root: File, text: String): String = rememberFact(root, text)
 
+    /**
+     * Reads the rest of a document automatically.
+     *
+     * Paging existed, but only as an instruction: she had to notice the marker and ask for the
+     * next page herself, and in practice she never did. Waiting for a model to remember a
+     * protocol is a fragile design when the app already knows what page comes next. This walks
+     * the document to the end, within one budget, and hands her the complete text once.
+     *
+     * Returns the joined text plus how many pages were read.
+     */
+    internal fun readWholeDocument(
+        root: File,
+        name: String,
+        startPage: Int = 0,
+        maxPages: Int = MAX_AUTO_PAGES,
+        maxChars: Int = MAX_AUTO_CHARS
+    ): Pair<String, Int> {
+        val builder = StringBuilder()
+        var page = startPage.coerceAtLeast(0)
+        var read = 0
+        var lastNote = ""
+        // Distinguish "ran out of document" from "ran out of budget": only the second may be
+        // reported as incomplete, otherwise a fully read file looks truncated.
+        var reachedEnd = false
+        var hitBudget = false
+        while (read < maxPages) {
+            if (builder.length >= maxChars) { hitBudget = true; break }
+            val (ok, text) = DocReader.read(root, name, page)
+            if (!ok) {
+                if (read == 0) return text to 0
+                lastNote = "\n[ЧТЕНИЕ ОСТАНОВЛЕНО: $text]"
+                break
+            }
+            read++
+            // Drop the per-page header and the trailing marker; the caller reports progress.
+            val withoutHeader = if (text.contains('\n')) text.substringAfter('\n') else text
+            val body = withoutHeader
+                .substringBefore("\n[ПРОДОЛЖЕНИЕ")
+                .substringBefore("\n[КОНЕЦ ДОКУМЕНТА]")
+            builder.append(body.trim()).append("\n\n")
+            val next = Regex("\\[ПРОДОЛЖЕНИЕ:.*?page=(\\d+)\\]").find(text)
+                ?.groupValues?.get(1)?.toIntOrNull()
+            if (next == null || next <= page) { reachedEnd = true; break }
+            page = next
+        }
+        if (!reachedEnd && !hitBudget) hitBudget = read >= maxPages
+        val more = when {
+            lastNote.isNotBlank() -> lastNote
+            hitBudget && !reachedEnd ->
+                "\n[ПРОЧИТАНО $read страниц, дальше текст слишком велик для одного ответа. " +
+                    "Спроси конкретное место или открой следующую страницу через read_document page=$page.]"
+            else -> "\n[ДОКУМЕНТ ПРОЧИТАН ЦЕЛИКОМ: $read стр.]"
+        }
+        return (builder.toString().trimEnd() + more) to read
+    }
+
+    /**
+     * Truncates a tool result without losing what tells her there is more.
+     *
+     * Two things must survive any cut: the paging marker (`[ПРОДОЛЖЕНИЕ: ... page=N]`,
+     * `[КОНЕЦ ДОКУМЕНТА]`, the raw-journal cursor) and an honest note that the middle was
+     * dropped. Silently cutting text made her believe a partial page was the whole document.
+     */
+    internal fun trimKeepingMarker(text: String, limit: Int = TOOL_RESULT_LIMIT): String {
+        if (text.length <= limit) return text
+        // Preserve every trailing bracket line: that is where continuation lives.
+        val tailLines = ArrayList<String>()
+        val lines = text.lines()
+        for (line in lines.asReversed()) {
+            val trimmed = line.trim()
+            if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) break
+            tailLines.add(0, trimmed)
+        }
+        // Also keep the "next offset" sentence the raw journal emits on its first line.
+        val headNote = lines.firstOrNull { it.contains("после_смещения") || it.contains("Следующий") }
+            ?.take(200)
+        val tail = if (tailLines.isEmpty()) "" else "\n" + tailLines.joinToString("\n")
+        val head = if (headNote.isNullOrBlank()) "" else headNote + "\n"
+        val reserved = head.length + tail.length + 80
+        val room = (limit - reserved).coerceAtLeast(200)
+        val body = text.take(room)
+        val dropped = text.length - body.length
+        return head + body +
+            "\n[ТЕКСТ ОБРЕЗАН: пропущено $dropped символов из ${text.length}. " +
+            "Это не весь ответ инструмента; если нужен остаток — запроси следующую страницу.]" +
+            tail
+    }
+
     private fun runToolRequests(
         root: File,
         initialReply: String,
@@ -274,7 +381,7 @@ object ChatEngine {
                 JSONObject().put("type", "tool_call").put("action", name).put("params", params)
             ))
             val result = executeTool(root, name, params)
-            val safeText = SecretRedactor.redactText(result.second).take(TOOL_RESULT_LIMIT)
+            val safeText = trimKeepingMarker(SecretRedactor.redactText(result.second))
             FileManager.appendEvent(root, SecretRedactor.redactEvent(
                 JSONObject().put("type", "tool_result").put("action", name)
                     .put("ok", result.first).put("text", safeText)
@@ -765,11 +872,18 @@ object ChatEngine {
                     ok to text
                 }
                 "read_document" -> {
-                    // One page at a time: a long document must never flood a single request.
-                    val (ok, text) = DocReader.read(
-                        root, params.optString("name"), params.optInt("page", 0)
-                    )
-                    ok to text
+                    // Read the whole document unless a specific page was requested. Asking her to
+                    // page manually meant long files were never actually read.
+                    val requestedPage = params.optInt("page", -1)
+                    if (requestedPage >= 0) {
+                        val (ok, text) = DocReader.read(
+                            root, params.optString("name"), requestedPage
+                        )
+                        ok to text
+                    } else {
+                        val (text, pages) = readWholeDocument(root, params.optString("name"))
+                        (pages > 0) to text
+                    }
                 }
                 "look_at_image" -> {
                     // Standalone image or one inside a document, described by the provider.

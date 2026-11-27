@@ -2571,4 +2571,92 @@ class FullSearchTest {
             style.contains("НЕ попадают"))
     }
 }
+
+/**
+ * She never asked for page N+1, so long documents were never actually read.
+ *
+ * Two causes: the continuation marker lived at the end of a 6000-character page but results were
+ * cut at 4000, so the marker was always sliced off; and paging relied on her remembering a
+ * protocol instead of the app doing it.
+ */
+class DocumentPaginationTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-paging").toFile().also {
+        FileManager.init(it)
+    }
+
+    @Test fun theResultCapExceedsAPageSoMarkersSurvive() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        val cap = Regex("TOOL_RESULT_LIMIT = (\\d+)").find(engine)?.groupValues?.get(1)?.toInt()
+        val page = Regex("PAGE_CHARS = (\\d+)")
+            .find(RepoSources.text("app/src/main/java/com/ruri/DocReader.kt"))
+            ?.groupValues?.get(1)?.toInt()
+        assertNotNull(cap)
+        assertNotNull(page)
+        assertTrue("cutting below a page guarantees losing the marker", cap!! > page!!)
+    }
+
+    @Test fun theMarkerSurvivesTruncation() {
+        val body = "x".repeat(20_000) + "\n[ПРОДОЛЖЕНИЕ: вызови read_document с name=\"doc\" и page=3]"
+        val trimmed = ChatEngine.trimKeepingMarker(body, limit = 1000)
+        assertTrue("the next page must remain visible", trimmed.contains("page=3"))
+        assertTrue("and truncation must be admitted", trimmed.contains("ТЕКСТ ОБРЕЗАН"))
+        assertTrue("not longer than the limit by much", trimmed.length < 1400)
+    }
+
+    @Test fun theEndOfDocumentMarkerAlsoSurvives() {
+        val body = "y".repeat(20_000) + "\n[КОНЕЦ ДОКУМЕНТА]"
+        val trimmed = ChatEngine.trimKeepingMarker(body, limit = 800)
+        assertTrue(trimmed.contains("КОНЕЦ ДОКУМЕНТА"))
+    }
+
+    @Test fun nothingIsAlteredWhenItFits() {
+        val small = "короткий текст\n[КОНЕЦ ДОКУМЕНТА]"
+        assertEquals(small, ChatEngine.trimKeepingMarker(small, limit = 9000))
+    }
+
+    @Test fun aLongDocumentIsReadInOneCall() {
+        val dir = root()
+        try {
+            // ~3 pages worth of text at PAGE_CHARS = 6000.
+            val paragraph = "Это предложение про проект маяка. ".repeat(60)
+            val content = (1..12).joinToString("\n\n") { "$paragraph (часть $it)" }
+            DocReader.store(dir, "long.txt", content.toByteArray(Charsets.UTF_8))
+
+            val (text, pages) = ChatEngine.readWholeDocument(dir, "long.txt")
+            assertTrue("must read beyond the first page", pages > 1)
+            assertTrue("text must be returned", text.length > 6000)
+            assertTrue("it must say the document is complete", text.contains("ДОКУМЕНТ ПРОЧИТАН"))
+            assertTrue("content from the start is present", text.contains("проект маяка"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun theAutomaticReadIsBounded() {
+        val dir = root()
+        try {
+            // Far more than the page budget can hold, so the cap must engage.
+            val huge = "слово ".repeat(400_000)
+            DocReader.store(dir, "huge.txt", huge.toByteArray(Charsets.UTF_8))
+            val (text, pages) = ChatEngine.readWholeDocument(dir, "huge.txt")
+            assertTrue("must stop instead of loading everything", pages <= 25)
+            assertTrue("and say so", text.contains("дальше текст слишком велик"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun aMissingDocumentFailsHonestly() {
+        val dir = root()
+        try {
+            val (text, pages) = ChatEngine.readWholeDocument(dir, "нет-такого.txt")
+            assertEquals(0, pages)
+            assertTrue("must explain the failure", text.contains("не найден"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun sheIsNoLongerToldToPageManually() {
+        val style = ChatStyle.documentHint("прочитай документ", listOf("doc.txt"))
+        assertTrue("whole-document read must be stated", style.contains("читается ЦЕЛИКОМ"))
+        assertTrue("page is optional now", style.contains("страницу указывать не нужно"))
+        assertFalse("must not instruct manual paging",
+            style.contains("вызови read_document с этим page"))
+    }
+}
 }
