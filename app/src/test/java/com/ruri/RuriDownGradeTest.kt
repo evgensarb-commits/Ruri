@@ -2805,7 +2805,8 @@ class AppearanceTest {
     }
 
     @Test fun theSchemaHasRealFields() {
-        val seed = RepoSources.text("app/src/main/java/com/ruri/FileManager.kt")
+        // The description now lives in AppearanceSeed; FileManager only wires it in.
+        val seed = AppearanceSeed.content()
         for (field in listOf("hair", "eyes", "clothing", "voice", "mannerisms", "height")) {
             assertTrue("appearance needs $field", seed.contains("\"$field\""))
         }
@@ -2829,6 +2830,9 @@ class AppearanceTest {
     @Test fun anEmptyAppearanceIsAdmittedNotInvented() {
         val dir = root()
         try {
+            // init now seeds her described body, so an undescribed state must be created
+            // explicitly: this checks the "nothing filled in" branch.
+            FileManager.write(dir, "core/appearance.json", JSONObject().put("schema_version", 3).toString())
             val section = ChatStyle.appearanceSection(dir)
             assertTrue("must say it is undefined", section.contains("НЕ ОПИСАНА"))
             assertTrue("and forbid making one up", section.contains("Не выдумывай"))
@@ -2837,9 +2841,9 @@ class AppearanceTest {
 
     @Test fun bothPromptsKnowHerBody() {
         val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
-        assertTrue("chat must include it", engine.contains("ChatStyle.appearanceSection(root)"))
+        assertTrue("chat must include it", engine.contains("ChatStyle.appearanceForMode(root)"))
         val thinker = RepoSources.text("app/src/main/java/com/ruri/Thinker.kt")
-        assertTrue("initiative must include it", thinker.contains("ChatStyle.appearanceSection(root)"))
+        assertTrue("initiative must include it", thinker.contains("ChatStyle.appearanceForMode(root)"))
     }
 }
 
@@ -2924,8 +2928,8 @@ class AppearanceSeedTest {
     }
 
     @Test fun everyDescribedDetailIsPresent() {
-        val seed = AppearanceSeed.content()
-        // Checked by phrase, so rewording the field names cannot silently drop content.
+        // Case-insensitive: a detail is not lost just because it starts a sentence.
+        val seed = AppearanceSeed.content().lowercase()
         for (detail in listOf(
             "перевёрнутая восьмёрка", "170 см", "voluptuous",
             "6 размер", "соски", "складка-тень",
