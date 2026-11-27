@@ -396,7 +396,14 @@ object ChatEngine {
                 DocReader.listImageNames(root),
                 Vision.supportState(root) != false
             ) +
-            "Ты общаешься с Командиром в чате приложения. Отвечай обычной прозой, без JSON и без служебных блоков. " +
+            // "без JSON" used to be absolute, which forbade the EMOTION_DELTA line the emotion
+            // section above explicitly allows. The model obeyed the newer, stronger rule and
+            // stopped reporting feelings — so the diary of emotions never moved. The exception
+            // is now stated instead of left to be guessed.
+            "Ты общаешься с Командиром в чате приложения. Отвечай обычной прозой, без " +
+            "служебных блоков и без JSON-объектов инструментов. " +
+            "Единственное исключение — служебная строка EMOTION_DELTA в конце, если она нужна: " +
+            "она описана выше, в разделе про эмоции, и Командиру не показывается. " +
             "Ниже — ТВОЯ ДОЛГОСРОЧНАЯ ПАМЯТЬ. Это не контекст одного диалога; ты помнишь между сессиями.\n" +
             "ТВОЯ АВТОБИОГРАФИЯ (L3):\n$summary\n" +
             "ТВОИ ФАКТЫ (L1):\n$factContext\n" +
