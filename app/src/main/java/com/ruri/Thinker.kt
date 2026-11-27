@@ -385,7 +385,7 @@ object Thinker {
             ". " + StyleGuard.repetitiveOpeningNote(root) +
             ". Запрещённые фразы: " + (character.optJSONArray("banned_phrases")?.toString() ?: "[]") + ".\n" +
             Capabilities.bodySection(root) + "\n" +
-            ChatStyle.appearanceSection(root) +
+            ChatStyle.appearanceForMode(root) +
             EmotionEngine.promptSection(root) + "\n" +
             outcomeDigest + "\n" +
             "Первый приоритет: " + priorities.optString("priority_1", "Жить") +

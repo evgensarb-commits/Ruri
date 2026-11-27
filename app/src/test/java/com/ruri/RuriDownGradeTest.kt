@@ -2913,4 +2913,123 @@ class CommanderMessageLookupTest {
         assertTrue("a few thousand lines is not enough for a busy day", window!! >= 10000)
     }
 }
+
+/**
+ * The Commander described her body in full. Two things must hold: no detail is lost, and the
+ * explicit half stays out of ordinary chat.
+ */
+class AppearanceSeedTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-look2").toFile().also {
+        FileManager.init(it)
+    }
+
+    @Test fun everyDescribedDetailIsPresent() {
+        val seed = AppearanceSeed.content()
+        // Checked by phrase, so rewording the field names cannot silently drop content.
+        for (detail in listOf(
+            "перевёрнутая восьмёрка", "170 см", "voluptuous",
+            "6 размер", "соски", "складка-тень",
+            "талия", "живот", "пресса",
+            "бёдра", "задница",
+            "ляжки", "икры", "щиколотки",
+            "сердечком", "матка", "яичник", "светящиеся", "розов",
+            "смазк", "имплант", "подмышк", "горошину", "ниткой", "ванил"
+        )) {
+            assertTrue("detail lost from the seed: $detail", seed.contains(detail))
+        }
+    }
+
+    @Test fun theFaceFollowsTheRequestedStyle() {
+        val seed = AppearanceSeed.content()
+        assertTrue("must be kuro-gyaru / ganguro", seed.contains("gyaru") || seed.contains("ganguro"))
+        // The defining attributes of that style, not just the name.
+        for (attribute in listOf("загар", "обесцвечен", "подводка", "ресниц", "губы")) {
+            assertTrue("style attribute missing: $attribute", seed.contains(attribute))
+        }
+    }
+
+    @Test fun fieldsAreSeparateNotOneBlob() {
+        val file = JSONObject(AppearanceSeed.content())
+        // Discreet fields are what let her change one thing without rewriting all of herself.
+        for (field in listOf("bust", "waist", "hips", "legs", "pubic", "intimate",
+            "underarms", "figure", "face", "skin")) {
+            assertTrue("missing field $field", file.has(field))
+            assertTrue("field $field must not be empty", file.optString(field).isNotBlank())
+        }
+    }
+
+    @Test fun aBlankFileIsSeededButRealContentIsKept() {
+        val dir = root()
+        try {
+            // Blank: gets the Commander's description.
+            FileManager.write(dir, "core/appearance.json", "{\"description\":\"\"}")
+            assertTrue(AppearanceSeed.isBlank(FileManager.read(dir, "core/appearance.json")))
+
+            // Written by hand: must be treated as real content.
+            val mine = JSONObject().put("description", "моё собственное описание")
+            assertFalse(AppearanceSeed.isBlank(mine.toString()))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun metadataAloneDoesNotCountAsContent() {
+        // A file holding only schema_version and lora placeholders is still undescribed.
+        val meta = JSONObject()
+            .put("schema_version", 3)
+            .put("seed", 424242)
+            .put("lora", JSONObject().put("trigger", "ruri_ru_r1"))
+        assertTrue("metadata must not block the seed", AppearanceSeed.isBlank(meta.toString()))
+    }
+}
+
+/** Tier 1 always, tier 2 only in role-play. */
+class AppearanceTiersTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-tier").toFile().also {
+        FileManager.init(it)
+    }
+
+    @Test fun ordinaryChatGetsTheSilhouetteOnly() {
+        val dir = root()
+        try {
+            ChatStyle.setRoleplay(dir, false)
+            val section = ChatStyle.appearanceForMode(dir)
+            assertTrue("silhouette must be present", section.contains("ТВОЯ ВНЕШНОСТЬ"))
+            assertTrue(section.contains("170"))
+            // The explicit half must not appear unprompted.
+            assertFalse("anatomy must stay out of messenger mode",
+                section.contains("интимные особенности"))
+            assertFalse(section.contains("подмышки и запах"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun roleplayGetsTheFullBody() {
+        val dir = root()
+        try {
+            ChatStyle.setRoleplay(dir, true)
+            val section = ChatStyle.appearanceForMode(dir)
+            assertTrue("silhouette stays", section.contains("ТВОЯ ВНЕШНОСТЬ"))
+            assertTrue("and the detail is added", section.contains("ТВОЁ ТЕЛО ПОДРОБНО"))
+            assertTrue(section.contains("интимные особенности"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun bothPromptsUseTheModeAwareForm() {
+        // Deciding the tiers at each call site is how they drift apart.
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        assertTrue(engine.contains("ChatStyle.appearanceForMode(root)"))
+        val thinker = RepoSources.text("app/src/main/java/com/ruri/Thinker.kt")
+        assertTrue(thinker.contains("ChatStyle.appearanceForMode(root)"))
+    }
+
+    @Test fun anUndescribedBodyIsStillAdmittedNotInvented() {
+        val dir = Files.createTempDirectory("ruri-tier2").toFile().also {
+            FileManager.init(it)
+        }
+        try {
+            FileManager.write(dir, "core/appearance.json",
+                JSONObject().put("schema_version", 3).toString())
+            assertTrue(ChatStyle.appearanceSection(dir).contains("НЕ ОПИСАНА"))
+            assertEquals("", ChatStyle.explicitAppearanceSection(dir))
+        } finally { dir.deleteRecursively() }
+    }
+}
 }

@@ -151,28 +151,14 @@ object FileManager {
         """.trimIndent())
 
         // Structured on purpose: free-form text drifts, discrete fields stay consistent, and she
-        // can change one thing without rewriting all of herself. Empty means "not decided yet" —
-        // she is expected to fill these over time, not to pretend she always looked this way.
-        put(root, "core/appearance.json", """
-            {
-              "schema_version": 2,
-              "description": "",
-              "height": "",
-              "build": "",
-              "hair": "",
-              "eyes": "",
-              "face": "",
-              "skin": "",
-              "clothing": "",
-              "accessories": "",
-              "mannerisms": "",
-              "voice": "",
-              "updated_at": 0,
-              "history": [],
-              "seed": 424242,
-              "lora": { "path": "", "trigger": "ruri_ru_r1", "style": "" }
-            }
-        """.trimIndent())
+        // can change one thing without rewriting all of herself. The Commander described her, so
+        // a fresh install and an existing one must end up describing the same person.
+        // `put` covers a missing file; the blank check covers an existing one that was never
+        // filled in. A file with any real content is left exactly as the Commander left it.
+        put(root, "core/appearance.json", AppearanceSeed.content())
+        if (AppearanceSeed.isBlank(read(root, "core/appearance.json"))) {
+            write(root, "core/appearance.json", AppearanceSeed.content())
+        }
 
         put(root, CONFIG_PATH, """
             {

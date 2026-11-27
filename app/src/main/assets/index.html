@@ -372,8 +372,9 @@ input:focus,select:focus,textarea:focus{border-color:rgba(167,139,250,.6);box-sh
         <input id="charName" type="text" autocomplete="off" placeholder="Рури">
         <label class="field-label" for="charStyle">Манера речи</label>
         <textarea id="charStyle" rows="3" placeholder="Как Рури говорит"></textarea>
-        <label class="field-label" for="charAppearance">Внешность</label>
+        <label class="field-label" for="charAppearance">Внешность (кратко)</label>
         <textarea id="charAppearance" rows="3" placeholder="Как она себя видит"></textarea>
+        <p class="hint">Это только общее описание. Остальные детали внешности — рост, фигура, лицо, волосы и прочее — хранятся отдельными полями в <code>core/appearance.json</code> и здесь не показываются. Сохранение этой строки их не затрагивает.</p>
         <div class="row-actions">
           <button class="btn" id="saveCharacter" type="button">Сохранить</button>
         </div>
