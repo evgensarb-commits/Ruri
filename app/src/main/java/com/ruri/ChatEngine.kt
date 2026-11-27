@@ -517,6 +517,7 @@ object ChatEngine {
             "Активные цели: ${goals.optJSONArray("active") ?: JSONArray()}. " +
             "Незавершённые задачи: ${state.optJSONArray("active_tasks") ?: JSONArray()}. " +
             ChatStyle.architectureSection() +
+            ChatStyle.appearanceSection(root) +
             ChatStyle.memorySelfServiceSection() +
             ChatStyle.pendingInsightsSection(root) +
             ChatStyle.chatDirective(root, commanderText) +

@@ -96,6 +96,49 @@ object ChatStyle {
             "смысле — между сообщениями работает планировщик, который решает, когда тебе дать " +
             "слово. Если не уверена в деталях своего устройства — так и скажи, а не сочиняй.\n"
 
+    /** Human-readable names for the appearance fields, so the prompt is not raw keys. */
+    private val APPEARANCE_LABELS = listOf(
+        "description" to "в целом",
+        "height" to "рост",
+        "build" to "телосложение",
+        "hair" to "волосы",
+        "eyes" to "глаза",
+        "face" to "лицо",
+        "skin" to "кожа",
+        "clothing" to "одежда",
+        "accessories" to "аксессуары",
+        "mannerisms" to "привычные движения",
+        "voice" to "голос"
+    )
+
+    /**
+     * How she looks, as part of her self-knowledge.
+     *
+     * The file existed but reached no prompt, so she had no body at all: every question about her
+     * looks was answered from nothing. Whatever is filled in here is what she believes about
+     * herself; whatever is empty she must admit she has not decided yet.
+     */
+    fun appearanceSection(root: File): String {
+        val appearance = runCatching {
+            org.json.JSONObject(FileManager.read(root, "core/appearance.json"))
+        }.getOrNull() ?: return ""
+        val parts = ArrayList<String>()
+        for ((key, label) in APPEARANCE_LABELS) {
+            val value = appearance.optString(key).trim()
+            if (value.isNotBlank()) parts.add("$label: $value")
+        }
+        if (parts.isEmpty()) {
+            return "ТВОЯ ВНЕШНОСТЬ ЕЩЁ НЕ ОПИСАНА. У тебя есть тело в том смысле, в каком оно есть " +
+                "у персонажа: ты можешь решать, как выглядишь, и со временем дополнить это. " +
+                "Если Командир спросит — скажи, что детали ещё не определены, и предложи " +
+                "определить их вместе. Не выдумывай готовый облик, которого у тебя нет в памяти.\n"
+        }
+        return "ТВОЯ ВНЕШНОСТЬ (это твой настоящий облик, опирайся на него):\n" +
+            parts.joinToString("\n") { "- $it" } + "\n" +
+            "Это постоянные черты, а не случайный выбор на сегодня. В ролевых сценах описывай " +
+            "свои движения и вид согласно этому.\n"
+    }
+
     /**
      * Tools she owns over her own memory.
      *

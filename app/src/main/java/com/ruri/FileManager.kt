@@ -150,9 +150,25 @@ object FileManager {
             }
         """.trimIndent())
 
+        // Structured on purpose: free-form text drifts, discrete fields stay consistent, and she
+        // can change one thing without rewriting all of herself. Empty means "not decided yet" —
+        // she is expected to fill these over time, not to pretend she always looked this way.
         put(root, "core/appearance.json", """
             {
+              "schema_version": 2,
               "description": "",
+              "height": "",
+              "build": "",
+              "hair": "",
+              "eyes": "",
+              "face": "",
+              "skin": "",
+              "clothing": "",
+              "accessories": "",
+              "mannerisms": "",
+              "voice": "",
+              "updated_at": 0,
+              "history": [],
               "seed": 424242,
               "lora": { "path": "", "trigger": "ruri_ru_r1", "style": "" }
             }
