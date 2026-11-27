@@ -2744,4 +2744,101 @@ class ToolHopLimitTest {
         assertTrue("salvage must be attempted first", salvageIndex > 0)
     }
 }
+
+/**
+ * The memory layers were almost always empty because writing was rationed by thresholds.
+ * L1 must record every new fact; L2 must record the act of thinking.
+ */
+class NoMemoryThresholdsTest {
+    @Test fun factsNoLongerWaitForAQuorumOfThreeMessages() {
+        val extractor = RepoSources.text("app/src/main/java/com/ruri/FactExtractor.kt")
+        // A single remark is often all the Commander says in a day; it must still be remembered.
+        assertFalse("the three-message quorum must be gone",
+            extractor.contains("commanderIds.size < MIN_COMMANDER_MESSAGES"))
+        assertTrue("but an empty batch is still a no-op", extractor.contains("commanderIds.isEmpty()"))
+    }
+
+    @Test fun theCooldownOnlyAppliesAfterAFailure() {
+        val extractor = RepoSources.text("app/src/main/java/com/ruri/FactExtractor.kt")
+        // Rationing normal traffic behind a cooldown is what kept L1 silent.
+        assertTrue("cooldown must be conditional", extractor.contains("lastAttemptFailed"))
+        assertTrue("and the flag recorded", extractor.contains("last_extraction_failed"))
+    }
+
+    @Test fun thinkingIsNotGatedOnEmotionalPressure() {
+        val dir = Files.createTempDirectory("ruri-gate").toFile().also {
+            FileManager.init(it)
+            EmotionEngine.ensure(it)
+        }
+        try {
+            // A calm moment: pressure far below the old threshold of 18.
+            val allowed = EmotionEngine.thoughtGate(dir, System.currentTimeMillis(), 0L)
+            assertTrue("a calm thought must still be allowed", allowed)
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun theAntiSpamGapStillProtectsAgainstDuplicates() {
+        val dir = Files.createTempDirectory("ruri-gate2").toFile().also {
+            FileManager.init(it)
+            EmotionEngine.ensure(it)
+        }
+        try {
+            val now = System.currentTimeMillis()
+            // Immediately after a thought turn the gate must refuse: same thought, same moment.
+            assertFalse(EmotionEngine.thoughtGate(dir, now, now - 1_000L))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun theDiaryIsDescribedAsAThinkingLog() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/EmotionEngine.kt")
+        assertTrue("the intent must be stated", engine.contains("thinking log"))
+        assertTrue("pressure shapes content, not permission",
+            engine.contains("never *whether* she writes") || engine.contains("whether"))
+    }
+}
+
+/** Her body: the schema exists and reaches both prompts. */
+class AppearanceTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-look").toFile().also {
+        FileManager.init(it)
+    }
+
+    @Test fun theSchemaHasRealFields() {
+        val seed = RepoSources.text("app/src/main/java/com/ruri/FileManager.kt")
+        for (field in listOf("hair", "eyes", "clothing", "voice", "mannerisms", "height")) {
+            assertTrue("appearance needs $field", seed.contains("\"$field\""))
+        }
+        assertTrue("and a history for changes", seed.contains("\"history\""))
+    }
+
+    @Test fun filledFieldsReachThePrompt() {
+        val dir = root()
+        try {
+            val appearance = JSONObject()
+                .put("hair", "тёмные, до плеч")
+                .put("eyes", "серые")
+            FileManager.write(dir, "core/appearance.json", appearance.toString(2))
+            val section = ChatStyle.appearanceSection(dir)
+            assertTrue(section.contains("тёмные, до плеч"))
+            assertTrue(section.contains("серые"))
+            assertTrue("uses readable labels", section.contains("волосы"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun anEmptyAppearanceIsAdmittedNotInvented() {
+        val dir = root()
+        try {
+            val section = ChatStyle.appearanceSection(dir)
+            assertTrue("must say it is undefined", section.contains("НЕ ОПИСАНА"))
+            assertTrue("and forbid making one up", section.contains("Не выдумывай"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun bothPromptsKnowHerBody() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        assertTrue("chat must include it", engine.contains("ChatStyle.appearanceSection(root)"))
+        val thinker = RepoSources.text("app/src/main/java/com/ruri/Thinker.kt")
+        assertTrue("initiative must include it", thinker.contains("ChatStyle.appearanceSection(root)"))
+    }
+}
 }

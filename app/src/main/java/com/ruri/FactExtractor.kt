@@ -33,7 +33,12 @@ object FactExtractor {
         val root = context.filesDir
         val state = readStateStrict(root)
         val now = System.currentTimeMillis()
-        if (now - state.optLong("last_fact_extraction_attempt_at", 0L) < RETRY_COOLDOWN_MS) return 0
+        // The cooldown exists to avoid hammering a failing provider, not to ration normal work.
+        // It only applies while a previous attempt actually failed; a healthy run may proceed.
+        val lastAttemptFailed = state.optBoolean("last_extraction_failed", false)
+        if (lastAttemptFailed &&
+            now - state.optLong("last_fact_extraction_attempt_at", 0L) < RETRY_COOLDOWN_MS
+        ) return 0
 
         val pending = readOrInitializePending(root, state)
         val scanOffset = pending.optLong("scan_offset", 0L).coerceAtLeast(0L)
@@ -61,7 +66,10 @@ object FactExtractor {
         val commanderIds = (0 until commanderMessages.length()).mapNotNull { index ->
             commanderMessages.optJSONObject(index)?.optString("id")?.takeIf { it.isNotBlank() }
         }.toSet()
-        if (commanderIds.size < MIN_COMMANDER_MESSAGES) return 0
+        // No quorum. Waiting for three Commander messages meant a single remark — often the only
+        // one in a day — produced no fact at all. The Commander accepts the token cost; what he
+        // cannot accept is a companion who forgets what he just said.
+        if (commanderIds.isEmpty()) return 0
 
         val latestCommander = commanderMessages.optJSONObject(commanderMessages.length() - 1)
             ?: return 0
@@ -134,7 +142,7 @@ object FactExtractor {
         }
 
         if (parsed == null) {
-            recordAttempt(root, state, now)
+            recordAttempt(root, state, now, failed = true)
             return 0
         }
 
@@ -276,9 +284,17 @@ object FactExtractor {
         FileManager.write(root, PENDING_PATH, reset.toString(2))
     }
 
-    private fun recordAttempt(root: File, state: JSONObject, now: Long) {
+    /**
+     * Records an attempt and whether it failed.
+     *
+     * The cooldown is meant for a broken provider, not for normal traffic, so the failure flag is
+     * what makes the cooldown conditional. A successful run clears it and the next Commander
+     * message is processed immediately.
+     */
+    private fun recordAttempt(root: File, state: JSONObject, now: Long, failed: Boolean = false) {
         FileManager.updateL4State(root) { latest ->
             latest.put("last_fact_extraction_attempt_at", now)
+            latest.put("last_extraction_failed", failed)
         }
     }
 

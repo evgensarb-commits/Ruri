@@ -327,28 +327,36 @@ object EmotionEngine {
      * she keeps an inner life while she is not yet ready to message him. Both gates are
      * driven purely by emotion: no interval decides anything.
      */
+    /**
+     * Whether a thought turn may happen.
+     *
+     * The diary is her thinking log — the trace of a thought process, like a model's reasoning
+     * trace. It used to be gated on emotional pressure (threshold 18 of 100) plus a long
+     * cooldown, so a calm stretch produced no entries and the diary stayed empty for weeks.
+     *
+     * Pressure now shapes *what* she writes, never *whether* she writes. Only a short anti-spam
+     * window remains: two entries minutes apart would be the same thought counted twice.
+     */
     fun thoughtGate(root: File, now: Long, lastThoughtTurn: Long): Boolean {
         val d = drift(root)
         val p = pressure(root)
         val threshold = d.optDouble("thought_threshold", 18.0)
-        if (p < threshold) return false
-        val cooldown = thoughtCooldownMs(d, p, threshold)
-        if (lastThoughtTurn > 0L && now - lastThoughtTurn < cooldown) return false
+        val minGap = d.optLong("thought_min_gap_sec", 90L) * 1000L
+        if (lastThoughtTurn > 0L && now - lastThoughtTurn < minGap) return false
         val span = (100.0 - threshold).coerceAtLeast(1.0)
-        val chance = Math.pow(((p - threshold) / span).coerceIn(0.0, 1.0),
+        // Telemetry only: how strongly she was moved, not whether she may write.
+        val intensity = Math.pow(((p - threshold) / span).coerceIn(0.0, 1.0),
             d.optDouble("thought_gamma", 0.9))
         val roll = initiativeRoll(now, p, lastThoughtTurn, 0L)
-        val passed = roll < chance
         FileManager.appendEvent(root, JSONObject()
             .put("type", "thought_gate_evaluated")
             .put("pressure", p)
             .put("threshold", threshold)
-            .put("cooldown_sec", (cooldown / 1000L).toLong())
-            .put("chance", chance)
+            .put("intensity", intensity)
             .put("roll", roll)
-            .put("passed", passed)
+            .put("passed", true)
             .put("ts", now))
-        return passed
+        return true
     }
 
     internal fun thoughtCooldownMs(drift: JSONObject, pressure: Double, threshold: Double): Double {
