@@ -647,7 +647,7 @@ object ChatEngine {
         val action = runCatching { JSONObject(jsonText) }.getOrNull() ?: return null
         val name = action.optString("action")
         val allowed = when (name) {
-            "recall" -> setOf("action", "query")
+            "recall" -> setOf("action", "query", "scope", "limit")
             "remember_fact" -> setOf("action", "text", "source_ids", "confidence")
             "self_check" -> setOf("action")
             "read_raw" -> setOf("action", "after_offset", "limit", "types", "from_ts", "to_ts")
@@ -662,6 +662,13 @@ object ChatEngine {
         when (name) {
             "recall" -> {
                 if (action.optString("query").isBlank() || action.optString("query").length > 300) return null
+                if (action.has("limit") && action.optInt("limit", 0) !in 1..MemoryRetriever.SCOPE_MAX_RESULTS) return null
+                val scope = action.optString("scope")
+                if (scope.isNotBlank() && scope.lowercase() !in setOf(
+                        MemoryRetriever.SCOPE_ALL, MemoryRetriever.SCOPE_MESSAGES,
+                        MemoryRetriever.SCOPE_FACTS, MemoryRetriever.SCOPE_DIARY,
+                        MemoryRetriever.SCOPE_NOTES
+                    )) return null
             }
             "remember_fact" -> if (action.optString("text").trim().length !in 5..300) return null
             "read_raw" -> {
@@ -703,7 +710,12 @@ object ChatEngine {
         return try {
             when (action) {
                 "recall" -> true to SecretRedactor.redactText(
-                    MemoryRetriever.recall(root, params.optString("query"), 5)
+                    MemoryRetriever.search(
+                        root = root,
+                        query = params.optString("query"),
+                        scope = params.optString("scope", MemoryRetriever.SCOPE_ALL),
+                        limit = params.optInt("limit", 12)
+                    )
                 )
                 "remember_fact" -> true to SecretRedactor.redactText(
                     rememberFact(

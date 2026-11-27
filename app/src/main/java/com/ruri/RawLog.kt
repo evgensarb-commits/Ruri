@@ -20,7 +20,12 @@ object RawLog {
     private const val INDEX_PATH = "memory/L0_index.json"
     private const val SCHEMA = 1
 
-    /** Types she is allowed to ask for. Anything else is refused rather than silently empty. */
+    /**
+     * Everything she may ask for by name.
+     *
+     * This is the union of both groups below. It exists only for validation; it must NOT be the
+     * default filter, which is [CONVERSATIONAL_TYPES].
+     */
     val READABLE_TYPES = setOf(
         "message", "tool_call", "tool_result", "wake", "emotion_delta",
         "phone_notification", "facts_extracted", "initiative_gate_evaluated",
@@ -28,6 +33,22 @@ object RawLog {
         "eviction_evt", "diary_linked", "claim_challenged", "claim_rejected",
         "thought_lost", "self_description_changed"
     )
+
+    /**
+     * What "the journal" means by default: things that happened to her and to the Commander.
+     *
+     * Eleven of the eighteen readable types are bookkeeping — tool traffic, wakes, gate
+     * evaluations, emotion arithmetic. Defaulting to all of them meant a 30-entry page was
+     * consumed by machinery, and she never saw a single line of the actual conversation.
+     * Technical types stay available on explicit request, because sometimes she needs them.
+     */
+    val CONVERSATIONAL_TYPES = setOf(
+        "message", "phone_notification", "diary_linked", "nsfw_refusal",
+        "claim_challenged", "claim_rejected", "self_description_changed"
+    )
+
+    /** Types that describe machinery rather than life. Requestable, never default. */
+    val TECHNICAL_TYPES = READABLE_TYPES - CONVERSATIONAL_TYPES
 
     /** One decoded journal line plus where it lives in the file. */
     data class Entry(
@@ -59,7 +80,8 @@ object RawLog {
         val target = File(root, "memory/L0_raw.jsonl")
         if (!target.isFile) return emptyList<Entry>() to afterOffset
 
-        val wanted = if (types.isEmpty()) READABLE_TYPES else types.intersect(READABLE_TYPES)
+        // No explicit request means "show me life, not machinery".
+        val wanted = if (types.isEmpty()) CONVERSATIONAL_TYPES else types.intersect(READABLE_TYPES)
         if (wanted.isEmpty()) return emptyList<Entry>() to afterOffset
 
         val out = ArrayList<Entry>()

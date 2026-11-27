@@ -2424,4 +2424,151 @@ class ReflectionResultTest {
         assertTrue("and return it", runner.contains("return result"))
     }
 }
+
+/**
+ * The raw journal window filled up with bookkeeping: 11 of 18 readable types were machinery, so
+ * a 30-entry page never reached the conversation.
+ */
+class RawLogDefaultsTest {
+    @Test fun theDefaultWindowIsLifeNotMachinery() {
+        // The default filter must be the conversational set, not everything readable.
+        assertTrue("a conversational subset must exist", RawLog.CONVERSATIONAL_TYPES.isNotEmpty())
+        assertTrue("messages belong in it", "message" in RawLog.CONVERSATIONAL_TYPES)
+        assertTrue("diary links too", "diary_linked" in RawLog.CONVERSATIONAL_TYPES)
+        for (technical in listOf("tool_call", "tool_result", "wake", "emotion_delta",
+            "eviction_evt", "initiative_gate_evaluated")) {
+            assertFalse("$technical must not be default",
+                technical in RawLog.CONVERSATIONAL_TYPES)
+        }
+    }
+
+    @Test fun technicalTypesStayRequestable() {
+        // She still needs them sometimes; they must be allowed, just not default.
+        assertTrue("tool_call" in RawLog.READABLE_TYPES)
+        assertTrue("wake" in RawLog.READABLE_TYPES)
+        assertTrue(RawLog.TECHNICAL_TYPES.isNotEmpty())
+    }
+
+    @Test fun aTechnicalFloodDoesNotHideTheConversation() {
+        val dir = Files.createTempDirectory("ruri-rawdefaults").toFile().also { FileManager.init(it) }
+        try {
+            val messageId = JSONObject(FileManager.appendEvent(dir, JSONObject()
+                .put("type", "message").put("who", "commander").put("text", "важное сообщение")))
+                .optString("id")
+            // Bury it in technical noise, the way a real day does.
+            repeat(60) {
+                FileManager.appendEvent(dir, JSONObject()
+                    .put("type", "tool_call").put("action", "read_document"))
+                FileManager.appendEvent(dir, JSONObject().put("type", "wake").put("reason", "timer"))
+                FileManager.appendEvent(dir, JSONObject()
+                    .put("type", "emotion_delta").put("delta", JSONObject().put("joy", 1)))
+            }
+            // A default page must still contain the message.
+            val (entries, _) = RawLog.read(dir, limit = 10)
+            assertTrue("the conversation must survive the noise",
+                entries.any { it.id == messageId })
+            assertTrue("and no machinery should appear",
+                entries.none { it.type == "tool_call" || it.type == "wake" })
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun technicalEventsRemainReachableOnRequest() {
+        val dir = Files.createTempDirectory("ruri-rawtech").toFile().also { FileManager.init(it) }
+        try {
+            FileManager.appendEvent(dir, JSONObject().put("type", "tool_call").put("action", "x"))
+            val (entries, _) = RawLog.read(dir, types = setOf("tool_call"))
+            assertEquals(1, entries.size)
+        } finally { dir.deleteRecursively() }
+    }
+}
+
+/** Search must cover the whole corpus, not a fixed recent slice. */
+class FullSearchTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-search").toFile().also {
+        FileManager.init(it)
+    }
+
+    private fun say(root: java.io.File, who: String, text: String) {
+        FileManager.appendEvent(root, JSONObject()
+            .put("type", "message").put("who", who).put("text", text))
+    }
+
+    @Test fun findsConversationScopedToMessages() {
+        val dir = root()
+        try {
+            say(dir, "commander", "я планирую поездку в Токио весной")
+            say(dir, "ruri", "звучит здорово")
+            val out = MemoryRetriever.search(dir, "Токио", MemoryRetriever.SCOPE_MESSAGES)
+            assertTrue("the message must be found", out.contains("Токио"))
+            assertTrue("scope is reported", out.contains("messages"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun scopeFactsExcludesConversation() {
+        val dir = root()
+        try {
+            say(dir, "commander", "я люблю крепкий кофе без сахара")
+            val facts = JSONObject().put("facts", JSONArray().put(JSONObject()
+                .put("id", "f1").put("text", "Командир любит кофе").put("confidence", 0.8)
+                .put("created_at", System.currentTimeMillis()).put("status", "asserted")))
+            FileManager.write(dir, "memory/L1_facts.json", facts.toString(2))
+
+            val onlyFacts = MemoryRetriever.search(dir, "кофе", MemoryRetriever.SCOPE_FACTS)
+            assertTrue("fact found", onlyFacts.contains("Командир любит кофе"))
+            assertFalse("conversation excluded", onlyFacts.contains("без сахара"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun searchReachesOldEventsBeyondThePromptWindow() {
+        val dir = root()
+        try {
+            say(dir, "commander", "запомни: пароль от склада выдаёт Борис")
+            // Bury it under far more history than the prompt ever carries.
+            repeat(400) { say(dir, "commander", "болтовня номер $it") }
+            val out = MemoryRetriever.search(dir, "Борис", MemoryRetriever.SCOPE_MESSAGES)
+            assertTrue("old events must stay searchable", out.contains("Борис"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun rejectedClaimsAreNotSearchableEvidence() {
+        val dir = root()
+        try {
+            val facts = JSONObject().put("facts", JSONArray().put(JSONObject()
+                .put("id", "bad").put("text", "Командир ненавидит кофе")
+                .put("status", "rejected").put("created_at", System.currentTimeMillis())))
+            FileManager.write(dir, "memory/L1_facts.json", facts.toString(2))
+            val out = MemoryRetriever.search(dir, "кофе", MemoryRetriever.SCOPE_FACTS)
+            assertFalse("a rejected claim must not resurface as evidence",
+                out.contains("ненавидит"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun theResultLimitIsGenerous() {
+        val dir = root()
+        try {
+            repeat(40) { say(dir, "commander", "поездка в Токио вариант $it") }
+            val out = MemoryRetriever.search(dir, "Токио", MemoryRetriever.SCOPE_MESSAGES, limit = 30)
+            val lines = out.lines().count { it.startsWith("- [") }
+            assertTrue("must return more than the old five", lines > 5)
+            assertTrue("but respect the requested limit", lines <= 30)
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun recallAndSearchShareOneRanking() {
+        val reader = RepoSources.text("app/src/main/java/com/ruri/MemoryRetriever.kt")
+        // Two copies of the scoring logic drifted apart before; recall now delegates.
+        assertTrue("recall must reuse collect", reader.contains("val hits = collect(root, query, SCOPE_ALL)"))
+        assertTrue("search must exist", reader.contains("fun search("))
+    }
+
+    @Test fun sheIsToldAboutSearchAndScopes() {
+        val style = ChatStyle.memorySelfServiceSection()
+        assertTrue("search advertised", style.contains("recall"))
+        for (scope in listOf("messages", "facts", "diary", "notes")) {
+            assertTrue("scope advertised: $scope", style.contains(scope))
+        }
+        assertTrue("and the default journal excludes machinery",
+            style.contains("НЕ попадают"))
+    }
+}
 }
