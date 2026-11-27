@@ -139,7 +139,7 @@ object FactExtractor {
         }
 
         val candidates = parsed.optJSONArray("facts") ?: JSONArray()
-        val applied = applyCandidates(facts, candidates, commanderIds, usedModel, now)
+        val applied = applyCandidates(facts, candidates, commanderIds, usedModel, now, root)
         val added = applied.added
         val updated = applied.updated
 
@@ -173,7 +173,8 @@ object FactExtractor {
         candidates: JSONArray,
         commanderIds: Set<String>,
         sourceModel: String,
-        now: Long
+        now: Long,
+        root: java.io.File? = null
     ): ApplyResult {
         var added = 0
         var updated = 0
@@ -216,7 +217,8 @@ object FactExtractor {
                 updated++
             } else {
                 // A full store no longer silently drops the new claim: the weakest entry goes.
-                if (facts.length() >= ReflectionPass.FACT_CAP) {
+                // The root is needed so the eviction can be journaled.
+                if (facts.length() >= ReflectionPass.FACT_CAP && root != null) {
                     MemoryWeight.makeRoom(
                         root, "L1", facts, ReflectionPass.FACT_CAP,
                         "pending-" + UUID.randomUUID().toString()

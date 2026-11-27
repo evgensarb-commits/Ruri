@@ -23,7 +23,7 @@ object ReflectionRunner {
         }.getOrDefault(0L)
         if (last > 0L && now - last < DUE_INTERVAL_MS) return false
         // Nothing new to read means nothing to do; this avoids a pointless model call.
-        return RawLog.cursor(root) < RawLog.sizeBytes(root)
+        return ReflectionPass.cursor(root) < RawLog.sizeBytes(root)
     }
 
     fun runIfDue(context: Context) {
