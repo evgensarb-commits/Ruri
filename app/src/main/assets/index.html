@@ -109,6 +109,11 @@ button,input,select,textarea{font-family:inherit}
 .meta>*+*{margin-left:6px}
 .tick{color:var(--accent);letter-spacing:-.12em}
 .tick.read{color:#8ee6a8}
+/* Copy sits next to delete; both are quiet until the bubble is touched. */
+.copy{background:none;border:0;color:var(--text-dim);font:inherit;font-size:13px;line-height:1;
+  padding:2px 4px;margin:0 2px;cursor:pointer;opacity:.55;transition:opacity .15s,color .15s}
+.copy:hover,.copy:active{opacity:1;color:var(--text)}
+.copy.copied{opacity:1;color:var(--good,#7ee787)}
 .del{width:20px;height:20px;display:flex;align-items:center;justify-content:center;border:1px solid var(--line);background:var(--panel);color:var(--text-2);border-radius:50%;font:600 13px/1 var(--mono);opacity:0;pointer-events:none;transform:scale(.85);-webkit-tap-highlight-color:transparent;transition:opacity .18s ease,transform .12s ease,background .2s ease,color .2s ease,border-color .2s ease}
 .msg.sel .del{opacity:1;pointer-events:auto;transform:scale(1)}
 .del:active{transform:scale(.9);color:var(--bad);border-color:rgba(248,113,113,.5)}
@@ -707,6 +712,8 @@ function renderChat(animateAll, forceBottom){
     html += '<div class="msg ' + (mine ? 'mine' : 'her') + (isNew ? ' rise' : '') + '" data-mid="' + esc(ev.id || '') + '">'
       + '<div class="bubble">' + esc(ev.text) + '</div>'
       + '<div class="meta"><span class="time">' + timeOf(ev.ts) + '</span>' + ticks
+      // Copy first: it is the action used most often, and on her messages it is the only one.
+      + '<button class="copy" type="button" data-action="copy" data-index="' + i + '" aria-label="Скопировать сообщение">⧉</button>'
       + (ev.id ? '<button class="del" type="button" data-action="delete" aria-label="Удалить сообщение">×</button>' : '')
       + '</div></div>';
   }
@@ -947,6 +954,46 @@ function msgNodeFrom(target){
     guard++;
   }
   return null;
+}
+
+/* Copy one message to the clipboard. Text is read from the state, not the DOM, so the
+   escaped bubble markup cannot leak into the copied text. */
+function copyMessage(index){
+  var pos = Number(index);
+  if(!isFinite(pos) || pos < 0) return;
+  var events = chatState.events || [];
+  var ev = events[pos];
+  if(!ev || !ev.text) return;
+  var text = String(ev.text);
+  var done = function(ok){
+    if(ok) flashCopied(pos);
+    else {
+      // The bridge writes to the system clipboard directly; this covers the case when the
+      // WebView has no promise-based clipboard API.
+      var fallback = call('copyText', [text], 'ERROR');
+      flashCopied(!isErr(fallback));
+    }
+  };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(function(){ done(true); },
+      function(){ done(false); });
+  } else {
+    done(false);
+  }
+}
+
+function flashCopied(index){
+  var list = $('messages');
+  if(!list) return;
+  var node = list.querySelector('[data-action="copy"][data-index="' + index + '"]');
+  if(!node) return;
+  var previous = node.textContent;
+  node.textContent = '✓';
+  node.classList.add('copied');
+  setTimeout(function(){
+    node.textContent = previous;
+    node.classList.remove('copied');
+  }, 1100);
 }
 
 function deleteMessage(node){
@@ -2160,6 +2207,10 @@ function bindEvents(){
         var action = target.getAttribute('data-action');
         if(action === 'delete'){
           deleteMessage(msgNodeFrom(target));
+          return;
+        }
+        if(action === 'copy'){
+          copyMessage(target.getAttribute('data-index'));
           return;
         }
         if(action === 'retry'){

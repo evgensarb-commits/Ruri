@@ -1893,4 +1893,73 @@ class ToolLoopRobustnessTest {
         assertTrue(loop.contains("leftover.isNotEmpty() && hops >= MAX_TOOL_HOPS"))
     }
 }
+
+/**
+ * DOCX reported "0 pages": the XML hardening threw on Android and the whole parse was lost.
+ */
+class OfficeExtractionTest {
+    @Test fun hardeningMustNotAbortTheParse() {
+        val reader = RepoSources.text("app/src/main/java/com/ruri/DocReader.kt")
+        val block = reader.substringAfter("internal fun readZipXml(")
+            .substringBefore("internal fun embeddedImages(")
+        // Android's default parser rejects setXIncludeAware, and a bare setFeature can throw
+        // UnsupportedOperationException. One shared runCatching swallowed the whole extraction,
+        // so every DOCX looked empty.
+        assertTrue("features must be applied defensively", block.contains("fun tryFeature("))
+        assertTrue("xinclude must be guarded too", block.contains("runCatching { factory.isXIncludeAware = false }"))
+    }
+
+    @Test fun aDocumentWithoutThePrefixStillYieldsText() {
+        val reader = RepoSources.text("app/src/main/java/com/ruri/DocReader.kt")
+        val block = reader.substringAfter("internal fun readZipXml(")
+            .substringBefore("internal fun embeddedImages(")
+        // Not every producer writes the "w:" prefix; matching only "w:p" returned nothing.
+        assertTrue("needs a local-name fallback", block.contains("localName"))
+        assertTrue(block.contains("if (text.isBlank())"))
+    }
+
+    @Test fun theZeroPageMessageIsExplained() {
+        val reader = RepoSources.text("app/src/main/java/com/ruri/DocReader.kt")
+        // An empty result must say why, not silently return "" and become "0 pages".
+        assertTrue(reader.contains("не нашлось читаемого текста"))
+    }
+}
+
+/**
+ * Copy button next to each message, so her answers can be shared as text.
+ */
+class MessageCopyTest {
+    @Test fun everyMessageCarriesACopyControl() {
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        assertTrue("copy control needed", html.contains("data-action=\"copy\""))
+        assertTrue("and its handler", html.contains("function copyMessage("))
+        assertTrue("dispatched from the list", html.contains("action === 'copy'"))
+    }
+
+    @Test fun theTextComesFromStateNotFromMarkup() {
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        val fn = html.substringAfter("function copyMessage(").substringBefore("function flashCopied(")
+        // Reading textContent from the bubble would copy escaped entities.
+        assertTrue(fn.contains("chatState.events"))
+        assertFalse(fn.contains("textContent"))
+    }
+
+    @Test fun theClipboardIsReachableThroughTheBridge() {
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        // navigator.clipboard is not reliably available in a file:// WebView, so the native
+        // clipboard is the dependable path.
+        assertTrue(activity.contains("fun copyText("))
+        assertTrue(activity.contains("ClipboardManager"))
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        assertTrue(html.contains("call('copyText'"))
+    }
+
+    @Test fun copyingDoesNotDisturbTheMessageList() {
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        val fn = html.substringAfter("function copyMessage(").substringBefore("function flashCopied(")
+        // A re-render would drop the scroll position and the animation state.
+        assertFalse(fn.contains("renderChat("))
+        assertFalse(fn.contains("refreshChat("))
+    }
+}
 }

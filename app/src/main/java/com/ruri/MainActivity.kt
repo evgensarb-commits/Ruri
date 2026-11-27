@@ -433,6 +433,21 @@ class MainActivity : AppCompatActivity() {
         fun roleplayMode(): Boolean = ChatStyle.roleplayEnabled(filesDir)
 
         /** Commander-set completion cap. 0 keeps the per-mode default. */
+        /** Copies text to the system clipboard; the WebView clipboard API is unavailable here. */
+        @JavascriptInterface
+        fun copyText(text: String): String {
+            return try {
+                require(text.isNotBlank()) { "Пустой текст" }
+                val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                    as android.content.ClipboardManager
+                clipboard.setPrimaryClip(
+                    android.content.ClipData.newPlainText("Рури", text)
+                )
+                // Android 13+ shows its own copy confirmation, so a toast here would duplicate it.
+                "OK"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "clipboard failed") }
+        }
+
         @JavascriptInterface
         fun tokenLimit(): Int = ChatStyle.manualTokenLimit(filesDir)
 
