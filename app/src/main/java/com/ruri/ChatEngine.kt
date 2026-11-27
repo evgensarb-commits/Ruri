@@ -411,7 +411,28 @@ object ChatEngine {
         val (cleaned, diaryAgain, leftover) = ToolLoop.stripActions(current)
         diaryAgain.forEach { routeChatDiaryAction(root, it, emotion) }
         if (leftover.isNotEmpty() && hops >= MAX_TOOL_HOPS) {
-            return "Не удалось завершить цепочку действий: достигнут лимит $MAX_TOOL_HOPS вызовов."
+            // Returning a bare error threw away everything she had already gathered. Ask the
+            // model once more, this time with an explicit instruction to answer from what it
+            // has: partial truth is worth far more to the Commander than a system message.
+            val closing = runCatching {
+                val finalMessages = JSONArray(messages.toString())
+                finalMessages.put(JSONObject().put("role", "user").put("content",
+                    "ЛИМИТ ДЕЙСТВИЙ ИСЧЕРПАН: больше инструментов вызвать нельзя. " +
+                    "Ответь сейчас, обычной прозой, используя то, что уже собрано выше. " +
+                    "Если чего-то не хватило — прямо скажи, что именно осталось непроверенным. " +
+                    "Не возвращай JSON."
+                ))
+                requestToolFollowup(
+                    model = JSONObject().put("api_key", Route.apiKey(root)),
+                    messages = finalMessages,
+                    root = root,
+                    routeId = Route.providerId(root),
+                    task = Task.CHAT,
+                    maxTokens = ChatStyle.replyBudget(root, currentCommanderText(root))
+                )
+            }.getOrNull()
+            val salvaged = closing?.let { ToolLoop.stripActions(it).first.trim() }.orEmpty()
+            if (salvaged.isNotBlank()) return salvaged
         }
         return resolveChatReply(cleaned, diaryAgain.firstOrNull().orEmpty())
     }
@@ -774,7 +795,7 @@ object ChatEngine {
                 if (scope.isNotBlank() && scope.lowercase() !in setOf(
                         MemoryRetriever.SCOPE_ALL, MemoryRetriever.SCOPE_MESSAGES,
                         MemoryRetriever.SCOPE_FACTS, MemoryRetriever.SCOPE_DIARY,
-                        MemoryRetriever.SCOPE_NOTES
+                        MemoryRetriever.SCOPE_NOTES, MemoryRetriever.SCOPE_SELF
                     )) return null
             }
             "remember_fact" -> if (action.optString("text").trim().length !in 5..300) return null
