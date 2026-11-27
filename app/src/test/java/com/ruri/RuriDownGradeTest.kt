@@ -3683,4 +3683,78 @@ class InterfaceRepairTest {
             reader.contains("re-check the host immediately before the connection"))
     }
 }
+
+/**
+ * Regression for a hang: the cursor must advance past the terminator, and must not assume one.
+ *
+ * Reading the terminator sequentially (readLine has already consumed it) made the advance wrong
+ * on every line, so the loop never moved and the unit-test job spun until it was cancelled.
+ */
+class JournalCursorTerminationTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-cursor").toFile().also {
+        FileManager.init(it)
+    }
+
+    @Test fun anUnterminatedLastLineDoesNotSpin() {
+        val dir = root()
+        try {
+            // The shape a journal has while an append is in flight: the last line has no newline,
+            // and RandomAccessFile.readLine returns it anyway.
+            val file = java.io.File(dir, "memory/L0_raw.jsonl")
+            file.parentFile?.mkdirs()
+            file.writeText(
+                "{\"id\":\"a\",\"type\":\"message\",\"who\":\"commander\",\"text\":\"один\"}\n" +
+                    "{\"id\":\"b\",\"type\":\"message\",\"who\":\"commander\",\"text\":\"два\"}"
+            )
+
+            val (entries, cursor) = RawLog.read(dir, afterOffset = 0L, limit = 10)
+            assertEquals("both lines must be returned", 2, entries.size)
+            assertTrue("the cursor may not pass the end", cursor <= file.length())
+
+            // And reading again from there must terminate immediately.
+            val (again, cursor2) = RawLog.read(dir, afterOffset = cursor, limit = 10)
+            assertTrue("nothing left to read", again.isEmpty())
+            assertEquals(cursor, cursor2)
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun carriageReturnLinesAreConsumedInOneStep() {
+        val dir = root()
+        try {
+            val file = java.io.File(dir, "memory/L0_raw.jsonl")
+            file.parentFile?.mkdirs()
+            // CRLF endings, written whole: every line must be read exactly once.
+            file.writeText(
+                "{\"id\":\"a\",\"type\":\"message\",\"who\":\"commander\",\"text\":\"один\"}\r\n" +
+                    "{\"id\":\"b\",\"type\":\"message\",\"who\":\"commander\",\"text\":\"два\"}\r\n"
+            )
+            val (entries, _) = RawLog.read(dir, afterOffset = 0L, limit = 10)
+            assertEquals(2, entries.size)
+            assertEquals(listOf("a", "b"), entries.map { it.id })
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun pagingStaysConsistentAcrossManyLines() {
+        val dir = root()
+        try {
+            repeat(20) { i ->
+                FileManager.appendEvent(dir, JSONObject()
+                    .put("type", "message").put("who", "commander").put("text", "строка $i"))
+            }
+            val seen = ArrayList<String>()
+            var cursor = 0L
+            var guard = 0
+            while (guard < 50) {
+                val (page, next) = RawLog.read(dir, afterOffset = cursor, limit = 3)
+                if (page.isEmpty()) break
+                seen.addAll(page.map { it.id })
+                assertTrue("the cursor must advance", next > cursor)
+                cursor = next
+                guard++
+            }
+            assertEquals("every line exactly once", 20, seen.size)
+            assertEquals("no duplicates", 20, seen.distinct().size)
+        } finally { dir.deleteRecursively() }
+    }
+}
 }
