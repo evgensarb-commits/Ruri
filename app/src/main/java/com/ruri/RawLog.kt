@@ -97,13 +97,28 @@ object RawLog {
                     // readLine() decodes as ISO-8859-1; the journal is UTF-8, so re-read the
                     // exact byte range and decode it properly. Cyrillic would be mojibake otherwise.
                     val lineLength = raw.toByteArray(Charsets.ISO_8859_1).size
-                    // Advance past the newline only if there is one. Assuming it meant a torn
-                    // read (an append in flight, so the last line has no terminator yet) pushed
-                    // the cursor past EOF; the next call then saw cursor > length and restarted
-                    // from the beginning of the journal.
-                    val terminated = lineStart + lineLength < length &&
-                        raf.read() == '\n'.code
-                    cursor = if (terminated) lineStart + lineLength + 1L else lineStart + lineLength
+                    // Advance past the terminator, but only when one is actually there:
+                    // readLine() has already consumed it, so the byte is checked at its exact
+                    // offset. Assuming a newline pushed the cursor past EOF on a torn read (an
+                    // append in flight), and the next call then saw cursor > length and restarted
+                    // from the beginning of the journal. Never advancing would loop forever, so
+                    // the terminator length is measured rather than guessed.
+                    val endOfLine = lineStart + lineLength
+                    var terminator = 0
+                    if (endOfLine < length) {
+                        raf.seek(endOfLine)
+                        val first = raf.read()
+                        if (first == '\n'.code) {
+                            terminator = 1
+                        } else if (first == '\r'.code) {
+                            terminator = 1
+                            if (endOfLine + 1 < length) {
+                                raf.seek(endOfLine + 1)
+                                if (raf.read() == '\n'.code) terminator = 2
+                            }
+                        }
+                    }
+                    cursor = endOfLine + terminator
                     nextCursor = cursor
                     if (lineStart >= length) break
 
