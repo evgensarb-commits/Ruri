@@ -2012,7 +2012,11 @@ function uploadImage(file){
       }
       var text = '[изображение ' + String(data.name || file.name) + '] ' + String(data.text || '');
       var id = 'm' + Date.now() + Math.random().toString(36).slice(2, 10);
-      appendLog({ type: 'message', who: 'commander', text: text, id: id });
+      // appendLog() never existed: attaching an image threw ReferenceError every time and the
+      // description was never stored, so the turn never started.
+      var payload = JSON.stringify({ type: 'message', who: 'commander', text: text, id: id });
+      var saved = call('appendEvent', [payload], 'ERROR');
+      if(isErr(saved)){ alert('Изображение не сохранено: ' + errText(saved)); return; }
       var sent = call('completeChat', ['auto', id], 'ERROR');
       if(isErr(sent)) alert(errText(sent));
       refreshChat(false, true);

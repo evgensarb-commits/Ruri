@@ -3177,4 +3177,182 @@ class AlwaysWorkingTest {
             engine.contains("без JSON-объектов инструментов. \" +"))
     }
 }
+
+/** Batch 2: two dead features, journal protection, no silent wipe. */
+class BrokenFeatureRepairTest {
+    @Test fun imageAttachmentUsesTheRealBridge() {
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        val fn = html.substringAfter("function uploadImage(file){").substringBefore("function ")
+        // appendLog() does not exist; calling it threw ReferenceError on every attachment.
+        assertFalse("the phantom function must be gone", fn.contains("appendLog("))
+        assertTrue("it must write through the bridge", fn.contains("call('appendEvent'"))
+        assertTrue("and report a failure instead of failing silently", fn.contains("alert("))
+    }
+
+    @Test fun exportWritesWhereFileProviderCanServeIt() {
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        val exports = activity.substringAfter("fun exportArchive(")
+            .substringBefore("runOnUiThread")
+        // cacheDir is not a published root, so getUriForFile threw and export never worked.
+        assertFalse("must not write into cacheDir", exports.contains("File(cacheDir"))
+        assertTrue("must write under files/backup/exports", exports.contains("File(filesDir, \"backup/exports\")"))
+        val paths = RepoSources.text("app/src/main/res/xml/filepaths.xml")
+        assertTrue("and the provider must publish exactly that path",
+            paths.contains("path=\"backup/exports/\""))
+    }
+
+    @Test fun anArchiveWithoutTheJournalIsRefused() {
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        val import = activity.substringAfter("fun importArchive(").substringBefore("fun exportArchive(")
+        // Restore deletes live memory files the archive lacks, so a missing L0 means data loss.
+        assertTrue("L0 must be required", import.contains("archive.has(\"memory/L0_raw.jsonl\")"))
+        assertTrue("with an explanation", import.contains("не принимается"))
+    }
+}
+
+/** The append-only journal must be unreachable by every route, including path aliases. */
+class JournalProtectionTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-l0guard").toFile().also {
+        FileManager.init(it)
+    }
+
+    @Test fun noAliasCanRewriteTheJournal() {
+        val dir = root()
+        try {
+            FileManager.appendEvent(dir, JSONObject()
+                .put("type", "message").put("who", "commander").put("text", "живое событие"))
+            val before = java.io.File(dir, "memory/L0_raw.jsonl").readText()
+
+            // Each of these normalises onto the real journal.
+            for (alias in listOf(
+                "memory/L0_raw.jsonl",
+                "memory//L0_raw.jsonl",
+                "memory/./L0_raw.jsonl",
+                "./memory/L0_raw.jsonl"
+            )) {
+                val threw = runCatching { FileManager.write(dir, alias, "") }.isFailure
+                assertTrue("write via [$alias] must be refused", threw)
+            }
+
+            val after = java.io.File(dir, "memory/L0_raw.jsonl").readText()
+            assertEquals("the journal must be untouched", before, after)
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun apiKeysStillCannotBeWrittenThroughTheGenericPath() {
+        val dir = root()
+        try {
+            val threw = runCatching {
+                FileManager.write(dir, "core/config.json",
+                    JSONObject().put("models", JSONArray().put(JSONObject().put("api_key", "secret"))).toString())
+            }.isFailure
+            assertTrue("keys must go through SecretStore", threw)
+        } finally { dir.deleteRecursively() }
+    }
+}
+
+/** A failed read must never turn into a smaller memory. */
+class NoSilentMemoryWipeTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-nowipe").toFile().also {
+        FileManager.init(it)
+    }
+
+    @Test fun anUnreadableL1IsNotReplacedByOneFact() {
+        val dir = root()
+        try {
+            val garbage = "{ this is not json"
+            FileManager.write(dir, "memory/L1_facts.json", garbage)
+
+            val stored = ReflectionPass.store(dir, JSONObject()
+                .put("text", "Командир любит чай")
+                .put("source_ids", JSONArray()))
+            assertFalse("the write must be refused", stored)
+            assertEquals("L1 must survive verbatim",
+                garbage, FileManager.read(dir, "memory/L1_facts.json"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun anUnreadableL2IsNotReplacedByOneEntry() {
+        val dir = root()
+        try {
+            val garbage = "[not json at all"
+            FileManager.write(dir, "memory/L2_diary.json", garbage)
+
+            Diary.append(dir, "новая мысль про день", "test", null, "thought")
+            assertEquals("L2 must survive verbatim",
+                garbage, FileManager.read(dir, "memory/L2_diary.json"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun aBlankStoreIsStillWritable() {
+        val dir = root()
+        try {
+            // A fresh install has an empty-but-valid file and must keep working.
+            FileManager.write(dir, "memory/L1_facts.json", "")
+            val stored = ReflectionPass.store(dir, JSONObject()
+                .put("text", "Командир любит чай")
+                .put("source_ids", JSONArray()))
+            assertTrue("an empty store is not corruption", stored)
+        } finally { dir.deleteRecursively() }
+    }
+}
+
+/** Extraction must recover after one transient failure, and provenance must stay honest. */
+class ExtractionRecoveryTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-extract").toFile().also {
+        FileManager.init(it)
+    }
+
+    @Test fun aSuccessfulBatchClearsTheFailureFlag() {
+        val extractor = RepoSources.text("app/src/main/java/com/ruri/FactExtractor.kt")
+        val success = extractor.substringAfter("private fun finishSuccessfulBatch(")
+            .substringBefore("private fun recordAttempt(")
+        // Without this the cooldown applied forever after a single provider error.
+        assertTrue("the flag must be cleared on success",
+            success.contains("\"last_extraction_failed\", false"))
+    }
+
+    @Test fun autoExtractedFactsCarryAStatus() {
+        val extractor = RepoSources.text("app/src/main/java/com/ruri/FactExtractor.kt")
+        assertTrue("status must be recorded", extractor.contains("Provenance.statusFor(verified)"))
+        assertTrue("evidence must be verified against the journal",
+            extractor.contains("Provenance.verifiedSources(root, cited)"))
+    }
+
+    @Test fun reDerivingARejectedClaimDoesNotRefreshIt() {
+        val extractor = RepoSources.text("app/src/main/java/com/ruri/FactExtractor.kt")
+        val merge = extractor.substringAfter("if (existing != null) {")
+            .substringBefore("} else {")
+        assertTrue("rejected and challenged claims must be skipped",
+            merge.contains("\"rejected\"") && merge.contains("\"challenged\""))
+    }
+}
+
+/** Weight must reflect status, or dead claims crowd out live memory. */
+class WeightRespectsStatusTest {
+    @Test fun aRejectedClaimWeighsNothing() {
+        val now = System.currentTimeMillis()
+        val live = MemoryWeight.weight(now, now, confirmations = 3, origin = "commander",
+            status = "asserted", now = now)
+        val dead = MemoryWeight.weight(now, now, confirmations = 3, origin = "commander",
+            status = "rejected", now = now)
+        assertEquals("rejected memory must weigh nothing", 0.0, dead, 0.000001)
+        assertTrue(live > 0.0)
+    }
+
+    @Test fun aChallengedClaimWeighsLessThanAConfirmedOne() {
+        val now = System.currentTimeMillis()
+        val asserted = MemoryWeight.weight(now, now, 2, "commander", "asserted", now)
+        val challenged = MemoryWeight.weight(now, now, 2, "commander", "challenged", now)
+        assertTrue("a disputed claim must yield to a live one", challenged < asserted)
+    }
+
+    @Test fun theOrdinaryCaseIsUnchanged() {
+        val now = System.currentTimeMillis()
+        val withStatus = MemoryWeight.weight(now, now, 1, "commander", "asserted", now)
+        val withoutStatus = MemoryWeight.weight(now, now, 1, "commander", now = now)
+        // The default must match, so existing call sites keep their behaviour.
+        assertEquals(withStatus, withoutStatus, 0.000001)
+    }
+}
 }

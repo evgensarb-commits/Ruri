@@ -14,6 +14,20 @@ import java.util.concurrent.TimeUnit
  */
 object MemoryWeight {
 
+    /**
+     * A rejected claim is worthless, and a challenged one is not evidence.
+     *
+     * Without this, re-deriving a rejected claim refreshed its `last_confirmed_at`, so it grew
+     * heavier over time and evicted live memories at the cap — dead weight crowding out real
+     * memory.
+     */
+    private fun statusFactor(status: String): Double = when (status) {
+        "rejected" -> 0.0
+        "challenged" -> 0.15
+        "assumption" -> 0.5
+        else -> 1.0
+    }
+
     /** How much a source counts. A spoken message is stronger evidence than a silent thought. */
     private fun sourceFactor(origin: String): Double = when {
         origin.startsWith("commander") || origin == "self_reported" -> 1.0
@@ -34,6 +48,7 @@ object MemoryWeight {
         lastConfirmedAt: Long,
         confirmations: Int,
         origin: String,
+        status: String = "asserted",
         now: Long = System.currentTimeMillis()
     ): Double {
         val reference = if (lastConfirmedAt > 0L) lastConfirmedAt else createdAt
@@ -41,7 +56,7 @@ object MemoryWeight {
         else ((now - reference).coerceAtLeast(0L).toDouble() / TimeUnit.DAYS.toMillis(1))
         val freshness = Math.pow(0.5, ageDays / HALF_LIFE_DAYS)
         val confirmation = (1.0 + Math.log1p(confirmations.coerceAtLeast(0).toDouble()))
-        return freshness * confirmation * sourceFactor(origin)
+        return freshness * confirmation * sourceFactor(origin) * statusFactor(status)
     }
 
     fun weightOf(item: JSONObject, now: Long = System.currentTimeMillis()): Double = weight(
@@ -49,6 +64,7 @@ object MemoryWeight {
         lastConfirmedAt = item.optLong("last_confirmed_at", 0L),
         confirmations = item.optInt("confirmations", 1),
         origin = item.optString("origin", "unknown"),
+        status = item.optString("status", "asserted"),
         now = now
     )
 

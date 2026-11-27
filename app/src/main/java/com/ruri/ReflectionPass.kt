@@ -126,7 +126,11 @@ object ReflectionPass {
         val verified = Provenance.verifiedSources(root, rawSources)
         val origin = if (verified.isEmpty()) "assumption" else candidate.optString("origin", "reflection")
 
-        val facts = readFacts(root)
+        val facts = readFactsStrict(root) ?: run {
+            // L1 is unreadable; refuse to write rather than replace it with one entry.
+            android.util.Log.w("Ruri", "L1 unreadable; reflection write skipped to protect memory")
+            return false
+        }
         // Duplicate: strengthen the existing claim instead of storing a twin.
         for (i in 0 until facts.length()) {
             val existing = facts.optJSONObject(i) ?: continue
@@ -168,15 +172,36 @@ object ReflectionPass {
         }
     }
 
-    private fun readFacts(root: File): JSONArray {
-        val file = runCatching { JSONObject(FileManager.read(root, "memory/L1_facts.json")) }
-            .getOrElse { JSONObject() }
-        return file.optJSONArray("facts") ?: JSONArray().also { file.put("facts", it) }
+    /**
+     * Reads L1, refusing to pretend it is empty.
+     *
+     * Returning an empty object on a failed read meant the next write replaced the whole fact
+     * store with a single entry: one bad read and her memory of facts was gone. A blank file is
+     * fine (fresh install); a non-blank file that will not parse is an error the caller must not
+     * paper over.
+     */
+    internal fun readFactsStrict(root: File): JSONArray? {
+        val raw = FileManager.read(root, "memory/L1_facts.json")
+        if (raw.isBlank()) return JSONArray()
+        val file = runCatching { JSONObject(raw) }.getOrNull() ?: run {
+            preserveUnreadable(root, "memory/L1_facts.json", raw)
+            return null
+        }
+        return file.optJSONArray("facts") ?: JSONArray()
+    }
+
+    private fun preserveUnreadable(root: File, path: String, raw: String) {
+        runCatching {
+            val name = path.substringAfterLast('/')
+            FileManager.write(root, "backup/unreadable_${System.currentTimeMillis()}_$name", raw)
+        }
     }
 
     private fun writeFacts(root: File, facts: JSONArray) {
-        val file = runCatching { JSONObject(FileManager.read(root, "memory/L1_facts.json")) }
-            .getOrElse { JSONObject() }
+        val raw = FileManager.read(root, "memory/L1_facts.json")
+        val file = if (raw.isBlank()) JSONObject() else {
+            runCatching { JSONObject(raw) }.getOrNull() ?: return
+        }
         file.put("facts", facts)
         file.put("updated_at", System.currentTimeMillis())
         FileManager.write(root, "memory/L1_facts.json", file.toString(2))

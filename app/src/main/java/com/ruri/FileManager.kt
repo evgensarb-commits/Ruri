@@ -428,7 +428,15 @@ object FileManager {
 
     fun write(root: File, path: String, content: String) {
         val normalized = path.replace('\\', '/').trimStart('/')
-        require(normalized != L0_PATH) { "L0 is append-only; use appendEvent or explicit archive restore" }
+        // Compare resolved files, not strings: "memory//L0_raw.jsonl" and "memory/./L0_raw.jsonl"
+        // pass a string check and then canonicalise onto the real journal, which let an import
+        // replace the one file that must never be rewritten.
+        val isL0 = runCatching {
+            val target = safe(root, normalized)
+            val journal = safe(root, L0_PATH)
+            target != null && journal != null && target.canonicalPath == journal.canonicalPath
+        }.getOrDefault(false)
+        require(!isL0) { "L0 is append-only; use appendEvent or explicit archive restore" }
         if (normalized == CONFIG_PATH) {
             val json = JSONObject(content)
             val models = json.optJSONArray("models")

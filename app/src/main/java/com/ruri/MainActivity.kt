@@ -927,6 +927,12 @@ class MainActivity : AppCompatActivity() {
         fun importArchive(json: String): String {
             return try {
                 val archive = JSONObject(json)
+                // An archive that does not carry the journal must never be imported: restore
+                // deletes live memory files that the archive lacks, so "no L0 in the archive"
+                // would have meant "delete the journal".
+                require(archive.has("memory/L0_raw.jsonl")) {
+                    "В архиве нет журнала L0 — такой архив не принимается"
+                }
                 LocalBackupManager.createSnapshot(filesDir)
                 val allowedRoots = listOf("core/", "memory/")
                 val keys = archive.keys()
@@ -949,7 +955,10 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun exportArchive(json: String): String {
             return try {
-                val directory = File(cacheDir, "exports")
+                // Must live under the path FileProvider actually publishes
+                // (res/xml/filepaths.xml: files-path backup/exports/). Writing to cacheDir made
+                // getUriForFile throw, so memory export failed on every attempt.
+                val directory = File(filesDir, "backup/exports")
                 if (!directory.exists()) directory.mkdirs()
                 val archive = File(directory, "ruri_backup_" + System.currentTimeMillis() + ".json")
                 archive.writeText(json, Charsets.UTF_8)
