@@ -205,6 +205,16 @@ object FactExtractor {
             if (validEvidence.length() == 0) continue
             if (!explicit && validEvidence.length() < 2) continue
 
+            // Verify against the journal itself. This path used to trust ids taken from the
+            // retained in-memory window, so after an L0 restore a fact could cite events that no
+            // longer exist — provenance that proves nothing, in the one writer that skipped it.
+            val cited = ArrayList<String>()
+            for (evidenceIndex in 0 until validEvidence.length()) {
+                cited.add(validEvidence.optString(evidenceIndex))
+            }
+            val verified = if (root != null) Provenance.verifiedSources(root, cited) else cited
+            if (verified.isEmpty()) continue
+
             val normalized = normalize(text)
             var existing: JSONObject? = null
             for (factIndex in 0 until facts.length()) {
@@ -216,11 +226,16 @@ object FactExtractor {
             }
 
             if (existing != null) {
+                // Re-deriving a claim the Commander rejected must not make it fresher: weight
+                // rises with `last_confirmed_at`, so refreshing it would let dead claims evict
+                // live memory.
+                val existingStatus = existing.optString("status", "asserted")
+                if (existingStatus == "rejected" || existingStatus == "challenged") continue
                 existing.put("confidence", maxOf(existing.optDouble("confidence", 0.0), confidence))
                 existing.put("updated_at", now)
                 existing.put("last_confirmed_at", now)
                 existing.put("explicit", existing.optBoolean("explicit", false) || explicit)
-                existing.put("source_event_ids", mergeIds(existing.optJSONArray("source_event_ids"), validEvidence))
+                existing.put("source_event_ids", mergeIds(existing.optJSONArray("source_event_ids"), JSONArray(verified)))
                 if (existing.optString("source_model").isBlank()) existing.put("source_model", sourceModel)
                 updated++
             } else {
@@ -239,8 +254,12 @@ object FactExtractor {
                         .put("category", candidate.optString("category", "general").take(40))
                         .put("confidence", confidence)
                         .put("explicit", explicit)
-                        .put("source_event_ids", validEvidence)
+                        .put("source_event_ids", JSONArray(verified))
                         .put("origin", "automatic_extraction")
+                        // Every other writer records provenance status; without it these facts were
+                        // indistinguishable from confirmed ones to any consumer filtering on it.
+                        .put("status", Provenance.statusFor(verified))
+                        .put("confirmations", if (verified.isEmpty()) 0 else 1)
                         .put("sensitivity", candidate.optString("sensitivity", "personal_context").take(40))
                         .put("created_at", now)
                         .put("updated_at", now)
@@ -265,6 +284,9 @@ object FactExtractor {
     ) {
         FileManager.updateL4State(root) { latest ->
             latest.put("last_fact_extraction_attempt_at", now)
+                // Clear the failure flag: the cooldown is meant for a broken provider, and
+                // without this one transient error throttled extraction for good.
+                .put("last_extraction_failed", false)
                 .put("last_fact_extraction_ts", latestCommander.optLong("timestamp", latestCommander.optLong("ts", now)))
                 .put("last_fact_extraction_event_id", latestCommander.optString("id"))
                 .put("last_fact_extraction_offset", scanOffset)

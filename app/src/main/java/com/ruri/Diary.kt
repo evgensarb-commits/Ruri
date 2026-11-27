@@ -37,8 +37,23 @@ object Diary {
         if (kind != "thought" && !(kind == "said" && mirrorSaid)) return
         val t = SecretRedactor.redactText(text.trim())
         if (t.isBlank() || isDuplicate(root, t, kind)) return
-        val d = runCatching { JSONObject(FileManager.read(root, "memory/L2_diary.json")) }
-            .getOrElse { JSONObject().put("entries", JSONArray()) }
+        val raw = FileManager.read(root, "memory/L2_diary.json")
+        val d = if (raw.isBlank()) {
+            JSONObject().put("entries", JSONArray())
+        } else {
+            // A non-blank but unparsable diary must not be replaced by a single new entry.
+            runCatching { JSONObject(raw) }.getOrNull() ?: run {
+                runCatching {
+                    FileManager.write(
+                        root,
+                        "backup/unreadable_${System.currentTimeMillis()}_L2_diary.json",
+                        raw
+                    )
+                }
+                android.util.Log.w("Ruri", "L2 unreadable; diary entry skipped to protect memory")
+                return
+            }
+        }
         val entries = d.optJSONArray("entries") ?: JSONArray()
         val total = maxOf(d.optLong("total_entries", entries.length().toLong()), entries.length().toLong()) + 1
         // An entry is a claim like any other: it names the raw events it rests on. Without them it
