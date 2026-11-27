@@ -2659,4 +2659,89 @@ class DocumentPaginationTest {
             style.contains("вызови read_document с этим page"))
     }
 }
+
+/**
+ * "не удалось завершить цепочку действий: достигнут лимит 8 вызовов" — asked to find every
+ * mention of her appearance, she looped because her own description was not searchable at all.
+ */
+class SelfDescriptionSearchTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-self").toFile().also {
+        FileManager.init(it)
+    }
+
+    @Test fun appearanceIsSearchable() {
+        val dir = root()
+        try {
+            val appearance = JSONObject()
+                .put("description", "невысокая, тёмные волосы до плеч, серые глаза")
+                .put("style", "носит свободный свитер")
+            FileManager.write(dir, "core/appearance.json", appearance.toString(2))
+
+            val out = MemoryRetriever.search(dir, "волосы", MemoryRetriever.SCOPE_SELF)
+            assertTrue("appearance must be found", out.contains("волосы"))
+            assertTrue("and labelled as appearance", out.contains("внешность"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun characterIsSearchable() {
+        val dir = root()
+        try {
+            val character = JSONObject().put("speech_rules", "говорю прямо и коротко")
+            FileManager.write(dir, "core/character.json", character.toString(2))
+            val out = MemoryRetriever.search(dir, "говорю", MemoryRetriever.SCOPE_SELF)
+            assertTrue(out.contains("говорю прямо"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun theSelfScopeIsIncludedInAll() {
+        val dir = root()
+        try {
+            FileManager.write(dir, "core/appearance.json",
+                JSONObject().put("description", "рыжие волосы").toString(2))
+            val out = MemoryRetriever.search(dir, "волосы", MemoryRetriever.SCOPE_ALL)
+            assertTrue("a general search must reach her self-description too",
+                out.contains("рыжие волосы"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun nestedAppearanceFieldsAreSearchable() {
+        val dir = root()
+        try {
+            val appearance = JSONObject().put("lora", JSONObject().put("style", "акварельный стиль"))
+            FileManager.write(dir, "core/appearance.json", appearance.toString(2))
+            val out = MemoryRetriever.search(dir, "акварельный", MemoryRetriever.SCOPE_SELF)
+            assertTrue("nested fields must not be skipped", out.contains("акварельный"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun theScopeIsOfferedToHer() {
+        val style = ChatStyle.memorySelfServiceSection()
+        assertTrue("self scope advertised", style.contains("\"self\""))
+        assertTrue("and explained", style.contains("внешности"))
+        assertTrue("she is told one search is enough", style.contains("ОДНОГО ПОИСКА"))
+    }
+}
+
+/** Hitting the hop limit must degrade gracefully, never replace the answer with an error. */
+class ToolHopLimitTest {
+    @Test fun theLimitDoesNotDiscardGatheredMaterial() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        // The old code returned a bare system message, throwing away every tool result.
+        assertTrue("must ask for a closing answer",
+            engine.contains("ЛИМИТ ДЕЙСТВИЙ ИСЧЕРПАН"))
+        assertTrue("with an instruction to admit gaps",
+            engine.contains("осталось непроверенным"))
+        assertTrue("and salvage the reply", engine.contains("salvaged"))
+    }
+
+    @Test fun theErrorTextSurvivesOnlyAsLastResort() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        val block = engine.substringAfter("if (leftover.isNotEmpty() && hops >= MAX_TOOL_HOPS) {")
+            .substringBefore("val (cleaned, diaryAgain, leftover)")
+        // The bare limit message may still exist after the salvage attempt, but the salvage
+        // must come first.
+        val salvageIndex = block.indexOf("salvaged.isNotBlank()")
+        assertTrue("salvage must be attempted first", salvageIndex > 0)
+    }
+}
 }

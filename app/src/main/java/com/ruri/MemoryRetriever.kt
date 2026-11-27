@@ -129,6 +129,62 @@ object MemoryRetriever {
             }
         }
 
+        // Her own description of herself: character and appearance are part of memory too.
+        // They were stored but never searchable, so "find every mention of your appearance"
+        // could never be answered and she would loop trying.
+        if (scope == SCOPE_ALL || scope == SCOPE_SELF) {
+            val character = readJson(root, "core/character.json")
+            val appearance = readJson(root, "core/appearance.json")
+            val keys = character.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                val value = character.optString(key).trim()
+                if (value.length < 3) continue
+                memories.add(
+                    Memory("черта характера: $key", value,
+                        character.optLong("updated_at", 0L))
+                )
+            }
+            val appearanceKeys = appearance.keys()
+            while (appearanceKeys.hasNext()) {
+                val key = appearanceKeys.next()
+                when (val value = appearance.opt(key)) {
+                    is String -> if (value.trim().length >= 3) {
+                        memories.add(
+                            Memory("внешность: $key", value.trim(),
+                                appearance.optLong("updated_at", 0L))
+                        )
+                    }
+                    is JSONObject -> {
+                        val sub = value.keys()
+                        while (sub.hasNext()) {
+                            val subKey = sub.next()
+                            val text = value.optString(subKey).trim()
+                            if (text.length >= 3) {
+                                memories.add(
+                                    Memory("внешность: $key/$subKey", text,
+                                        appearance.optLong("updated_at", 0L))
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            // Her self-model says what she knows about her own state and limits.
+            val selfModel = readJson(root, "memory/self_model.json")
+            val selfKeys = selfModel.keys()
+            while (selfKeys.hasNext()) {
+                val key = selfKeys.next()
+                if (key !in setOf("current_focus", "identity", "project")) continue
+                val value = selfModel.optString(key).trim()
+                if (value.length < 3) continue
+                memories.add(
+                    Memory("самоописание: $key", value,
+                        selfModel.optLong("updated_at", 0L))
+                )
+            }
+        }
+
         if (wantDiary) {
             val diary = readJson(root, "memory/L2_diary.json").optJSONArray("entries") ?: JSONArray()
             for (i in 0 until diary.length()) {
@@ -216,6 +272,7 @@ object MemoryRetriever {
     const val SCOPE_FACTS = "facts"
     const val SCOPE_DIARY = "diary"
     const val SCOPE_NOTES = "notes"
+    const val SCOPE_SELF = "self"
 
     /** Generous on purpose: the Commander accepts the token cost of a deep search. */
     const val SCOPE_MAX_RESULTS = 60
