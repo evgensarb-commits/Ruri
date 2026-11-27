@@ -561,13 +561,14 @@ class AutonomyCadenceTest {
         assertTrue(thoughtHigh < thoughtLow * 0.25)
     }
 
-    @Test fun thoughtGateStaysClosedBelowItsThreshold() {
+    @Test fun thinkingDoesNotRequireEmotionalPressure() {
         val dir = root()
         try {
             EmotionEngine.applyDelta(dir, JSONObject()
                 .put("boredom", -100.0).put("longing", -100.0), "test")
-            // No pressure at all: she stays silent and spends nothing.
-            assertFalse(EmotionEngine.thoughtGate(dir, System.currentTimeMillis(), 0L))
+            // A calm moment must still allow thought: the diary is a thinking log, and gating it
+            // on pressure left it empty for weeks. Only the anti-spam window may refuse.
+            assertTrue(EmotionEngine.thoughtGate(dir, System.currentTimeMillis(), 0L))
         } finally { dir.deleteRecursively() }
     }
 }
