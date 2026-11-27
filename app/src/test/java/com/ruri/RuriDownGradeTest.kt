@@ -1408,7 +1408,8 @@ class RouterAiProviderTest {
     @Test fun anUnconfiguredProviderIsRefusedBeforeAnyRequest() {
         val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
         // Sending anyway would surface as a provider error instead of a settings hint.
-        assertTrue(engine.contains("Route.routerAiUnconfigured(root)"))
+        // One helper now covers every provider, not routerai alone.
+        assertTrue(engine.contains("Route.unconfiguredProvider(root)"))
         assertTrue(engine.contains("идентификатор модели не задан"))
         val route = RepoSources.text("app/src/main/java/com/ruri/Route.kt")
         assertFalse("no guessed default may return", route.contains("MODEL_ROUTERAI_DEFAULT"))
@@ -3371,9 +3372,11 @@ class ReplyPathRepairTest {
             .substringBefore("fun onCommanderReply(")
         val reply = emotions.substringAfter("fun onCommanderReply(")
             .substringBefore("fun onIgnored(")
-        for ((name, body) in listOf("onCommanderMessage" to message, "onCommanderReply" to reply)) {
+        // Checked on the declaration: the body of one method runs up to the next one's doc
+        // comment, and that comment happens to contain the word.
+        for (name in listOf("onCommanderMessage", "onCommanderReply")) {
             assertFalse("$name must not hold the emotion monitor across L4",
-                body.contains("@Synchronized"))
+                emotions.contains("@Synchronized\n    fun $name("))
         }
         assertTrue("the reason must be documented", emotions.contains("deadlock"))
     }
@@ -3398,10 +3401,11 @@ class ReplyPathRepairTest {
 
     @Test fun theDocumentBudgetMatchesDelivery() {
         val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
-        val call = engine.substringAfter("\"read_document\" -> {")
-            .substringBefore("\"look_at_image\" -> {")
-        // Reading more than can be delivered produced "read in full" about a truncated body.
-        assertTrue("must cap by the delivery limit", call.contains("maxChars = TOOL_RESULT_LIMIT"))
+        // Reading more than can be delivered produced "read in full" about a truncated body, and
+        // made the advertised page=N escape hatch unreachable. Anchored on the call itself,
+        // because `"read_document" -> {` also appears in the action validator.
+        assertTrue("must cap by the delivery limit",
+            engine.contains("maxChars = TOOL_RESULT_LIMIT - 800"))
     }
 
     @Test fun theDiaryToolPathKeepsMarkersToo() {
