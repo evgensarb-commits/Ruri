@@ -214,7 +214,14 @@ object FactExtractor {
                 existing.put("source_event_ids", mergeIds(existing.optJSONArray("source_event_ids"), validEvidence))
                 if (existing.optString("source_model").isBlank()) existing.put("source_model", sourceModel)
                 updated++
-            } else if (facts.length() < 500) {
+            } else {
+                // A full store no longer silently drops the new claim: the weakest entry goes.
+                if (facts.length() >= ReflectionPass.FACT_CAP) {
+                    MemoryWeight.makeRoom(
+                        root, "L1", facts, ReflectionPass.FACT_CAP,
+                        "pending-" + UUID.randomUUID().toString()
+                    )
+                }
                 facts.put(
                     JSONObject()
                         .put("id", "fact-" + UUID.randomUUID().toString())

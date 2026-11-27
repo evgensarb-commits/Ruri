@@ -172,6 +172,12 @@ class RuriLifeWorker(
                 if (!OfflineQueue.hasPending(root) && !CommanderReplyQueue.hasPending(root)) {
                     MemoryConsolidator.consolidateIfDue(appContext)
                 }
+                // Her own bounded reading pass. It runs after the mechanisms above so it can only
+                // use capacity they left, and it stops on its own budget instead of looping.
+                if (!OfflineQueue.hasPending(root) && !CommanderReplyQueue.hasPending(root)) {
+                    runCatching { ReflectionRunner.runIfDue(appContext) }
+                        .onFailure { Log.w("Ruri", "Reflection pass failed; cycle continues", it) }
+                }
             }
 
             try {

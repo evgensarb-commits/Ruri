@@ -7,7 +7,8 @@ import java.io.File
 /** Shared action protocol and prose guard for interactive and autonomous model turns. */
 object ToolLoop {
     private val allowed = setOf(
-        "recall", "remember_fact", "self_check", "read_url", "read_document", "look_at_image"
+        "recall", "remember_fact", "self_check", "read_url", "read_document", "look_at_image",
+        "read_raw", "challenge_claim"
     )
 
     private fun extractJsonObjects(text: String): List<String> {
@@ -60,7 +61,8 @@ object ToolLoop {
             cleaned = cleaned.replace(objectText, "")
             when (action.optString("action")) {
                 "write_diary", "diary" -> action.optString("text").trim().takeIf { it.isNotBlank() }?.let(diary::add)
-                "recall", "remember_fact", "self_check" -> tools.add(action)
+                "recall", "remember_fact", "self_check", "read_url", "read_document",
+                "look_at_image", "read_raw", "challenge_claim" -> tools.add(action)
                 else -> Unit
             }
         }

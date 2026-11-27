@@ -273,8 +273,15 @@ object Thinker {
 
         OutcomeDigest.verifyClaims(root, safeReply)
         val notificationMessageId = if (publishesToChat(initiative, effective)) {
-            val messageId = appendChatMessage(root, "ruri", safeReply, now, ChatEngine.sourceUrlsSnapshot(), successfulRouteId)
-            messageId
+            // A chat message is not a diary entry, but the turn still produced a thought. It used
+            // to be dropped here, so the diary only filled when she chose "think" — which is why
+            // it looked permanently empty while she was happily talking in the chat.
+            appendChatMessage(root, "ruri", safeReply, now, ChatEngine.sourceUrlsSnapshot(), successfulRouteId)
+            runCatching {
+                if (!Diary.isDuplicate(root, safeReply, "thought")) {
+                    Diary.append(root, safeReply, reason, emotion, "thought")
+                }
+            }
         } else {
             if (Diary.isDuplicate(root, safeReply, "thought")) {
                 state.put("last_thought", now)

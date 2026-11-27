@@ -25,7 +25,14 @@ object Diary {
     }
 
     @Synchronized
-    fun append(root: File, text: String, trigger: String, emotion: JSONObject?, kind: String = "thought") {
+    fun append(
+        root: File,
+        text: String,
+        trigger: String,
+        emotion: JSONObject?,
+        kind: String = "thought",
+        sourceIds: Collection<String> = emptyList()
+    ) {
         val mirrorSaid = runCatching { JSONObject(FileManager.read(root, "core/config.json")).optBoolean("diary_mirror_said", false) }.getOrElse { false }
         if (kind != "thought" && !(kind == "said" && mirrorSaid)) return
         val t = SecretRedactor.redactText(text.trim())
@@ -34,14 +41,38 @@ object Diary {
             .getOrElse { JSONObject().put("entries", JSONArray()) }
         val entries = d.optJSONArray("entries") ?: JSONArray()
         val total = maxOf(d.optLong("total_entries", entries.length().toLong()), entries.length().toLong()) + 1
-        val e = JSONObject().put("id", UUID.randomUUID().toString()).put("sequence", total)
+        // An entry is a claim like any other: it names the raw events it rests on. Without them it
+        // is marked as an assumption, which is what stops the loop of her confirming her own words.
+        val verified = Provenance.verifiedSources(root, sourceIds)
+        val id = UUID.randomUUID().toString()
+        val e = JSONObject().put("id", id).put("sequence", total)
             .put("ts", System.currentTimeMillis()).put("text", t).put("trigger", trigger).put("kind", kind)
+            .put("source_event_ids", JSONArray(verified))
+            .put("origin", "diary")
+            .put("status", Provenance.statusFor(verified))
+            .put("confirmations", if (verified.isEmpty()) 0 else 1)
         if (emotion != null) e.put("emotion_before", emotion.optJSONObject("before"))
             .put("emotion_delta", emotion.optJSONObject("delta"))
             .put("emotion_after", emotion.optJSONObject("after"))
             .put("mood_label", emotion.optString("mood"))
-        entries.put(e); while (entries.length() > 500) entries.remove(0)
+        if (verified.isNotEmpty()) {
+            // Journal the link so the trace is visible from L0 too, not only inside L2.
+            runCatching {
+                FileManager.appendEvent(root, JSONObject()
+                    .put("type", "diary_linked")
+                    .put("entry_id", id)
+                    .put("source_event_ids", JSONArray(verified)))
+            }
+        }
+        entries.put(e)
+        if (entries.length() > CAPACITY) {
+            // Eviction by weight, recorded: an entry must never vanish without a trace.
+            MemoryWeight.trim(root, "L2", entries, CAPACITY)
+        }
         d.put("entries", entries).put("total_entries", total).put("updated_at", System.currentTimeMillis())
         FileManager.write(root, "memory/L2_diary.json", d.toString(2))
     }
+
+    /** Bounded by weight rather than by silently dropping the oldest entry. */
+    private const val CAPACITY = 500
 }

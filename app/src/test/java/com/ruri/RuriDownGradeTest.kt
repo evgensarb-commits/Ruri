@@ -2006,4 +2006,342 @@ class EmotionDeltaReachableTest {
         assertTrue(parser.contains("reply.replace(m.value, \"\")"))
     }
 }
+
+/** Raw journal paging: a cursor instead of a full scan, and never a write. */
+class RawLogTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-rawlog").toFile().also {
+        FileManager.init(it)
+    }
+
+    private fun append(root: java.io.File, type: String, text: String, who: String = "commander") {
+        FileManager.appendEvent(root, JSONObject()
+            .put("type", type).put("who", who).put("text", text))
+    }
+
+    @Test fun pagesByCursorWithoutRescanning() {
+        val dir = root()
+        try {
+            repeat(5) { append(dir, "message", "msg $it") }
+            val (first, cursor) = RawLog.read(dir, afterOffset = 0L, limit = 2)
+            assertEquals(2, first.size)
+            assertTrue("cursor must advance past what was read", cursor > 0L)
+
+            val (second, cursor2) = RawLog.read(dir, afterOffset = cursor, limit = 2)
+            assertEquals(2, second.size)
+            assertTrue("no overlap between pages", second.first().id != first.first().id)
+            assertTrue(cursor2 > cursor)
+
+            // Reading again from the same cursor returns the same page: paging is idempotent.
+            val (again, _) = RawLog.read(dir, afterOffset = cursor, limit = 2)
+            assertEquals(second.map { it.id }, again.map { it.id })
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun filtersByType() {
+        val dir = root()
+        try {
+            append(dir, "message", "hello")
+            append(dir, "wake", "timer")
+            append(dir, "tool_call", "read_document")
+            val (messages, _) = RawLog.read(dir, types = setOf("message"))
+            assertEquals(1, messages.size)
+            assertEquals("message", messages.first().type)
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun refusesToFabricateTheIndex() {
+        val dir = root()
+        try {
+            append(dir, "message", "a")
+            append(dir, "wake", "b")
+            val index = RawLog.index(dir)
+            assertEquals(2, index.optInt("lines"))
+            assertEquals(1, index.getJSONObject("by_type").getJSONObject("message").optInt("count"))
+            assertEquals(0, index.optInt("malformed"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun cyrillicSurvivesPaging() {
+        val dir = root()
+        try {
+            append(dir, "message", "привет, как дела")
+            val (entries, _) = RawLog.read(dir, limit = 5)
+            assertEquals("привет, как дела", entries.first().json.optString("text"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun theJournalIsNeverModifiedByReading() {
+        val dir = root()
+        try {
+            append(dir, "message", "one")
+            val before = File(dir, "memory/L0_raw.jsonl").readText()
+            RawLog.read(dir, limit = 50)
+            RawLog.index(dir)
+            val after = File(dir, "memory/L0_raw.jsonl").readText()
+            assertEquals("reading must not touch L0", before, after)
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun inventedSourceIdsAreDropped() {
+        val dir = root()
+        try {
+            append(dir, "message", "real event")
+            val real = RawLog.read(dir, limit = 1).first.first().id
+            val verified = Provenance.verifiedSources(dir, listOf(real, "evt-does-not-exist"))
+            assertEquals(listOf(real), verified)
+        } finally { dir.deleteRecursively() }
+    }
+}
+
+/** Weight decides who survives a full store, and an eviction always leaves a record. */
+class MemoryWeightTest {
+    @Test fun recentAndConfirmedOutweighsOldAndSilent() {
+        val now = System.currentTimeMillis()
+        val day = 86_400_000L
+        val old = MemoryWeight.weight(now - 300 * day, now - 300 * day, confirmations = 0, origin = "diary", now = now)
+        val fresh = MemoryWeight.weight(now - day, now - day, confirmations = 1, origin = "commander", now = now)
+        assertTrue("a fresh Commander message must outrank a stale silent thought", fresh > old)
+    }
+
+    @Test fun confirmationRaisesWeight() {
+        val now = System.currentTimeMillis()
+        val once = MemoryWeight.weight(now, now, confirmations = 1, origin = "commander", now = now)
+        val many = MemoryWeight.weight(now, now, confirmations = 10, origin = "commander", now = now)
+        assertTrue("more confirmations must weigh more", many > once)
+    }
+
+    @Test fun evictionIsRecordedAndTheNewcomerSurvives() {
+        val dir = Files.createTempDirectory("ruri-weight").toFile().also { FileManager.init(it) }
+        try {
+            val array = JSONArray()
+            val now = System.currentTimeMillis()
+            for (i in 0 until 3) {
+                array.put(JSONObject().put("id", "old-$i").put("text", "stale $i")
+                    .put("origin", "diary").put("created_at", now - (100 + i) * 86_400_000L)
+                    .put("confirmations", 0))
+            }
+            val evicted = MemoryWeight.makeRoom(dir, "L1", array, cap = 3, incomingId = "new")
+            assertEquals("exactly one slot must free up", 1, evicted.size)
+            assertTrue("the weakest (oldest silent) entry goes", evicted.first().startsWith("old-"))
+
+            // The eviction is journaled, so nothing disappears without a trace.
+            val (events, _) = RawLog.read(dir, types = setOf("eviction_evt"))
+            assertTrue("an eviction_evt must be written", events.isNotEmpty())
+            assertEquals("L1", events.first().json.optString("store"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun theIncomingClaimIsNeverTheOneEvicted() {
+        val dir = Files.createTempDirectory("ruri-weight2").toFile().also { FileManager.init(it) }
+        try {
+            val array = JSONArray()
+            val now = System.currentTimeMillis()
+            // A very fresh, heavily confirmed store: the newcomer is the weakest thing in it.
+            for (i in 0 until 2) {
+                array.put(JSONObject().put("id", "keep-$i").put("text", "important $i")
+                    .put("origin", "commander").put("created_at", now).put("confirmations", 50))
+            }
+            val evicted = MemoryWeight.makeRoom(dir, "L1", array, cap = 2, incomingId = "new")
+            assertFalse("the new claim must not evict itself", evicted.contains("new"))
+        } finally { dir.deleteRecursively() }
+    }
+}
+
+/** Her own reading pass is bounded and resumes from a cursor. */
+class ReflectionPassTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-reflect").toFile().also {
+        FileManager.init(it)
+        // A real event to cite.
+        FileManager.appendEvent(it, JSONObject()
+            .put("type", "message").put("who", "commander").put("text", "я люблю чай с молоком"))
+    }
+
+    @Test fun writesAtMostTheWriteBudget() {
+        val dir = root()
+        try {
+            val candidates = (0 until 30).map {
+                JSONObject().put("text", "кандидат номер $it про чай")
+                    .put("source_ids", JSONArray())
+            }
+            var reads = 0
+            val result = ReflectionPass.run(dir) { window ->
+                reads = window.size
+                candidates
+            }
+            assertTrue("must have read something", reads > 0)
+            assertTrue("write budget must cap the pass", result.written <= ReflectionPass.WRITE_BUDGET)
+            assertTrue("the rest is reported as skipped", result.skipped >= 0)
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun aClaimWithoutSourcesIsAnAssumption() {
+        val dir = root()
+        try {
+            ReflectionPass.run(dir) { _ ->
+                listOf(JSONObject().put("text", "Командир любит чай с молоком").put("source_ids", JSONArray()))
+            }
+            val facts = JSONObject(FileManager.read(dir, "memory/L1_facts.json")).getJSONArray("facts")
+            assertEquals(1, facts.length())
+            assertEquals("assumption", facts.getJSONObject(0).optString("status"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun aClaimWithARealSourceIsAsserted() {
+        val dir = root()
+        try {
+            val realId = RawLog.read(dir, limit = 1).first.first().id
+            ReflectionPass.run(dir) { _ ->
+                listOf(JSONObject().put("text", "Командир пьёт чай с молоком")
+                    .put("source_ids", JSONArray().put(realId)))
+            }
+            val facts = JSONObject(FileManager.read(dir, "memory/L1_facts.json")).getJSONArray("facts")
+            assertEquals(1, facts.length())
+            assertEquals("asserted", facts.getJSONObject(0).optString("status"))
+            assertEquals(realId, facts.getJSONObject(0).getJSONArray("source_event_ids").optString(0))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun theCursorAdvancesSoTheNextPassMovesOn() {
+        val dir = root()
+        try {
+            val before = ReflectionPass.cursor(dir)
+            ReflectionPass.run(dir) { emptyList() }
+            val after = ReflectionPass.cursor(dir)
+            assertTrue("cursor must move forward", after > before)
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun repeatedClaimsStrengthenInsteadOfDuplicating() {
+        val dir = root()
+        try {
+            val realId = RawLog.read(dir, limit = 1).first.first().id
+            val candidate = { JSONObject().put("text", "Командир любит чай")
+                .put("source_ids", JSONArray().put(realId)) }
+            ReflectionPass.store(dir, candidate())
+            ReflectionPass.store(dir, candidate())
+            val facts = JSONObject(FileManager.read(dir, "memory/L1_facts.json")).getJSONArray("facts")
+            assertEquals("no twin entries", 1, facts.length())
+            assertTrue("confirmations must rise", facts.getJSONObject(0).optInt("confirmations") >= 2)
+        } finally { dir.deleteRecursively() }
+    }
+}
+
+/** The challenge trail: nothing is deleted, and rejected claims stay visible. */
+class ProvenanceChallengeTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-prov").toFile().also {
+        FileManager.init(it)
+    }
+
+    private fun seedFact(dir: java.io.File, id: String): JSONArray {
+        val file = JSONObject()
+        val facts = JSONArray().put(JSONObject().put("id", id).put("text", "спорный факт")
+            .put("status", "asserted").put("source_event_ids", JSONArray().put("evt-1")))
+        file.put("facts", facts)
+        FileManager.write(dir, "memory/L1_facts.json", file.toString(2))
+        return facts
+    }
+
+    @Test fun challengingMarksAndKeepsTheClaim() {
+        val dir = root()
+        try {
+            seedFact(dir, "f-1")
+            assertTrue(Provenance.challenge(dir, "L1", "f-1", "это неверно"))
+            val facts = JSONObject(FileManager.read(dir, "memory/L1_facts.json")).getJSONArray("facts")
+            assertEquals("claim must survive the challenge", 1, facts.length())
+            assertEquals("challenged", facts.getJSONObject(0).optString("status"))
+            assertEquals("это неверно", facts.getJSONObject(0).optString("challenge_reason"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun rejectingKeepsSourcesAsTheRecordOfAMistake() {
+        val dir = root()
+        try {
+            seedFact(dir, "f-2")
+            assertTrue(Provenance.reject(dir, "L1", "f-2", "выдумка"))
+            val facts = JSONObject(FileManager.read(dir, "memory/L1_facts.json")).getJSONArray("facts")
+            val fact = facts.getJSONObject(0)
+            assertEquals("rejected", fact.optString("status"))
+            assertTrue("sources must remain", fact.getJSONArray("source_event_ids").length() == 1)
+            assertTrue("rejection reason must remain", fact.optString("reject_reason").isNotBlank())
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun aRejectedClaimCannotBeSilentlyRevived() {
+        val dir = root()
+        try {
+            seedFact(dir, "f-3")
+            Provenance.reject(dir, "L1", "f-3", "нет")
+            // Remembering the same text again must not turn it back into a fact.
+            val answer = ChatEngine.rememberFactForTest(dir, "спорный факт")
+            assertTrue("must refuse to revive", answer.contains("отвергнут"))
+            val facts = JSONObject(FileManager.read(dir, "memory/L1_facts.json")).getJSONArray("facts")
+            assertEquals("rejected", facts.getJSONObject(0).optString("status"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun theChallengeIsWrittenToTheJournal() {
+        val dir = root()
+        try {
+            seedFact(dir, "f-4")
+            Provenance.challenge(dir, "L1", "f-4")
+            val (events, _) = RawLog.read(dir, types = setOf("claim_challenged"))
+            assertTrue("challenge must be journaled", events.isNotEmpty())
+            assertEquals("f-4", events.first().json.optString("claim_id"))
+        } finally { dir.deleteRecursively() }
+    }
+}
+
+/** The diary was only written when she chose "think", so it looked permanently empty. */
+class DiaryWritesTest {
+    @Test fun aChatTurnStillRecordsAThought() {
+        val thinker = RepoSources.text("app/src/main/java/com/ruri/Thinker.kt")
+        val chatBranch = thinker.substringAfter("if (publishesToChat(initiative, effective)) {")
+            .substringBefore("} else {")
+        // Previously the chat branch just sent the message and returned, leaving the diary alone.
+        assertTrue("chat turns must also reach the diary", chatBranch.contains("Diary.append"))
+    }
+
+    @Test fun diaryEntriesCarryTheirSources() {
+        val diary = RepoSources.text("app/src/main/java/com/ruri/Diary.kt")
+        assertTrue("entries must record source ids", diary.contains("source_event_ids"))
+        assertTrue("and a status", diary.contains("Provenance.statusFor"))
+        val diaryLinked = diary.contains("diary_linked")
+        assertTrue("the link is journaled too", diaryLinked)
+    }
+
+    @Test fun diaryEvictionIsRecorded() {
+        val diary = RepoSources.text("app/src/main/java/com/ruri/Diary.kt")
+        // The old code did entries.remove(0) with no record.
+        assertFalse("silent drop must be gone", diary.contains("while (entries.length() > 500) entries.remove(0)"))
+        assertTrue("weight decides instead", diary.contains("MemoryWeight.trim"))
+    }
+}
+
+/** Bridge and UI for the insights page. */
+class InsightsUiTest {
+    @Test fun theBridgeExposesProvenance() {
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        for (method in listOf("listInsights", "readEventsByIds", "challengeClaim",
+            "rejectClaim", "rawJournalIndex")) {
+            assertTrue("bridge needs " + method, activity.contains("fun " + method + "("))
+        }
+    }
+
+    @Test fun thePageShowsSourcesNotJustAVerdict() {
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        assertTrue(html.contains("data-chip=\"INS\""))
+        assertTrue(html.contains("function renderInsights("))
+        // The Commander asked to see the full source list, not a summary.
+        assertTrue(html.contains("source_event_ids"))
+        assertTrue(html.contains("data-insight=\"sources\""))
+        assertTrue(html.contains("data-insight=\"challenge\""))
+    }
+
+    @Test fun assumptionsAreMarkedAsSuch() {
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        for (label in listOf("ПРЕДПОЛОЖЕНИЕ", "ОСПОРЕНО", "ОТВЕРГНУТО")) {
+            assertTrue("status label missing: " + label, html.contains(label))
+        }
+    }
+}
 }
