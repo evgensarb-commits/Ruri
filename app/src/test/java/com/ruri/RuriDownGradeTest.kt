@@ -2573,7 +2573,8 @@ class FullSearchTest {
     @Test fun recallAndSearchShareOneRanking() {
         val reader = RepoSources.text("app/src/main/java/com/ruri/MemoryRetriever.kt")
         // Two copies of the scoring logic drifted apart before; recall now delegates.
-        assertTrue("recall must reuse collect", reader.contains("val hits = collect(root, query, SCOPE_ALL)"))
+        assertTrue("recall must reuse collect",
+            reader.contains("val hits = collect(root, query, SCOPE_ALL, fullScan = false)"))
         assertTrue("search must exist", reader.contains("fun search("))
     }
 
@@ -3556,7 +3557,8 @@ class MemoryMaintenanceRepairTest {
         val reader = RepoSources.text("app/src/main/java/com/ruri/RawLog.kt")
         // Assuming a newline pushed the cursor beyond EOF on a torn read; the next call then saw
         // cursor > length and restarted from the beginning of the journal.
-        assertTrue("must test for the terminator", reader.contains("val terminated ="))
+        assertTrue("must measure the terminator", reader.contains("val endOfLine ="))
+        assertTrue("and never advance blindly", reader.contains("val terminator = 0"))
         assertFalse("must not assume one", reader.contains("cursor += lineLength + 1L"))
     }
 
@@ -3577,11 +3579,11 @@ class MemoryMaintenanceRepairTest {
 
     @Test fun provenanceLookupActuallyStopsEarly() {
         val reader = RepoSources.text("app/src/main/java/com/ruri/RawLog.kt")
+        // existingIds is the last function in the file, so the body runs to the end.
         val fn = reader.substringAfter("fun existingIds(")
-            .substringBefore("/** Human-readable digest")
         // `return@forEach` only skipped a line, so the "early exit" re-read the whole journal.
-        assertFalse(fn.contains("return@forEach"))
-        assertTrue(fn.contains("while (found.size < wanted.size)"))
+        assertFalse("the helper must not use a per-line skip", fn.contains("return@forEach"))
+        assertTrue("it must stop once every id is found", fn.contains("while (found.size < wanted.size)"))
     }
 
     @Test fun aMissingKeyDoesNotNameTheWrongProvider() {

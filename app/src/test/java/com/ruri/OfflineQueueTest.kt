@@ -16,8 +16,11 @@ class OfflineQueueTest {
             val outcome = runCatching { ChatEngine.respond(root) }
 
             assertTrue(outcome.isFailure)
-            assertTrue(outcome.exceptionOrNull()?.message.orEmpty().contains("маршрут", ignoreCase = true) ||
-                outcome.exceptionOrNull()?.message.orEmpty().contains("route", ignoreCase = true))
+            // The failure must name the missing key. This used to match the word "Routeway",
+            // which was provider-specific wording that has since been made neutral.
+            val message = outcome.exceptionOrNull()?.message.orEmpty()
+            assertTrue("must explain the missing key: $message",
+                message.contains("ключ", ignoreCase = true))
             assertTrue(OfflineQueue.hasPending(root))
             assertFalse(FileManager.exists(root, "memory/L0_raw.jsonl"))
         } finally {
