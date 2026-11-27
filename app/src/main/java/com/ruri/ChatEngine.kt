@@ -27,11 +27,18 @@ object ChatEngine {
      */
     private const val TOOL_RESULT_LIMIT = 9000
 
-    /** A long document is walked in one go, up to this many pages. */
-    private const val MAX_AUTO_PAGES = 40
+    /**
+     * A long document is walked in one go, up to this many pages.
+     *
+     * Paired with the character budget below: 25 pages × 6000 chars would be 150k, so the
+     * character cap is what actually stops a runaway file. Keeping these two consistent matters
+     * — an earlier pair (40 pages against 24k chars) silently cut documents at four pages while
+     * claiming a much larger limit.
+     */
+    private const val MAX_AUTO_PAGES = 25
 
-    /** Total characters of document text handed over in one turn. */
-    private const val MAX_AUTO_CHARS = 24_000
+    /** Total characters of document text handed over in one turn (~30 pages of prose). */
+    private const val MAX_AUTO_CHARS = 120_000
 
     @Volatile private var lastFinalMessageId: String? = null
     private val responseLock = Any()
@@ -280,7 +287,12 @@ object ChatEngine {
         var page = startPage.coerceAtLeast(0)
         var read = 0
         var lastNote = ""
-        while (read < maxPages && builder.length < maxChars) {
+        // Distinguish "ran out of document" from "ran out of budget": only the second may be
+        // reported as incomplete, otherwise a fully read file looks truncated.
+        var reachedEnd = false
+        var hitBudget = false
+        while (read < maxPages) {
+            if (builder.length >= maxChars) { hitBudget = true; break }
             val (ok, text) = DocReader.read(root, name, page)
             if (!ok) {
                 if (read == 0) return text to 0
@@ -296,13 +308,17 @@ object ChatEngine {
             builder.append(body.trim()).append("\n\n")
             val next = Regex("\\[ПРОДОЛЖЕНИЕ:.*?page=(\\d+)\\]").find(text)
                 ?.groupValues?.get(1)?.toIntOrNull()
-            if (next == null || next <= page) break
+            if (next == null || next <= page) { reachedEnd = true; break }
             page = next
         }
-        val more = if (builder.length >= maxChars) {
-            "\n[ПРОЧИТАНО $read страниц, дальше текст слишком велик для одного ответа. " +
-                "Спроси конкретное место или открой следующую страницу через read_document page=$page.]"
-        } else if (lastNote.isNotBlank()) lastNote else "\n[ДОКУМЕНТ ПРОЧИТАН ЦЕЛИКОМ: $read стр.]"
+        if (!reachedEnd && !hitBudget) hitBudget = read >= maxPages
+        val more = when {
+            lastNote.isNotBlank() -> lastNote
+            hitBudget && !reachedEnd ->
+                "\n[ПРОЧИТАНО $read страниц, дальше текст слишком велик для одного ответа. " +
+                    "Спроси конкретное место или открой следующую страницу через read_document page=$page.]"
+            else -> "\n[ДОКУМЕНТ ПРОЧИТАН ЦЕЛИКОМ: $read стр.]"
+        }
         return (builder.toString().trimEnd() + more) to read
     }
 

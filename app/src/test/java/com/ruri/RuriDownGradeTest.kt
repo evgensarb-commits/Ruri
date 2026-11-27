@@ -2633,10 +2633,11 @@ class DocumentPaginationTest {
     @Test fun theAutomaticReadIsBounded() {
         val dir = root()
         try {
-            val huge = "слово ".repeat(60_000)
+            // Far more than the page budget can hold, so the cap must engage.
+            val huge = "слово ".repeat(400_000)
             DocReader.store(dir, "huge.txt", huge.toByteArray(Charsets.UTF_8))
             val (text, pages) = ChatEngine.readWholeDocument(dir, "huge.txt")
-            assertTrue("must stop instead of loading everything", pages <= 40)
+            assertTrue("must stop instead of loading everything", pages <= 25)
             assertTrue("and say so", text.contains("дальше текст слишком велик"))
         } finally { dir.deleteRecursively() }
     }
