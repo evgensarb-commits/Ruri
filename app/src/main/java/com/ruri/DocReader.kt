@@ -259,18 +259,41 @@ object DocReader {
 
         return runCatching {
             val factory = javax.xml.parsers.DocumentBuilderFactory.newInstance()
-            // No external entities: a crafted document must not read local files.
-            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-            factory.setFeature("http://xml.org/sax/features/external-general-entities", false)
-            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
-            factory.isXIncludeAware = false
-            factory.isExpandEntityReferences = false
+            // Hardening must never abort the parse. Android's default parser throws
+            // UnsupportedOperationException on setXIncludeAware, and some builders reject the
+            // SAX feature flags; wrapping the whole setup in one runCatching turned every DOCX
+            // into "0 pages" because the exception swallowed the entire extraction.
+            fun tryFeature(url: String, value: Boolean) {
+                runCatching { factory.setFeature(url, value) }
+            }
+            tryFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+            tryFeature("http://xml.org/sax/features/external-general-entities", false)
+            tryFeature("http://xml.org/sax/features/external-parameter-entities", false)
+            runCatching { factory.isXIncludeAware = false }
+            runCatching { factory.isExpandEntityReferences = false }
             val document = factory.newDocumentBuilder().parse(xmlBytes.inputStream())
             val text = StringBuilder()
+            // Documents may or may not carry the namespace prefix, so match both the qualified
+            // name and the local name: a file written without the "w:" prefix produced nothing.
             val nodes = document.getElementsByTagName(if (isOdt) "text:p" else "w:p")
-            for (i in 0 until nodes.length) {
-                val paragraph = nodes.item(i)?.textContent?.trim().orEmpty()
-                if (paragraph.isNotEmpty()) text.append(paragraph).append('\n')
+            if (nodes.length > 0) {
+                for (i in 0 until nodes.length) {
+                    val paragraph = nodes.item(i)?.textContent?.trim().orEmpty()
+                    if (paragraph.isNotEmpty()) text.append(paragraph).append('\n')
+                }
+            }
+            if (text.isBlank()) {
+                // Last resort: pull every paragraph-ish element by local name.
+                val all = document.getElementsByTagName("*")
+                for (i in 0 until all.length) {
+                    val node = all.item(i) ?: continue
+                    val local = (node.localName ?: node.nodeName).substringAfterLast(':')
+                    if (local != "p" && local != "h") continue
+                    val paragraph = node.textContent?.trim().orEmpty()
+                    if (paragraph.isNotEmpty() && text.indexOf(paragraph) < 0) {
+                        text.append(paragraph).append('\n')
+                    }
+                }
             }
             text.append(if (isOdt) OdtTables.textOf(document) else DocxTables.textOf(document))
             text.toString()
