@@ -89,7 +89,7 @@ object MemoryRetriever {
                         if (text.isBlank()) continue
                         memories.add(
                             Memory(
-                                if (event.optString("who") == "ruri") "моя реплика" else "реплика Командира",
+                                if (event.optString("who") == "ruri") "прошлый ответ Рури" else "прошлая реплика Командира",
                                 text,
                                 event.optLong("timestamp", event.optLong("ts", 0L)),
                                 emotionAfter = event.optJSONObject("emotion_after")
@@ -120,7 +120,7 @@ object MemoryRetriever {
                 if (fact.optString("status") == "rejected") continue
                 val text = fact.optString("text").trim()
                 if (text.isBlank()) continue
-                val label = if (fact.optString("status") == "assumption") "предположение" else "факт"
+                val label = if (fact.optString("status") == "assumption") "предположение" else "устойчивый факт"
                 memories.add(
                     Memory(label, text,
                         fact.optLong("updated_at", fact.optLong("created_at", 0L)),
@@ -139,7 +139,7 @@ object MemoryRetriever {
                 val text = entry.optString("text").trim()
                 if (text.isBlank()) continue
                 memories.add(
-                    Memory("дневник", text, entry.optLong("ts", 0L),
+                    Memory("эпизод дневника", text, entry.optLong("ts", 0L),
                         emotionAfter = entry.optJSONObject("emotion_after")
                             ?.let { JSONObject(it.toString()) })
                 )
@@ -166,6 +166,43 @@ object MemoryRetriever {
                 }
             }
             scored.add(memory to score)
+        }
+
+        // Association step: the strongest direct matches pull in memories that share their
+        // distinctive terms. Without it an answer like "tell me about the project" never reaches
+        // the related episode that used a different word. Terms occurring in most memories are
+        // ignored as weak links.
+        val seeds = scored.sortedByDescending { it.second }.take(3)
+        if (seeds.isEmpty()) return scored
+        val directTexts = scored.map { it.first.text }.toSet()
+        val expanded = seeds.flatMap { tokenize(it.first.text) }.toSet() - terms
+        if (expanded.isEmpty()) return scored
+        val documentFrequency = HashMap<String, Int>()
+        for ((memory, memoryTerms) in tokenized) {
+            memoryTerms.forEach { term ->
+                documentFrequency[term] = (documentFrequency[term] ?: 0) + 1
+            }
+        }
+        val maxLinkFrequency = maxOf(2, memories.size / 3)
+        val linkTerms = expanded.filter {
+            it.length >= 5 && (documentFrequency[it] ?: 0) <= maxLinkFrequency
+        }.toSet()
+        if (linkTerms.isEmpty()) return scored
+
+        for ((memory, memoryTerms) in tokenized) {
+            if (memory.text in directTexts) continue
+            val links = linkTerms.intersect(memoryTerms)
+            if (links.isEmpty()) continue
+            val ageDays = if (memory.timestamp > 0L) {
+                (now - memory.timestamp).coerceAtLeast(0L) / 86_400_000.0
+            } else 3650.0
+            val recency = 1.0 / (1.0 + ageDays / 365.0)
+            val score = 0.55 + links.size.coerceAtMost(3) * 0.18 + recency * 0.05
+            // The label records the route, so a linked memory is never mistaken for a direct hit.
+            val via = links.sorted().take(2).joinToString(", ")
+            scored.add(
+                memory.copy(kind = memory.kind + " (связано через: $via)") to score
+            )
         }
         return scored
     }
