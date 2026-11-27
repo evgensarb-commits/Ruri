@@ -3558,7 +3558,7 @@ class MemoryMaintenanceRepairTest {
         // Assuming a newline pushed the cursor beyond EOF on a torn read; the next call then saw
         // cursor > length and restarted from the beginning of the journal.
         assertTrue("must measure the terminator", reader.contains("val endOfLine ="))
-        assertTrue("and never advance blindly", reader.contains("val terminator = 0"))
+        assertTrue("and never advance blindly", reader.contains("var terminator = 0"))
         assertFalse("must not assume one", reader.contains("cursor += lineLength + 1L"))
     }
 

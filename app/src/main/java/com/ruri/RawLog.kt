@@ -223,8 +223,8 @@ object RawLog {
         val found = HashSet<String>()
         val target = File(root, "memory/L0_raw.jsonl")
         if (!target.isFile) return found
-        // A plain loop, not useLines: `return@forEach` only skipped one line, so the "early exit"
-        // re-read the entire journal on every provenance check.
+        // A plain loop rather than useLines: the per-line skip form only skipped one line, so the
+        // "early exit" re-read the entire journal on every provenance check.
         runCatching {
             target.bufferedReader(Charsets.UTF_8).use { reader ->
                 while (found.size < wanted.size) {
