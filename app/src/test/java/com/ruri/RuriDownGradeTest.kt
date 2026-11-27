@@ -2344,4 +2344,84 @@ class InsightsUiTest {
         }
     }
 }
+
+/**
+ * The self-service machinery existed but was never announced, so she had no reason to use it.
+ * A capability the model is not told about is not a capability.
+ */
+class SelfServiceAdvertisedTest {
+    @Test fun sheIsToldSheCanReadHerOwnJournal() {
+        val style = ChatStyle.memorySelfServiceSection()
+        assertTrue("read_raw must be advertised", style.contains("read_raw"))
+        assertTrue("with the type filter", style.contains("types"))
+        assertTrue("and paging", style.contains("after_offset"))
+        assertTrue("read-only must be stated", style.contains("только читается"))
+    }
+
+    @Test fun sheIsToldSheCanChallengeHerOwnClaims() {
+        val style = ChatStyle.memorySelfServiceSection()
+        assertTrue("challenge_claim must be advertised", style.contains("challenge_claim"))
+        assertTrue("both stores named", style.contains("L1") && style.contains("L2"))
+        assertTrue("nothing is deleted", style.contains("ничего не удаляет"))
+    }
+
+    @Test fun theChatPromptCarriesBothSections() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        assertTrue(engine.contains("ChatStyle.memorySelfServiceSection()"))
+        assertTrue(engine.contains("ChatStyle.pendingInsightsSection(root)"))
+    }
+
+    @Test fun rememberFactDemandsItsSources() {
+        val section = ChatStyle.architectureSection()
+        assertTrue("source_ids must be required, not optional",
+            section.contains("source_ids ОБЯЗАТЕЛЬНО"))
+        assertTrue("the store checks them", section.contains("проверяются по журналу"))
+        assertTrue("and the fallback is stated", section.contains("ПРЕДПОЛОЖЕНИЕ"))
+    }
+
+    @Test fun theToolSignatureAcceptsWhatThePromptAsksFor() {
+        // Advertising a field the parser rejects would make every call fail silently.
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        assertTrue(engine.contains("\"remember_fact\" -> setOf(\"action\", \"text\", \"source_ids\", \"confidence\")"))
+    }
+
+    @Test fun sheCanSeeHerOwnUnverifiedClaims() {
+        val dir = Files.createTempDirectory("ruri-pending").toFile().also { FileManager.init(it) }
+        try {
+            val file = JSONObject()
+            file.put("facts", JSONArray()
+                .put(JSONObject().put("id", "f-a").put("text", "Командир любит кофе")
+                    .put("status", "assumption"))
+                .put(JSONObject().put("id", "f-b").put("text", "Командир любит чай")
+                    .put("status", "challenged"))
+                .put(JSONObject().put("id", "f-c").put("text", "Командир программист")
+                    .put("status", "asserted")))
+            FileManager.write(dir, "memory/L1_facts.json", file.toString(2))
+
+            val section = ChatStyle.pendingInsightsSection(dir)
+            assertTrue("assumptions must be surfaced", section.contains("Командир любит кофе"))
+            assertTrue("challenged claims too", section.contains("Командир любит чай"))
+            assertTrue("confirmed facts need no warning", !section.contains("Командир программист"))
+            assertTrue("and the limit is explained", section.contains("НЕ факты"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun thePendingSectionIsSilentWhenNothingIsUnverified() {
+        val dir = Files.createTempDirectory("ruri-pending2").toFile().also { FileManager.init(it) }
+        try {
+            assertEquals("", ChatStyle.pendingInsightsSection(dir))
+        } finally { dir.deleteRecursively() }
+    }
+}
+
+/** The reflection pass discarded its own result. */
+class ReflectionResultTest {
+    @Test fun thePassResultIsReturnedNotNulled() {
+        val runner = RepoSources.text("app/src/main/java/com/ruri/ReflectionRunner.kt")
+        // `lastResult = null` inside the lambda wiped the value that was about to be returned.
+        assertFalse("must not null its own result", runner.contains("lastResult = null"))
+        assertTrue("must capture the pass result", runner.contains("val result = ReflectionPass.run"))
+        assertTrue("and return it", runner.contains("return result"))
+    }
+}
 }

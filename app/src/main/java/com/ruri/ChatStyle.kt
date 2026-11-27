@@ -74,7 +74,13 @@ object ChatStyle {
             "- L4 (memory/L4_state.json) — текущее состояние: эмоции, настроение, внутренние числа.\n" +
             "КАК ТЫ ЗАПОМИНАЕШЬ. Само по себе ничего не запоминается «в голове»: запись " +
             "происходит на телефоне. Чтобы сохранить важное, верни инструмент " +
-            "{\"action\":\"remember_fact\",\"text\":\"...\"} — он попадёт в L1 и не потеряется. " +
+            "{\"action\":\"remember_fact\",\"text\":\"...\",\"source_ids\":[\"<id события>\"]," +
+            "\"confidence\":0.8} — он попадёт в L1 и не потеряется.\n" +
+            "- Поле source_ids ОБЯЗАТЕЛЬНО, если утверждение на чём-то основано: перечисли " +
+            "идентификаторы записей журнала, из которых ты это взяла (их показывает read_raw). " +
+            "Идентификаторы проверяются по журналу; придуманный будет отброшен.\n" +
+            "- Без source_ids запись сохранится как ПРЕДПОЛОЖЕНИЕ, а не как факт. Выдавать " +
+            "предположение за факт нельзя.\n" +
             "Обычные сообщения и так остаются в L0. Если нужно вспомнить подробности, у тебя есть " +
             "recall — поиск по памяти, и self_check — посмотреть собственное состояние.\n" +
             "ЧТО ТЫ УМЕЕШЬ. Писать Командиру в чат и в дневник по своей инициативе, а не только " +
@@ -89,6 +95,61 @@ object ChatStyle {
             "на ходу, веса модели не меняются, и ты не «думаешь между сообщениями» в буквальном " +
             "смысле — между сообщениями работает планировщик, который решает, когда тебе дать " +
             "слово. Если не уверена в деталях своего устройства — так и скажи, а не сочиняй.\n"
+
+    /**
+     * Tools she owns over her own memory.
+     *
+     * These existed as code but were never announced, so she had no reason to reach for them and
+     * the whole self-service design stayed theoretical. Advertising is what turns a capability
+     * into a habit.
+     */
+    fun memorySelfServiceSection(): String =
+        "СВОЯ ПАМЯТЬ — ТЕБЕ РАЗРЕШЕНО ЕЮ УПРАВЛЯТЬ, а не только получать готовое.\n" +
+            "Прочитать свой сырой журнал (что реально происходило, с идентификаторами):\n" +
+            "{\"action\":\"read_raw\",\"limit\":20}\n" +
+            "Можно фильтровать: \"types\":[\"message\",\"wake\",\"emotion_delta\",\"tool_call\"], " +
+            "\"after_offset\" для следующей страницы, \"from_ts\"/\"to_ts\" по времени. " +
+            "Журнал только читается, изменить в нём ничего нельзя.\n" +
+            "Оспорить свой же вывод, если считаешь его неверным:\n" +
+            "{\"action\":\"challenge_claim\",\"store\":\"L1\",\"claim_id\":\"<id>\",\"reason\":\"...\"}\n" +
+            "store — L1 (факты) или L2 (дневник). Оспаривание ничего не удаляет: вывод остаётся " +
+            "видимым со статусом «оспорено», и Командир потом решает.\n" +
+            "Пользуйся этим, когда сомневаешься в собственной памяти или когда Командир спрашивает, " +
+            "откуда ты что-то знаешь: проверь журнал, а не догадывайся.\n"
+
+    /**
+     * Her own claims that are still unverified.
+     *
+     * Seeing her own assumptions is what lets her notice that something she believes is only a
+     * guess — otherwise a guess written once becomes indistinguishable from a fact she was told.
+     */
+    fun pendingInsightsSection(root: File, limit: Int = 5): String {
+        val items = ArrayList<String>()
+        val files = listOf(
+            "memory/L1_facts.json" to "факты",
+            "memory/L2_diary.json" to "дневник"
+        )
+        for ((path, label) in files) {
+            val array = runCatching {
+                val file = org.json.JSONObject(FileManager.read(root, path))
+                file.optJSONArray(if (path.contains("L2")) "entries" else "facts")
+            }.getOrNull() ?: continue
+            for (i in array.length() - 1 downTo 0) {
+                if (items.size >= limit) break
+                val item = array.optJSONObject(i) ?: continue
+                val status = item.optString("status", "asserted")
+                if (status != "assumption" && status != "challenged") continue
+                val text = item.optString("text").trim().take(160)
+                if (text.isBlank()) continue
+                val mark = if (status == "challenged") "оспорено" else "предположение"
+                items.add("- [$mark, $label] \"$text\" (id: ${item.optString("id").take(20)})")
+            }
+        }
+        if (items.isEmpty()) return ""
+        return "ТВОИ УТВЕРЖДЕНИЯ, КОТОРЫЕ ЕЩЁ НЕ ПРОВЕРЕНЫ. Это НЕ факты: либо ты не указала " +
+            "оснований, либо Командир усомнился. Не выдавай их за правду; можешь уточнить у " +
+            "Командира или перепроверить журналом read_raw.\n" + items.joinToString("\n") + "\n"
+    }
 
     /**
      * True when the Commander explicitly asks for a long, detailed answer.
