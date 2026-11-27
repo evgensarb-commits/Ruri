@@ -244,6 +244,9 @@ object ChatEngine {
      * never answer. If the follow-up produces another tool request the loop continues, but the
      * hop count keeps it finite.
      */
+    /** Test-only seam: exercises the remember-fact rules without a provider call. */
+    internal fun rememberFactForTest(root: File, text: String): String = rememberFact(root, text)
+
     private fun runToolRequests(
         root: File,
         initialReply: String,
@@ -643,8 +646,10 @@ object ChatEngine {
         val name = action.optString("action")
         val allowed = when (name) {
             "recall" -> setOf("action", "query")
-            "remember_fact" -> setOf("action", "text")
+            "remember_fact" -> setOf("action", "text", "source_ids", "confidence")
             "self_check" -> setOf("action")
+            "read_raw" -> setOf("action", "after_offset", "limit", "types", "from_ts", "to_ts")
+            "challenge_claim" -> setOf("action", "store", "claim_id", "reason")
             "read_url" -> setOf("action", "url")
             "read_document" -> setOf("action", "name", "page")
             "look_at_image" -> setOf("action", "name")
@@ -657,6 +662,15 @@ object ChatEngine {
                 if (action.optString("query").isBlank() || action.optString("query").length > 300) return null
             }
             "remember_fact" -> if (action.optString("text").trim().length !in 5..300) return null
+            "read_raw" -> {
+                // Bounded by construction: the tool cannot ask for the whole journal.
+                if (action.has("after_offset") && action.optLong("after_offset", -1L) < 0L) return null
+                if (action.has("limit") && action.optInt("limit", 0) !in 1..200) return null
+            }
+            "challenge_claim" -> {
+                if (action.optString("store").uppercase() !in setOf("L1", "L2")) return null
+                if (action.optString("claim_id").isBlank()) return null
+            }
             "read_url" -> {
                 val url = action.optString("url").trim()
                 if (url.length > 2048) return null
@@ -689,8 +703,47 @@ object ChatEngine {
                 "recall" -> true to SecretRedactor.redactText(
                     MemoryRetriever.recall(root, params.optString("query"), 5)
                 )
-                "remember_fact" -> true to SecretRedactor.redactText(rememberFact(root, params.optString("text")))
+                "remember_fact" -> true to SecretRedactor.redactText(
+                    rememberFact(
+                        root,
+                        params.optString("text"),
+                        params.opt("source_ids"),
+                        params.optDouble("confidence", -1.0)
+                    )
+                )
                 "self_check" -> true to OutcomeDigest.build(root)
+                "read_raw" -> {
+                    // Read-only by design: the journal is never edited from here.
+                    val types = HashSet<String>()
+                    when (val raw = params.opt("types")) {
+                        is JSONArray -> for (i in 0 until raw.length()) types.add(raw.optString(i))
+                        is String -> raw.split(',').map { it.trim() }.filter { it.isNotEmpty() }.forEach { types.add(it) }
+                    }
+                    val (entries, next) = RawLog.read(
+                        root = root,
+                        afterOffset = params.optLong("after_offset", 0L),
+                        limit = params.optInt("limit", 30),
+                        types = types,
+                        fromTs = params.optLong("from_ts", 0L),
+                        toTs = params.optLong("to_ts", 0L)
+                    )
+                    val body = StringBuilder()
+                    body.append("ЖУРНАЛ, ${entries.size} записей. Следующий после_смещения: $next ")
+                    body.append("(всего ${RawLog.sizeBytes(root)} байт)\n")
+                    for (entry in entries) body.append(RawLog.describe(entry)).append('\n')
+                    if (entries.isEmpty()) body.append("В этом окне подходящих записей нет.\n")
+                     true to body.toString()
+                }
+                "challenge_claim" -> {
+                    val store = params.optString("store").uppercase()
+                    val claimId = params.optString("claim_id")
+                    val ok = Provenance.challenge(root, store, claimId, params.optString("reason"))
+                    ok to if (ok) {
+                        "Утверждение $claimId помечено как оспоренное. Ничего не удалено."
+                    } else {
+                        "Утверждение $claimId не найдено в $store."
+                    }
+                }
                 "read_url" -> {
                     // The Commander supplied this address; UrlReader refuses local and
                     // service addresses, so the model cannot probe the phone's network.
@@ -861,35 +914,82 @@ object ChatEngine {
         return savedId
     }
 
-    private fun rememberFact(root: File, rawText: String): String {
+    private fun rememberFact(
+        root: File,
+        rawText: String,
+        rawSources: Any? = null,
+        confidenceOverride: Double = -1.0
+    ): String {
         val text = SecretRedactor.redactText(rawText.trim()).take(300)
         if (text.length < 5 || text.contains(SecretRedactor.PLACEHOLDER)) {
             return "Факт не сохранён: текст содержит секрет или слишком короткий."
         }
+
+        // Sources are what separate a fact from a guess. They are verified against the journal,
+        // so an invented id cannot make a claim look confirmed.
+        val claimed = ArrayList<String>()
+        when (rawSources) {
+            is org.json.JSONArray -> for (i in 0 until rawSources.length()) claimed.add(rawSources.optString(i))
+            is String -> rawSources.split(',').map { it.trim() }.filter { it.isNotEmpty() }.forEach { claimed.add(it) }
+        }
+        val verified = Provenance.verifiedSources(root, claimed)
+
         val file = runCatching { JSONObject(FileManager.read(root, "memory/L1_facts.json")) }
             .getOrElse { JSONObject().put("facts", JSONArray()) }
         val facts = file.optJSONArray("facts") ?: JSONArray().also { file.put("facts", it) }
         fun normalized(value: String) = value.lowercase(java.util.Locale.ROOT)
             .replace(Regex("[^\\p{L}\\p{N}]"), "")
         val key = normalized(text)
+        val now = System.currentTimeMillis()
+
         for (i in 0 until facts.length()) {
             val existing = facts.optJSONObject(i) ?: continue
-            if (normalized(existing.optString("text")) == key) {
-                return "Похожий факт уже есть в L1; дубль не добавлен."
+            if (normalized(existing.optString("text")) != key) continue
+            // A rejected claim stays rejected: repeating it does not silently revive it.
+            if (existing.optString("status") == Provenance.STATUS_REJECTED) {
+                return "Похожий факт уже был отвергнут Командиром; повторно не добавляю."
             }
+            existing.put("confirmations", existing.optInt("confirmations", 1) + 1)
+            existing.put("last_confirmed_at", now)
+            val merged = LinkedHashSet<String>()
+            existing.optJSONArray("source_event_ids")?.let { arr ->
+                for (k in 0 until arr.length()) merged.add(arr.optString(k))
+            }
+            merged.addAll(verified)
+            existing.put("source_event_ids", JSONArray(merged.filter { it.isNotBlank() }))
+            if (existing.optString("status") == Provenance.STATUS_ASSUMPTION && verified.isNotEmpty()) {
+                existing.put("status", Provenance.STATUS_ASSERTED)
+            }
+            FileManager.write(root, "memory/L1_facts.json", file.put("updated_at", now).toString(2))
+            return "Похожий факт уже есть в L1; подтверждений теперь ${existing.optInt("confirmations")}."
         }
-        if (facts.length() >= 500) return "L1 заполнена (500 фактов); новый факт не добавлен."
-        val now = System.currentTimeMillis()
+
+        // Full store: evict by weight instead of refusing the new fact. The old behaviour threw
+        // the new one away and kept whatever was oldest, which is exactly backwards.
+        val id = "self-" + key.hashCode().toUInt().toString(16)
+        if (facts.length() >= ReflectionPass.FACT_CAP) {
+            MemoryWeight.makeRoom(root, "L1", facts, ReflectionPass.FACT_CAP, id)
+        }
+        val confidence = if (confidenceOverride >= 0.0) confidenceOverride
+        else if (verified.isEmpty()) 0.25 else 0.7
         facts.put(JSONObject()
-            .put("id", "self-" + key.hashCode().toUInt().toString(16))
+            .put("id", id)
             .put("text", text)
-            .put("origin", "self_reported")
-            .put("confidence", 0.6)
+            .put("category", "self_reported")
+            .put("source_event_ids", JSONArray(verified))
+            .put("origin", if (verified.isEmpty()) "assumption" else "self_reported")
+            .put("confidence", confidence)
+            .put("status", Provenance.statusFor(verified))
+            .put("confirmations", if (verified.isEmpty()) 0 else 1)
             .put("created_at", now)
-            .put("updated_at", now))
-        file.put("facts", facts).put("updated_at", now)
-        FileManager.write(root, "memory/L1_facts.json", file.toString(2))
-        return "Факт записан в твою L1-память с confidence 0.6."
+            .put("updated_at", now)
+            .put("last_confirmed_at", now))
+        FileManager.write(root, "memory/L1_facts.json", file.put("updated_at", now).toString(2))
+        return if (verified.isEmpty()) {
+            "Запомнила как предположение: не указаны события-основания."
+        } else {
+            "Запомнила как факт, оснований: ${verified.size}."
+        }
     }
 
     private fun readJson(root: File, path: String): JSONObject =

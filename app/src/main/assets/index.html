@@ -290,6 +290,7 @@ input:focus,select:focus,textarea:focus{border-color:rgba(167,139,250,.6);box-sh
       <button class="chip on" type="button" data-chip="L0">ЖУРНАЛ</button>
       <button class="chip" type="button" data-chip="L1">ФАКТЫ</button>
       <button class="chip" type="button" data-chip="L2">ДНЕВНИК</button>
+      <button class="chip" type="button" data-chip="INS">МОИ ВЫВОДЫ</button>
       <button class="chip" type="button" data-chip="L3">АВТОБИОГРАФИЯ</button>
       <button class="chip" type="button" data-chip="L4">СОСТОЯНИЕ</button>
       <button class="chip" type="button" data-chip="EMO">Эмоции</button>
@@ -1093,6 +1094,7 @@ function loadMemory(){
     else if(memoryState.chip === 'L2') renderDiary(view);
     else if(memoryState.chip === 'L3') renderAutobiography(view);
     else if(memoryState.chip === 'EMO') renderEmotions(view);
+    else if(memoryState.chip === 'INS') renderInsights(view);
     else if(memoryState.chip === 'SELF') renderSelfModel(view);
     else renderLifeState(view);
     setText($('memoryStatus'), 'обновлено ' + timeOf(Date.now()));
@@ -1195,6 +1197,91 @@ function renderFacts(view){
       + '</div>';
   }
   view.innerHTML = html || '<div class="placeholder">Фактов пока нет.</div>';
+}
+
+/* Her derived claims, each with the raw events behind it. This is the page that makes the
+   whole memory pipeline inspectable instead of something she has to take on trust. */
+var INSIGHT_FILTER = 'all';
+
+function statusLabel(status){
+  if(status === 'assumption') return 'ПРЕДПОЛОЖЕНИЕ';
+  if(status === 'challenged') return 'ОСПОРЕНО';
+  if(status === 'rejected') return 'ОТВЕРГНУТО';
+  return 'ФАКТ';
+}
+
+function renderInsights(view){
+  var items = parseJson(call('listInsights', [], '[]'), []);
+  if(!isArray(items) || !items.length){
+    view.innerHTML = '<div class="placeholder">Выводов пока нет. Они появляются, когда я читаю свой журнал и делаю заключения.</div>';
+    return;
+  }
+  items.sort(function(a, b){
+    return Number(b.ts || b.created_at || 0) - Number(a.ts || a.created_at || 0);
+  });
+  var html = '';
+  var shown = 0;
+  for(var i = 0; i < items.length; i++){
+    var item = items[i] || {};
+    var status = String(item.status || 'asserted');
+    if(INSIGHT_FILTER !== 'all' && status !== INSIGHT_FILTER) continue;
+    var text = String(item.text || '');
+    if(!text) continue;
+    shown++;
+    var sources = isArray(item.source_event_ids) ? item.source_event_ids : [];
+    var src = sources.length
+      ? sources.slice(0, 8).map(function(id){ return '<span class="src-id">' + esc(String(id).slice(0, 14)) + '</span>'; }).join('')
+      : '<span class="src-none">оснований нет</span>';
+    var conf = Number(item.confidence || 0);
+    var confirmations = Number(item.confirmations || 0);
+    var buttons = '<button class="btn mini" type="button" data-insight="challenge" data-store="' + esc(item.store) + '" data-id="' + esc(item.id) + '">Это не так</button>'
+      + '<button class="btn mini" type="button" data-insight="sources" data-ids="' + esc(JSON.stringify(sources)) + '">Источники</button>';
+    html += '<div class="insight st-' + esc(status) + '">'
+      + '<div class="insight-head"><span class="insight-status">' + esc(statusLabel(status)) + '</span>'
+      + '<span class="insight-meta">' + esc(dateOf(item.ts || item.created_at)) + ' · ' + esc(item.store || '') + '</span></div>'
+      + '<div class="entry-text">' + esc(text) + '</div>'
+      + '<div class="insight-src">' + src + '</div>'
+      + '<div class="insight-meta">уверенность ' + conf.toFixed(2) + ' · подтверждений ' + confirmations + '</div>'
+      + '<div class="row-actions">' + buttons + '</div>'
+      + '<div class="insight-detail" hidden></div>'
+      + '</div>';
+  }
+  var filt = '<div class="row-actions">'
+    + ['all','asserted','assumption','challenged','rejected'].map(function(key){
+        return '<button class="btn mini' + (INSIGHT_FILTER === key ? ' on' : '') + '" type="button" data-insight="filter" data-key="' + key + '">'
+          + esc(key === 'all' ? 'ВСЕ' : statusLabel(key)) + '</button>';
+      }).join('')
+    + '</div>';
+  view.innerHTML = filt + (shown ? html : '<div class="placeholder">Под этот фильтр ничего не подходит.</div>');
+}
+
+function showInsightSources(node){
+  if(!node) return;
+  var ids = parseJson(node.getAttribute('data-ids') || '[]', []);
+  var box = node.parentNode ? node.parentNode.parentNode.querySelector('.insight-detail') : null;
+  if(!box) return;
+  if(!isArray(ids) || !ids.length){ box.hidden = false; box.textContent = 'Оснований нет: это предположение, а не факт.'; return; }
+  var events = parseJson(call('readEventsByIds', [JSON.stringify(ids)], '[]'), []);
+  if(!isArray(events) || !events.length){ box.hidden = false; box.textContent = 'Записи-основания не найдены в журнале.'; return; }
+  var parts = [];
+  for(var i = 0; i < events.length; i++){
+    var ev = events[i] || {};
+    parts.push('[' + String(ev.id || '').slice(0, 14) + '] ' + String(ev.type || '') + ': ' + String(ev.text || ev.reason || ''));
+  }
+  box.hidden = false;
+  box.textContent = parts.join('\n');
+}
+
+function challengeInsight(node){
+  if(!node) return;
+  var store = node.getAttribute('data-store');
+  var id = node.getAttribute('data-id');
+  if(!store || !id) return;
+  var reason = prompt('Что именно неверно? Это сохранится рядом с утверждением.', '');
+  if(reason === null) return;
+  var result = call('challengeClaim', [store, id, String(reason || '')], 'ERROR');
+  if(isErr(result)){ setText($('memoryStatus'), errText(result)); return; }
+  loadMemory();
 }
 
 function renderDiary(view){
@@ -2198,6 +2285,17 @@ function bindEvents(){
       }
     });
   }
+
+  var memView = $('memoryView');
+  if(memView) memView.addEventListener('click', function(event){
+    var target = event.target;
+    if(!target || !target.getAttribute) return;
+    var kind = target.getAttribute('data-insight');
+    if(!kind) return;
+    if(kind === 'challenge'){ challengeInsight(target); return; }
+    if(kind === 'sources'){ showInsightSources(target); return; }
+    if(kind === 'filter'){ INSIGHT_FILTER = target.getAttribute('data-key') || 'all'; loadMemory(); return; }
+  });
 
   var messages = $('messages');
   if(messages){

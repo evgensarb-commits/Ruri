@@ -272,8 +272,18 @@ object Thinker {
         }
 
         OutcomeDigest.verifyClaims(root, safeReply)
-        val notificationMessageId = if (publishesToChat(initiative, effective)) {
-            val messageId = appendChatMessage(root, "ruri", safeReply, now, ChatEngine.sourceUrlsSnapshot(), successfulRouteId)
+        val notificationMessageId: String = if (publishesToChat(initiative, effective)) {
+            // A chat message is not a diary entry, but the turn still produced a thought. It used
+            // to be dropped here, so the diary only filled when she chose "think" — which is why
+            // it looked permanently empty while she was happily talking in the chat.
+            val messageId = appendChatMessage(
+                root, "ruri", safeReply, now, ChatEngine.sourceUrlsSnapshot(), successfulRouteId
+            )
+            runCatching {
+                if (!Diary.isDuplicate(root, safeReply, "thought")) {
+                    Diary.append(root, safeReply, reason, emotion, "thought", listOf(messageId))
+                }
+            }
             messageId
         } else {
             if (Diary.isDuplicate(root, safeReply, "thought")) {
@@ -284,10 +294,8 @@ object Thinker {
                 return
             }
             Diary.append(root, safeReply, reason, emotion, "thought")
-            runCatching {
-                val entries = readJson(root, "memory/L2_diary.json").optJSONArray("entries") ?: JSONArray()
-                entries.optJSONObject(entries.length() - 1)?.optString("id")
-            }.getOrNull().orEmpty()
+            // A diary entry has no chat message id; an empty id is what Receipts expects here.
+            ""
         }
         Receipts.delivered(root, notificationMessageId)
         if (initiative) {

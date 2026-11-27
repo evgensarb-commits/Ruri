@@ -434,6 +434,68 @@ class MainActivity : AppCompatActivity() {
 
         /** Commander-set completion cap. 0 keeps the per-mode default. */
         /** Copies text to the system clipboard; the WebView clipboard API is unavailable here. */
+        // ------------------------------------------------------------ insights / provenance
+
+        /** Claims she derived, with the raw events behind each one. */
+        @JavascriptInterface
+        fun listInsights(): String {
+            val out = JSONArray()
+            val facts = runCatching {
+                JSONObject(FileManager.read(filesDir, "memory/L1_facts.json")).optJSONArray("facts")
+            }.getOrNull() ?: JSONArray()
+            for (i in 0 until facts.length()) {
+                val fact = facts.optJSONObject(i) ?: continue
+                out.put(JSONObject(fact.toString()).put("store", "L1"))
+            }
+            val diary = runCatching {
+                JSONObject(FileManager.read(filesDir, "memory/L2_diary.json")).optJSONArray("entries")
+            }.getOrNull() ?: JSONArray()
+            for (i in 0 until diary.length()) {
+                val entry = diary.optJSONObject(i) ?: continue
+                if (entry.optString("kind", "thought") != "thought") continue
+                out.put(JSONObject(entry.toString()).put("store", "L2"))
+            }
+            return out.toString()
+        }
+
+        /** Raw journal events by id, so a source can be inspected verbatim. */
+        @JavascriptInterface
+        fun readEventsByIds(idsJson: String): String {
+            return try {
+                val ids = JSONArray(idsJson).let { arr ->
+                    (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() }.toSet()
+                }
+                if (ids.isEmpty()) return "[]"
+                val (entries, _) = RawLog.read(filesDir, afterOffset = 0L, limit = 200)
+                val out = JSONArray()
+                for (entry in entries) {
+                    if (entry.id !in ids) continue
+                    out.put(entry.json.put("offset", entry.offset))
+                }
+                out.toString()
+            } catch (e: Exception) { "[]" }
+        }
+
+        /** Marks a claim as disputed. Nothing is deleted: the trail stays visible. */
+        @JavascriptInterface
+        fun challengeClaim(store: String, claimId: String, reason: String): String {
+            return try {
+                val ok = Provenance.challenge(filesDir, store.uppercase(), claimId, reason)
+                if (ok) "OK" else "ERROR: утверждение не найдено"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "challenge failed") }
+        }
+
+        @JavascriptInterface
+        fun rejectClaim(store: String, claimId: String, reason: String): String {
+            return try {
+                val ok = Provenance.reject(filesDir, store.uppercase(), claimId, reason)
+                if (ok) "OK" else "ERROR: утверждение не найдено"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "reject failed") }
+        }
+
+        @JavascriptInterface
+        fun rawJournalIndex(): String = RawLog.index(filesDir).toString()
+
         @JavascriptInterface
         fun copyText(text: String): String {
             return try {
