@@ -255,8 +255,14 @@ object ChatEngine {
         val messages = buildMessages(root, commanderMessageId, batteryPercent)
         var current = initialReply
         var hops = 0
+        // The model often answers with prose plus a JSON block. parseAction() only accepts a
+        // bare object, so relying on it alone would drop the request it already made. The queue
+        // from stripActions() is the source of truth for the first hop.
+        var queued: List<JSONObject> = requests
         while (hops < MAX_TOOL_HOPS) {
-            val action = parseAction(current) ?: break
+            val action = queued.firstOrNull { ChatEngine.parseAction(it.toString()) != null }
+                ?: parseAction(current)
+                ?: break
             val name = action.optString("action")
             val params = JSONObject(action.toString())
             params.remove("action")
@@ -271,9 +277,15 @@ object ChatEngine {
                     .put("ok", result.first).put("text", safeText)
             ))
 
+            // Saying a failure plainly matters: an empty result read as success makes her
+            // invent content that the tool never returned.
+            val status = if (result.first) "РЕЗУЛЬТАТ ИНСТРУМЕНТА" else "ИНСТРУМЕНТ НЕ СРАБОТАЛ"
             messages.put(JSONObject().put("role", "user")
-                .put("content", "РЕЗУЛЬТАТ ИНСТРУМЕНТА $name:\n$safeText\n\n" +
-                    "Ответь обычной прозой по существу. Не возвращай JSON, если не нужен ещё один инструмент."))
+                .put("content", "$status $name:\n$safeText\n\n" +
+                    "Ответь обычной прозой по существу. Если инструмент не сработал — скажи " +
+                    "об этом честно и не выдумывай содержимое. Не возвращай JSON, если не нужен " +
+                    "ещё один инструмент."))
+            queued = emptyList()
             current = requestToolFollowup(
                 model = JSONObject().put("api_key", Route.apiKey(root)),
                 messages = messages,
@@ -284,11 +296,13 @@ object ChatEngine {
             ) ?: break
             hops++
         }
-        if (hops >= MAX_TOOL_HOPS) {
+        // A hop limit reached on a usable answer is not a failure: she may have answered on the
+        // last round trip. Returning the limit error here would throw away a good reply.
+        val (cleaned, diaryAgain, leftover) = ToolLoop.stripActions(current)
+        diaryAgain.forEach { routeChatDiaryAction(root, it, emotion) }
+        if (leftover.isNotEmpty() && hops >= MAX_TOOL_HOPS) {
             return "Не удалось завершить цепочку действий: достигнут лимит $MAX_TOOL_HOPS вызовов."
         }
-        val (cleaned, diaryAgain, _) = ToolLoop.stripActions(current)
-        diaryAgain.forEach { routeChatDiaryAction(root, it, emotion) }
         return resolveChatReply(cleaned, diaryAgain.firstOrNull().orEmpty())
     }
 
@@ -368,6 +382,7 @@ object ChatEngine {
             "Состояние: ${state.optString("mood", "собранная")}, энергия ${state.optInt("energy", 5)}, фокус: " +
             "${state.optString("current_focus", selfModel.optString("current_focus"))}. " +
             "Заряд батареи телефона прямо сейчас: $batteryPercent%. " +
+            DeviceSensors.timeContext() + " " +
             "Активные цели: ${goals.optJSONArray("active") ?: JSONArray()}. " +
             "Незавершённые задачи: ${state.optJSONArray("active_tasks") ?: JSONArray()}. " +
             ChatStyle.architectureSection() +
