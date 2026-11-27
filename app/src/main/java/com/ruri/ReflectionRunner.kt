@@ -43,11 +43,9 @@ object ReflectionRunner {
         val apiKey = Route.apiKey(root)
         if (apiKey.isBlank()) return null
 
-        var lastResult: ReflectionPass.PassResult? = null
-        ReflectionPass.run(root) { window ->
+        val result = ReflectionPass.run(root) { window ->
             val prompt = buildPrompt(window)
             val raw = request(root, apiKey, prompt) ?: return@run emptyList()
-            lastResult = null
             parseCandidates(raw)
         }
         runCatching {
@@ -55,7 +53,7 @@ object ReflectionRunner {
                 state.put(STATE_KEY, System.currentTimeMillis())
             }
         }
-        return lastResult
+        return result
     }
 
     private fun buildPrompt(window: List<RawLog.Entry>): String {

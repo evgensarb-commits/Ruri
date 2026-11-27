@@ -389,6 +389,8 @@ object ChatEngine {
             "Активные цели: ${goals.optJSONArray("active") ?: JSONArray()}. " +
             "Незавершённые задачи: ${state.optJSONArray("active_tasks") ?: JSONArray()}. " +
             ChatStyle.architectureSection() +
+            ChatStyle.memorySelfServiceSection() +
+            ChatStyle.pendingInsightsSection(root) +
             ChatStyle.chatDirective(root, commanderText) +
             ChatStyle.webReadHint(commanderText) +
             // Only documents here: images are advertised separately, and mixing them meant a
