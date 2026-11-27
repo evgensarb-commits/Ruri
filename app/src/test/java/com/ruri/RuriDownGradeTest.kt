@@ -1962,4 +1962,48 @@ class MessageCopyTest {
         assertFalse(fn.contains("refreshChat("))
     }
 }
+
+/**
+ * "EMOTION_DELTA отсутствует" — the chat prompt forbade all JSON, contradicting the emotion
+ * section that offers EMOTION_DELTA. The model obeyed the stronger rule and stopped reporting.
+ */
+class EmotionDeltaReachableTest {
+    @Test fun thePromptDoesNotForbidWhatItJustOffered() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        // A blanket "без JSON" silently cancelled the EMOTION_DELTA instruction above it.
+        assertFalse("a blanket JSON ban must be gone",
+            engine.contains("Отвечай обычной прозой, без JSON и без служебных блоков"))
+        assertTrue("the exception must be stated",
+            engine.contains("Единственное исключение — служебная строка EMOTION_DELTA"))
+    }
+
+    @Test fun bothPromptsStillAdvertiseEmotionDelta() {
+        val emotions = RepoSources.text("app/src/main/java/com/ruri/EmotionEngine.kt")
+        assertTrue(emotions.contains("EMOTION_DELTA"))
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        assertTrue("chat prompt must include the emotion section",
+            engine.contains("EmotionEngine.promptSection(root)"))
+        val thinker = RepoSources.text("app/src/main/java/com/ruri/Thinker.kt")
+        assertTrue("initiative prompt must include it too",
+            thinker.contains("EmotionEngine.promptSection(root)"))
+    }
+
+    @Test fun theDeltaIsActuallyParsedAndApplied() {
+        // Advertising a line that is never parsed would be the same lie in the other direction.
+        for (file in listOf("ChatEngine.kt", "Thinker.kt")) {
+            val src = RepoSources.text("app/src/main/java/com/ruri/" + file)
+            assertTrue(file + " must parse EMOTION_DELTA",
+                src.contains("EmotionEngine.parseAndStrip("))
+            assertTrue(file + " must apply the delta",
+                src.contains("EmotionEngine.applyDelta("))
+        }
+    }
+
+    @Test fun theDeltaLineNeverReachesTheCommander() {
+        val emotions = RepoSources.text("app/src/main/java/com/ruri/EmotionEngine.kt")
+        val parser = emotions.substringAfter("fun parseAndStrip(").substringBefore("fun queryEmotions(")
+        // The raw marker has to be stripped from the visible reply.
+        assertTrue(parser.contains("reply.replace(m.value, \"\")"))
+    }
+}
 }
