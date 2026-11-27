@@ -25,7 +25,8 @@ object RawLog {
         "message", "tool_call", "tool_result", "wake", "emotion_delta",
         "phone_notification", "facts_extracted", "initiative_gate_evaluated",
         "initiative_ignored", "initiative_vetoed", "nsfw_refusal", "error",
-        "eviction_evt", "diary_linked"
+        "eviction_evt", "diary_linked", "claim_challenged", "claim_rejected",
+        "thought_lost", "self_description_changed"
     )
 
     /** One decoded journal line plus where it lives in the file. */
