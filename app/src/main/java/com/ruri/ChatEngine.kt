@@ -535,9 +535,13 @@ object ChatEngine {
             // stopped reporting feelings — so the diary of emotions never moved. The exception
             // is now stated instead of left to be guessed.
             "Ты общаешься с Командиром в чате приложения. Отвечай обычной прозой, без " +
-            "служебных блоков и без JSON-объектов инструментов. " +
-            "Единственное исключение — служебная строка EMOTION_DELTA в конце, если она нужна: " +
-            "она описана выше, в разделе про эмоции, и Командиру не показывается. " +
+            "служебных блоков и без посторонних JSON-объектов. " +
+            // Named generically on purpose: a hardcoded list would advertise read_url or
+            // read_document even on a turn where nothing offered them, which is its own lie.
+            "ИСКЛЮЧЕНИЯ, и только они: действия, перечисленные выше в этом сообщении " +
+            "(их может и не быть — вызывай только те, что там есть), и служебная строка " +
+            "EMOTION_DELTA в конце, если она нужна. " +
+            "Всё остальное — прозой, и служебные строки Командиру не показываются. " +
             "Ниже — ТВОЯ ДОЛГОСРОЧНАЯ ПАМЯТЬ. Это не контекст одного диалога; ты помнишь между сессиями.\n" +
             "ТВОЯ АВТОБИОГРАФИЯ (L3):\n$summary\n" +
             "ТВОИ ФАКТЫ (L1):\n$factContext\n" +
@@ -750,8 +754,31 @@ object ChatEngine {
     }
 
     internal fun setTurnInFlight(root: File, value: Boolean) {
-        FileManager.updateL4State(root) { it.put("turn_in_flight", value) }
+        val now = System.currentTimeMillis()
+        FileManager.updateL4State(root) {
+            it.put("turn_in_flight", value)
+            it.put("turn_in_flight_at", if (value) now else 0L)
+        }
     }
+
+    /**
+     * Is a turn actually running?
+     *
+     * The flag is cleared in a finally block, which never runs if the process is killed. Without
+     * an age check a single killed turn disabled unprompted chat for good, because Thinker skips
+     * the initiative gate whenever the flag is set.
+     */
+    internal fun turnInFlight(root: File, now: Long = System.currentTimeMillis()): Boolean {
+        val state = readJson(root, "memory/L4_state.json")
+        if (!state.optBoolean("turn_in_flight", false)) return false
+        val startedAt = state.optLong("turn_in_flight_at", 0L)
+        // A flag written by an older build carries no timestamp; treat it as debris, not as a turn.
+        if (startedAt <= 0L) return false
+        return now - startedAt < TURN_IN_FLIGHT_TTL_MS
+    }
+
+    /** A real turn never lasts this long; beyond it the flag is debris from a killed process. */
+    private const val TURN_IN_FLIGHT_TTL_MS = 10L * 60L * 1000L
 
     internal fun lastSavedReplyId(): String? = lastFinalMessageId
 

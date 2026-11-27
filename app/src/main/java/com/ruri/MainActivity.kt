@@ -228,7 +228,9 @@ class MainActivity : AppCompatActivity() {
      */
     private fun attemptPendingTurn() {
         retryScheduled = false
-        if (!activityResumed) return
+        // No screen gate. The Commander's requirement is that she keeps working and answering
+        // regardless of whether the screen is on: the durable WorkManager path already runs in
+        // the background, and refusing here only delayed the in-process copy of the same work.
         if (!CommanderReplyQueue.hasPending(filesDir)) {
             pushQueueState()
             return
@@ -270,7 +272,7 @@ class MainActivity : AppCompatActivity() {
         // Durable scheduling first: WorkManager keeps retrying while the screen is off or the
         // app is in the background, so a locked phone never stalls a pending reply.
         runCatching { LifeScheduler.scheduleCommanderReplyRetry(this, delay) }
-        if (!activityResumed) return
+        // Also arm the in-process timer while backgrounded: a live process should not idle.
         synchronized(this) {
             if (retryScheduled) return
             retryScheduled = true

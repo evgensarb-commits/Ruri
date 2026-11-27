@@ -255,10 +255,12 @@ class FullMemoryGuardTest {
             val messages = ChatEngine.buildMessages(dir, "c1")
             assertTrue(ChatEngine.hasFullMemoryContext(messages))
             val prompt = messages.getJSONObject(0).optString("content")
-            // No tool protocol may be advertised: the executors no longer exist.
-            for (removed in listOf("\"action\":\"search\"", "read_shelf", "list_shelf", "read_url")) {
+            // Removed organs must stay removed, and a tool that was not offered on this turn must
+            // not be named either. read_url is advertised only when the Commander pastes a link.
+            for (removed in listOf("\"action\":\"search\"", "read_shelf", "list_shelf")) {
                 assertFalse("prompt must not advertise $removed", prompt.contains(removed))
             }
+            assertFalse("an unoffered tool must not be named", prompt.contains("read_url"))
         } finally { dir.deleteRecursively() }
     }
 }
@@ -465,11 +467,17 @@ class UiBridgeContractTest {
         assertFalse("search bridge must be gone", activity.contains("fun searchWeb("))
     }
 
-    @Test fun retryTimerIsCancelledWhenTheScreenGoesAway() {
+    @Test fun theScreenNeverStopsHerWork() {
         val activity = activity()
-        // Doze / background must not keep hitting the provider.
-        assertTrue(activity.contains("mainHandler.removeCallbacks(autoRetry)"))
-        assertTrue(activity.contains("if (!activityResumed) return"))
+        // The Commander's rule: she works always, screen or no screen. The old behaviour refused
+        // to retry while the app was backgrounded, which is exactly what was forbidden.
+        assertTrue("the in-process timer is still cancelled on pause to avoid a duplicate wake",
+            activity.contains("mainHandler.removeCallbacks(autoRetry)"))
+        assertFalse("but nothing may refuse work because the screen is off",
+            activity.contains("if (!activityResumed) return"))
+        // The durable path must still be armed regardless of the activity state.
+        val scheduler = RepoSources.text("app/src/main/java/com/ruri/LifeScheduler.kt")
+        assertTrue(scheduler.contains("scheduleCommanderReplyRetry"))
     }
 }
 
@@ -618,7 +626,12 @@ class ChatRecallAndQuotaTest {
         try {
             FileManager.init(dir)
             assertTrue("fresh install has budget", RouteMeta.autonomyBudgetAvailable(dir))
-            repeat(45) { RouteMeta.recordAttempt(dir, Route.ID_ROUTEWAY) }
+            // The Commander's own traffic must not touch her allowance.
+            repeat(300) { RouteMeta.recordAttempt(dir, Route.ID_ROUTEWAY) }
+            assertTrue("his chat must not exhaust her budget",
+                RouteMeta.autonomyBudgetAvailable(dir))
+            // Only her own cycles count, and a runaway loop is still bounded.
+            repeat(200) { RouteMeta.recordAutonomousAttempt(dir, Route.ID_ROUTEWAY) }
             assertFalse("autonomy must stop when the day is spent",
                 RouteMeta.autonomyBudgetAvailable(dir))
             // The chat path must not consult this budget at all: no preflight gates.
@@ -1975,7 +1988,8 @@ class EmotionDeltaReachableTest {
         assertFalse("a blanket JSON ban must be gone",
             engine.contains("Отвечай обычной прозой, без JSON и без служебных блоков"))
         assertTrue("the exception must be stated",
-            engine.contains("Единственное исключение — служебная строка EMOTION_DELTA"))
+            engine.contains("ИСКЛЮЧЕНИЯ, и только они"))
+        assertTrue("and must include the emotion line", engine.contains("EMOTION_DELTA"))
     }
 
     @Test fun bothPromptsStillAdvertiseEmotionDelta() {
@@ -3034,6 +3048,133 @@ class AppearanceTiersTest {
             assertTrue(ChatStyle.appearanceSection(dir).contains("НЕ ОПИСАНА"))
             assertEquals("", ChatStyle.explicitAppearanceSection(dir))
         } finally { dir.deleteRecursively() }
+    }
+}
+
+/**
+ * She must work always. Each test here pins one of the ways she could stop.
+ */
+class AlwaysWorkingTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-always").toFile().also {
+        FileManager.init(it)
+        EmotionEngine.ensure(it)
+    }
+
+    @Test fun aKilledTurnDoesNotSilenceHerForever() {
+        val dir = root()
+        try {
+            val now = System.currentTimeMillis()
+            // A turn that started and never finished, as happens when the process is killed.
+            FileManager.updateL4State(dir) {
+                it.put("turn_in_flight", true).put("turn_in_flight_at", now - 60_000L)
+            }
+            assertTrue("a recent turn is genuinely in flight",
+                ChatEngine.turnInFlight(dir, now))
+
+            FileManager.updateL4State(dir) {
+                it.put("turn_in_flight_at", now - 11L * 60L * 1000L)
+            }
+            assertFalse("an ancient flag must expire", ChatEngine.turnInFlight(dir, now))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun aFlagFromAnOlderBuildIsIgnored() {
+        val dir = root()
+        try {
+            // No timestamp at all: debris, not a running turn.
+            FileManager.updateL4State(dir) { it.put("turn_in_flight", true) }
+            assertFalse(ChatEngine.turnInFlight(dir))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun thinkingIsAllowedEvenWhenNobodyHasEverWritten() {
+        val dir = root()
+        try {
+            // last_seen_commander is 0 on a fresh install; the initiative pressure must still grow.
+            val state = JSONObject(FileManager.read(dir, "memory/L4_state.json"))
+            assertEquals(0L, state.optLong("last_seen_commander", 0L))
+            EmotionEngine.tick(dir, System.currentTimeMillis() + 6L * 3600L * 1000L, 0L,
+                System.currentTimeMillis())
+            val values = EmotionEngine.readValues(dir)
+            assertTrue("boredom must grow without a prior reply",
+                values.optDouble("boredom", 0.0) > 20.0)
+            assertTrue("so must longing",
+                values.optDouble("longing", 0.0) > 20.0)
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun aParkedMessageDoesNotSuspendHer() {
+        val dir = root()
+        try {
+            val id = JSONObject(FileManager.appendEvent(dir, JSONObject()
+                .put("type", "message").put("who", "commander").put("text", "вопрос"))).optString("id")
+            CommanderReplyQueue.enqueue(dir, id)
+            // Terminal failure: the item waits for the «ПОВТОРИТЬ» button.
+            CommanderReplyQueue.recordFailure(dir, id, "no_vpn")
+
+            assertTrue("it is still pending", CommanderReplyQueue.hasPending(dir))
+            assertFalse("but nothing will be retried automatically",
+                CommanderReplyQueue.hasAutoRetryPending(dir))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun anOrdinaryPendingMessageStillCounts() {
+        val dir = root()
+        try {
+            val id = JSONObject(FileManager.appendEvent(dir, JSONObject()
+                .put("type", "message").put("who", "commander").put("text", "вопрос"))).optString("id")
+            CommanderReplyQueue.enqueue(dir, id)
+            // A transient failure schedules another attempt, so this one does hold priority.
+            CommanderReplyQueue.recordFailure(dir, id, "timeout")
+            assertTrue(CommanderReplyQueue.hasAutoRetryPending(dir))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun theAutonomyBudgetIsNotEatenByTheCommanderChat() {
+        val dir = root()
+        try {
+            // A busy day of ordinary chat traffic.
+            repeat(180) { RouteMeta.recordAttempt(dir, Route.ID_ROUTEWAY) }
+            assertTrue("his conversation must not exhaust her allowance",
+                RouteMeta.autonomyBudgetAvailable(dir))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun herOwnCyclesDoCountAgainstHerBudget() {
+        val dir = root()
+        try {
+            repeat(200) { RouteMeta.recordAutonomousAttempt(dir, Route.ID_ROUTEWAY) }
+            assertFalse("a runaway loop must still be bounded",
+                RouteMeta.autonomyBudgetAvailable(dir))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun noScreenGateStopsTheRetry() {
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        val turn = activity.substringAfter("private fun attemptPendingTurn()")
+            .substringBefore("private fun scheduleRetryIfNeeded(")
+        // The Commander's rule is that she works regardless of the screen.
+        assertFalse("the screen must not gate the turn", turn.contains("if (!activityResumed) return"))
+        val retry = activity.substringAfter("private fun scheduleRetryIfNeeded(")
+            .substringBefore("private fun errorPayload(")
+        assertFalse("nor the retry timer", retry.contains("if (!activityResumed) return"))
+    }
+
+    @Test fun theNetworkCallbackSurvivesOneOwnerLeaving() {
+        val net = RepoSources.text("app/src/main/java/com/ruri/NetState.kt")
+        // The activity used to tear down the callback the foreground service still needed.
+        assertTrue("owners must be counted", net.contains("private var owners = 0"))
+        assertTrue("and checked before teardown", net.contains("if (owners > 0) return"))
+    }
+
+    @Test fun thePromptNamesTheToolsItAdvertises() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        // A blanket ban on tool JSON silently disabled every tool, exactly as it once did for
+        // EMOTION_DELTA.
+        assertTrue("the exception must allow the advertised actions",
+            engine.contains("действия, перечисленные выше в этом сообщении"))
+        assertFalse("no blanket ban may remain",
+            engine.contains("без JSON-объектов инструментов. \" +"))
     }
 }
 }

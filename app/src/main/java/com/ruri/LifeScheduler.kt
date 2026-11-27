@@ -190,7 +190,9 @@ class RuriLifeWorker(
 
             // A pending Commander reply takes priority over optional autonomous cognition.
             // This is task ordering, not an online/quota/battery preflight.
-            val commanderReplyPending = OfflineQueue.hasPending(root) || CommanderReplyQueue.hasPending(root)
+            // Only an item the app will actually retry may delay her inner life. A parked one
+            // waits for the «ПОВТОРИТЬ» button and must not suspend cognition meanwhile.
+            val commanderReplyPending = CommanderReplyQueue.hasAutoRetryPending(root)
             if (!commanderReplyPending && shouldRunRemoteCognition(appContext, reason)) {
                 if (!Thinker.runScheduledCycle(appContext, reason)) return Result.retry()
             }

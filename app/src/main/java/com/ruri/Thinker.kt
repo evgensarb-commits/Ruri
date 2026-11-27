@@ -63,8 +63,9 @@ object Thinker {
         val root = ctx.filesDir
         val state = readStateStrict(root)
         val baselineState = JSONObject(state.toString())
-        val inFlight = readJson(root, "memory/L4_state.json").optBoolean("turn_in_flight", false)
         val now = System.currentTimeMillis()
+        // Aged out on purpose: a killed turn must not silence her forever.
+        val inFlight = ChatEngine.turnInFlight(root, now)
         EmotionEngine.tick(root, now, state.optLong("last_seen_commander", 0L),
             state.optJSONObject("recent_activity")?.optLong("last_event_at", now) ?: now)
         EmotionEngine.onCycle(root)
@@ -156,7 +157,7 @@ object Thinker {
                     )
                 }
             }
-            runCatching { RouteMeta.recordAttempt(root, routeId) }
+            runCatching { RouteMeta.recordAutonomousAttempt(root, routeId) }
             val messages = JSONArray()
                 .put(JSONObject().put("role", "system").put("content", prompt))
                 .put(JSONObject().put("role", "user").put("content",
@@ -310,7 +311,7 @@ object Thinker {
         state.put("mood", EmotionEngine.moodLabel(EmotionEngine.readValues(root)))
         state.put("energy", energyFor())
         persistStatePreservingTurnInFlight(root, state, baselineState)
-        val stillInFlight = readJson(root, "memory/L4_state.json").optBoolean("turn_in_flight", false)
+        val stillInFlight = ChatEngine.turnInFlight(root, System.currentTimeMillis())
         if (!inFlight && !stillInFlight) Notifier.thought(ctx, safeReply, notificationMessageId)
     }
 
