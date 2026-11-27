@@ -3853,8 +3853,12 @@ class JournalReadScopeTest {
             .substringBefore("internal fun isActionJson(")
         // The collection used a second, bracket-only prefix test, so in the chat path the tool
         // output was dropped and the follow-up carried the question with no material.
-        assertTrue("must collect by the shared flag", fn.contains("if (role == \"user\" && isToolResult) toolResults.add(m)"))
-        assertFalse("must not re-test one prefix", fn.contains("content.startsWith(\"[ИНСТРУМЕНТ\")"))
+        assertTrue("must collect by the shared flag",
+            fn.contains("if (role == \"user\" && isToolResult) toolResults.add(m)"))
+        // The bracket prefix belongs to the shared flag exactly once; a second, separate test is
+        // what dropped the chat path's result.
+        val bracketTests = Regex("content\\.startsWith\\(\\\"[ИНСТРУМЕНТ\\\"\\)").findAll(fn).count()
+        assertEquals("the prefix must be tested only inside the shared flag", 1, bracketTests)
     }
 
     @Test fun aToolFollowUpKeepsTheCurrentQuestion() {
