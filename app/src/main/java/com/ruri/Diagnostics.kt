@@ -195,7 +195,7 @@ object Diagnostics {
         !online ->
             "Нет интернета: Android не видит активную сеть. Проверь Wi-Fi/мобильные данные."
         apiKey.isBlank() ->
-            "Ключ Routeway не задан. Настройки → Подключение → вставь ключ и сохрани."
+            "Ключ провайдера не задан. Настройки → Подключение → вставь ключ и сохрани."
         requiresVpn && !vpn && kind != "ok" ->
             "VPN не обнаружен, а Gemma MeroMero работает только через VPN. " +
                 RetryPolicy.explain(kind, httpStatus, detail)

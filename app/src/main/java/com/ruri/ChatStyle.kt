@@ -397,7 +397,7 @@ object ChatStyle {
         val lowered = text.lowercase()
         val markers = listOf(
             "картинк", "изображен", "фото", "скриншот", "скрин", "снимок", "фотограф",
-            "что на图", "посмотри на", "глянь на фото", "что здесь", "кто на", "мем"
+            "что на фото", "посмотри на", "глянь на фото", "что здесь", "кто на", "мем"
         )
         return markers.any(lowered::contains) ||
             Regex("\\.(png|jpe?g|webp|gif)\\b", RegexOption.IGNORE_CASE).containsMatchIn(text)

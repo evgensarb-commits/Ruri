@@ -18,7 +18,6 @@ object FactExtractor {
     private const val STATE_PATH = "memory/L4_state.json"
     private const val FACTS_PATH = "memory/L1_facts.json"
     private const val PENDING_PATH = "memory/fact_extraction_pending.json"
-    private const val MIN_COMMANDER_MESSAGES = 3
     private const val MAX_WINDOW_MESSAGES = 32
     private const val RETRY_COOLDOWN_MS = 30L * 60L * 1000L
     private val processLock = Any()

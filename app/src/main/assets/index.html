@@ -833,7 +833,13 @@ function refreshStyleToggle(){
 function toggleStyle(){
   var next = !styleOn();
   var result = call('setRoleplayMode', [next], 'ERROR: нет связи с Ruri');
-  if(isErr(result)){ setStatus('dataStatus', errText(result), 'bad'); return; }
+  if(isErr(result)){
+    // #dataStatus lives on the Settings tab while the button is in the chat header, so a failure
+    // used to be completely invisible on the screen where it happened.
+    pushError({ message: errText(result), explanation: 'Режим ролевой игры не переключён.', retryable: false });
+    renderChat(false, true);
+    return;
+  }
   refreshStyleToggle();
 }
 
@@ -1245,7 +1251,12 @@ function renderInsights(view){
       : '<span class="src-none">оснований нет</span>';
     var conf = Number(item.confidence || 0);
     var confirmations = Number(item.confirmations || 0);
+    // Reject closes the loop: a challenged claim had no verdict control at all, so it hung
+    // forever and the "rejected" status was unreachable from the interface.
     var buttons = '<button class="btn mini" type="button" data-insight="challenge" data-store="' + esc(item.store) + '" data-id="' + esc(item.id) + '">Это не так</button>'
+      + (status === 'challenged'
+        ? '<button class="btn mini" type="button" data-insight="reject" data-store="' + esc(item.store) + '" data-id="' + esc(item.id) + '">Отвергнуть</button>'
+        : '')
       + '<button class="btn mini" type="button" data-insight="sources" data-ids="' + esc(JSON.stringify(sources)) + '">Источники</button>';
     html += '<div class="insight st-' + esc(status) + '">'
       + '<div class="insight-head"><span class="insight-status">' + esc(statusLabel(status)) + '</span>'
@@ -1281,6 +1292,20 @@ function showInsightSources(node){
   }
   box.hidden = false;
   box.textContent = parts.join('\n');
+}
+
+/* Final verdict on a disputed claim. Nothing is deleted: the entry keeps its sources and the
+   reason, which is the trail that documents what the extractor got wrong. */
+function rejectInsight(node){
+  if(!node) return;
+  var store = node.getAttribute('data-store');
+  var id = node.getAttribute('data-id');
+  if(!store || !id) return;
+  var reason = prompt('Почему это отвергается? Утверждение останется в памяти как след ошибки.', '');
+  if(reason === null) return;
+  var result = call('rejectClaim', [store, id, String(reason || '')], 'ERROR');
+  if(isErr(result)){ setText($('memoryStatus'), errText(result)); return; }
+  loadMemory();
 }
 
 function challengeInsight(node){
@@ -1908,6 +1933,24 @@ function runLiveDiagnostics(){
   }, 80);
 }
 
+/* Journal composition. The bridge existed but nothing called it, so the raw index — how many
+   events of each type the journal holds — was invisible even though it is the cheapest way to
+   see whether she is actually living. */
+function journalIndexSummary(){
+  var index = parseJson(call('rawJournalIndex', [], '{}'), {});
+  if(!index || typeof index !== 'object' || !index.by_type) return '';
+  var types = index.by_type;
+  var parts = [];
+  for(var key in types){
+    if(!Object.prototype.hasOwnProperty.call(types, key)) continue;
+    var bucket = types[key] || {};
+    parts.push(key + ': ' + String(bucket.count || 0));
+  }
+  if(!parts.length) return '';
+  return 'Журнал: ' + String(index.lines || 0) + ' записей, ' + String(index.bytes || 0)
+    + ' байт. ' + parts.sort().join(', ');
+}
+
 function toggleDiagLog(){
   var box = $('diagLogBox');
   var button = $('diagLog');
@@ -1917,6 +1960,8 @@ function toggleDiagLog(){
     if(button) setText(button, 'Показать журнал');
     return;
   }
+  var summary = journalIndexSummary();
+  if(box && summary) box.setAttribute('data-journal', summary);
   var lines = parseJson(call('readDiagnosticsLog', [], '[]'), []);
   if(!isArray(lines) || !lines.length){
     box.innerHTML = '<div class="placeholder">Журнал пуст.</div>';
@@ -2164,6 +2209,10 @@ function showTab(name){
   else if(key === 'settings') refreshSettings();
 }
 
+/* The app calls refreshOnboarding on every resume; only this name was ever defined, so the
+   onboarding re-check silently did nothing. */
+window.refreshOnboarding = function(){ window.startOnboarding(); };
+
 window.startOnboarding = function(){
   var overlay = $('onboarding');
   if(!overlay) return;
@@ -2305,6 +2354,7 @@ function bindEvents(){
     var kind = target.getAttribute('data-insight');
     if(!kind) return;
     if(kind === 'challenge'){ challengeInsight(target); return; }
+    if(kind === 'reject'){ rejectInsight(target); return; }
     if(kind === 'sources'){ showInsightSources(target); return; }
     if(kind === 'filter'){ INSIGHT_FILTER = target.getAttribute('data-key') || 'all'; loadMemory(); return; }
   });

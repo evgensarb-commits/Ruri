@@ -83,6 +83,14 @@ object UrlReader {
         var connection: HttpURLConnection? = null
         return try {
             repeat(MAX_REDIRECTS + 1) { hop ->
+                // Defence in depth: re-check the host immediately before the connection, because
+                // openConnection() performs its own DNS lookup. This narrows the rebinding window
+                // (a hostile name that resolves differently between the two lookups) but cannot
+                // close it without pinning the socket to the validated address, which would break
+                // TLS hostname verification — the residual risk is accepted and documented.
+                if (target.host.isNullOrBlank() || !isPublicHost(target.host)) {
+                    return false to "Адрес локальный или служебный — читать нельзя"
+                }
                 connection = (target.toURL().openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
                     connectTimeout = 12_000

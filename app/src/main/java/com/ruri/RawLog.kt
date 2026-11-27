@@ -17,7 +17,6 @@ import java.io.File
  */
 object RawLog {
 
-    private const val INDEX_PATH = "memory/L0_index.json"
     private const val SCHEMA = 1
 
     /**
@@ -98,7 +97,13 @@ object RawLog {
                     // readLine() decodes as ISO-8859-1; the journal is UTF-8, so re-read the
                     // exact byte range and decode it properly. Cyrillic would be mojibake otherwise.
                     val lineLength = raw.toByteArray(Charsets.ISO_8859_1).size
-                    cursor += lineLength + 1L
+                    // Advance past the newline only if there is one. Assuming it meant a torn
+                    // read (an append in flight, so the last line has no terminator yet) pushed
+                    // the cursor past EOF; the next call then saw cursor > length and restarted
+                    // from the beginning of the journal.
+                    val terminated = lineStart + lineLength < length &&
+                        raf.read() == '\n'.code
+                    cursor = if (terminated) lineStart + lineLength + 1L else lineStart + lineLength
                     nextCursor = cursor
                     if (lineStart >= length) break
 
@@ -203,11 +208,13 @@ object RawLog {
         val found = HashSet<String>()
         val target = File(root, "memory/L0_raw.jsonl")
         if (!target.isFile) return found
+        // A plain loop, not useLines: `return@forEach` only skipped one line, so the "early exit"
+        // re-read the entire journal on every provenance check.
         runCatching {
-            target.bufferedReader(Charsets.UTF_8).useLines { seq ->
-                seq.forEach { line ->
-                    if (found.size >= wanted.size) return@forEach
-                    val json = runCatching { JSONObject(line) }.getOrNull() ?: return@forEach
+            target.bufferedReader(Charsets.UTF_8).use { reader ->
+                while (found.size < wanted.size) {
+                    val line = reader.readLine() ?: break
+                    val json = runCatching { JSONObject(line) }.getOrNull() ?: continue
                     val id = json.optString("id")
                     if (id in wanted) found.add(id)
                 }

@@ -107,44 +107,7 @@ object Provenance {
         return true
     }
 
-    /** Turns a challenged claim back into an ordinary one after a fresh, sourced derivation. */
-    fun restore(root: File, store: String, claimId: String, newSources: Collection<String>): Boolean {
-        val path = storePath(store) ?: return false
-        val file = runCatching { JSONObject(FileManager.read(root, path)) }.getOrNull() ?: return false
-        val array = file.optJSONArray(if (store == "L2") "entries" else "facts") ?: return false
-        val verified = verifiedSources(root, newSources)
-        if (verified.isEmpty()) return false
-        var changed = false
-        for (i in 0 until array.length()) {
-            val item = array.optJSONObject(i) ?: continue
-            if (item.optString("id") != claimId) continue
-            item.put("status", STATUS_ASSERTED)
-            item.put("source_event_ids", JSONArray(verified))
-            item.put("restored_at", System.currentTimeMillis())
-            changed = true
-            break
-        }
-        if (!changed) return false
-        FileManager.write(root, path, file.toString(2))
-        return true
-    }
 
-    /** Claims awaiting a human verdict, newest first. */
-    fun pending(root: File): JSONArray {
-        val out = JSONArray()
-        for (store in listOf("L1", "L2")) {
-            val path = storePath(store) ?: continue
-            val file = runCatching { JSONObject(FileManager.read(root, path)) }.getOrNull() ?: continue
-            val array = file.optJSONArray(if (store == "L2") "entries" else "facts") ?: continue
-            for (i in array.length() - 1 downTo 0) {
-                val item = array.optJSONObject(i) ?: continue
-                val status = item.optString("status", STATUS_ASSERTED)
-                if (status != STATUS_CHALLENGED) continue
-                out.put(JSONObject(item.toString()).put("store", store))
-            }
-        }
-        return out
-    }
 
     private fun storePath(store: String): String? = when (store) {
         "L1" -> "memory/L1_facts.json"

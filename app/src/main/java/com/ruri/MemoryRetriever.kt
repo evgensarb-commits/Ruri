@@ -39,7 +39,10 @@ object MemoryRetriever {
     fun search(root: File, query: String, scope: String = SCOPE_ALL, limit: Int = 12): String {
         val bounded = limit.coerceIn(1, SCOPE_MAX_RESULTS)
         val wanted = scope.lowercase().ifBlank { SCOPE_ALL }
-        val hits = collect(root, query, wanted)
+        // An explicit search is thorough on purpose: it pages through the whole journal instead
+        // of reading a tail window, because reaching things that fell out of the prompt is the
+        // entire point of the tool.
+        val hits = collect(root, query, wanted, fullScan = true)
         if (hits.isEmpty()) {
             return "По запросу «$query» ничего не найдено в области: $wanted."
         }
@@ -60,7 +63,12 @@ object MemoryRetriever {
     }
 
     /** Raw scored hits before trimming, so search and recall share one ranking. */
-    private fun collect(root: File, query: String, scope: String): List<Pair<Memory, Double>> {
+    private fun collect(
+        root: File,
+        query: String,
+        scope: String,
+        fullScan: Boolean = false
+    ): List<Pair<Memory, Double>> {
         val queryEmotions = EmotionEngine.queryEmotions(root, query)
         val terms = tokenize(query)
         if (terms.isEmpty()) return emptyList()
@@ -74,11 +82,28 @@ object MemoryRetriever {
         // Deliberately NOT limited to recent lines: the whole point of the tool is to reach
         // things that fell out of the prompt, so it scans the journal from the start.
         if (wantMessages || wantNotes) {
-            val events = FileManager.readLastLines(
-                root, "memory/L0_raw.jsonl", maxLines = 200000, maxBytes = 32 * 1024 * 1024
-            )
-            for (line in events) {
-                val event = runCatching { JSONObject(line) }.getOrNull() ?: continue
+            // A full scan streams the journal in bounded batches, so a large file neither loads
+            // a 32 MB tail into memory at once nor silently ignores everything older than it.
+            val events: List<JSONObject> = if (fullScan) {
+                val collected = ArrayList<JSONObject>()
+                var offset = 0L
+                var guard = 0
+                while (guard < MAX_SCAN_BATCHES) {
+                    val batch = runCatching {
+                        FileManager.readL0Batch(root, offset, maxRecords = 4000, maxBytes = 4 * 1024 * 1024)
+                    }.getOrNull() ?: break
+                    collected.addAll(batch.events)
+                    if (!batch.hasMore || batch.nextOffset <= offset) break
+                    offset = batch.nextOffset
+                    guard++
+                }
+                collected
+            } else {
+                FileManager.readLastLines(
+                    root, "memory/L0_raw.jsonl", maxLines = 4000, maxBytes = 8 * 1024 * 1024
+                ).mapNotNull { runCatching { JSONObject(it) }.getOrNull() }
+            }
+            for (event in events) {
                 val type = event.optString("type")
                 val id = event.optString("id")
                 if (id.isNotBlank() && id in deletedIds) continue
@@ -277,6 +302,9 @@ object MemoryRetriever {
     /** Generous on purpose: the Commander accepts the token cost of a deep search. */
     const val SCOPE_MAX_RESULTS = 60
 
+    /** Bound on a full journal scan, so a huge file cannot stall a reply forever. */
+    private const val MAX_SCAN_BATCHES = 200
+
     /**
      * Automatic recall used when building the prompt.
      *
@@ -287,7 +315,9 @@ object MemoryRetriever {
     fun recall(root: File, query: String, limit: Int = 6): String {
         val terms = tokenize(query)
         if (terms.isEmpty()) return ""
-        val hits = collect(root, query, SCOPE_ALL)
+        // Prompt enrichment runs on every turn, so it reads a bounded tail rather than the whole
+        // journal; the explicit search tool is the thorough path.
+        val hits = collect(root, query, SCOPE_ALL, fullScan = false)
         if (hits.isEmpty()) return ""
         val builder = StringBuilder()
         for ((memory, _) in hits.sortedByDescending { it.second }.take(limit.coerceIn(1, 30))) {
