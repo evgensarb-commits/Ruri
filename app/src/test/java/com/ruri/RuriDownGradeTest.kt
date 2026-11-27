@@ -1831,4 +1831,66 @@ class ChatToolExecutionTest {
         assertFalse(requests.contains("buildMessages(root, commanderMessageId, -1)"))
     }
 }
+
+/**
+ * Wall clock in the prompt: she knew the battery level but not the hour.
+ */
+class TimeAwarenessTest {
+    @Test fun thePromptCarriesTheCurrentTimeAndDayPart() {
+        val chat = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        assertTrue("chat prompt needs the clock", chat.contains("DeviceSensors.timeContext()"))
+        val thinker = RepoSources.text("app/src/main/java/com/ruri/Thinker.kt")
+        // Initiative matters most: writing at 3am must not read as morning.
+        assertTrue("initiative prompt needs the clock", thinker.contains("DeviceSensors.timeContext()"))
+    }
+
+    @Test fun theDayPartCoversTheWholeDay() {
+        val sensors = RepoSources.text("app/src/main/java/com/ruri/DeviceSensors.kt")
+        // Every hour must map to a part of the day, otherwise she gets an empty label.
+        for (part in listOf("утро", "день", "вечер", "ночь")) {
+            assertTrue("missing day part " + part, sensors.contains(part))
+        }
+        assertTrue(sensors.contains("in 5..11"))
+        assertTrue("late night must be covered", sensors.contains("else ->"))
+    }
+
+    @Test fun theTimeComesFromTheDeviceZone() {
+        val sensors = RepoSources.text("app/src/main/java/com/ruri/DeviceSensors.kt")
+        // A fixed zone or a cached formatter would drift when the phone travels.
+        assertTrue(sensors.contains("TimeZone.getDefault()"))
+        assertTrue(sensors.contains("Calendar.getInstance(zone)"))
+    }
+}
+
+/**
+ * Bugs found in the tool execution path while reviewing it after the first fix.
+ */
+class ToolLoopRobustnessTest {
+    @Test fun prosePlusJsonStillExecutesTheTool() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        val loop = engine.substringAfter("private fun runToolRequests(")
+            .substringBefore("private fun currentCommanderText(")
+        // parseAction() only accepts a bare JSON object; a model that writes prose and then the
+        // action would otherwise have its request silently ignored.
+        assertTrue("must fall back to the stripped request list",
+            loop.contains("queued.firstOrNull"))
+    }
+
+    @Test fun aFailedToolIsReportedAsFailure() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        val loop = engine.substringAfter("private fun runToolRequests(")
+            .substringBefore("private fun currentCommanderText(")
+        // Presenting an empty failed result as data invites invented content.
+        assertTrue(loop.contains("ИНСТРУМЕНТ НЕ СРАБОТАЛ"))
+        assertTrue(loop.contains("не выдумывай содержимое"))
+    }
+
+    @Test fun reachingTheHopLimitDoesNotDiscardAGoodAnswer() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        val loop = engine.substringAfter("private fun runToolRequests(")
+            .substringBefore("private fun currentCommanderText(")
+        // The limit error may only replace the answer when an unexecuted request remains.
+        assertTrue(loop.contains("leftover.isNotEmpty() && hops >= MAX_TOOL_HOPS"))
+    }
+}
 }
