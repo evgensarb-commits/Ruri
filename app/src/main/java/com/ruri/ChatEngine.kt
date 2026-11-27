@@ -736,7 +736,9 @@ object ChatEngine {
                 runCatching { JSONObject(line) }.getOrNull()?.let { event ->
                     event.optString("id") == messageId &&
                         event.optString("type") == "message" &&
-                        event.optString("who") == "commander"
+                        event.optString("who") == "commander" &&
+                        // A deleted message must be refused on both paths, not only the slow one.
+                        !Tombstone.isDeleted(root, messageId)
                 } == true
             }
         if (quick) return true
