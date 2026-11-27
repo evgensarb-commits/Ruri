@@ -191,6 +191,10 @@ object MemoryRetriever {
 
         for ((memory, memoryTerms) in tokenized) {
             if (memory.text in directTexts) continue
+            // A phone notification is text written by another app, not a memory she formed.
+            // Linking it by a stray shared word pulled unrelated notifications into answers
+            // about a completely different topic, so they only ever match directly.
+            if (memory.kind.startsWith("уведомление")) continue
             val links = linkTerms.intersect(memoryTerms)
             if (links.isEmpty()) continue
             val ageDays = if (memory.timestamp > 0L) {
