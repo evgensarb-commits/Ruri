@@ -37,6 +37,12 @@ object Diary {
         if (kind != "thought" && !(kind == "said" && mirrorSaid)) return
         val t = SecretRedactor.redactText(text.trim())
         if (t.isBlank() || isDuplicate(root, t, kind)) return
+        if (kind == "thought") {
+            val lastThoughtTurn = runCatching {
+                JSONObject(FileManager.read(root, "memory/L4_state.json")).optLong("last_thought_turn", 0L)
+            }.getOrDefault(0L)
+            if (!DiaryCadence.allows(root, System.currentTimeMillis(), lastThoughtTurn)) return
+        }
         val raw = FileManager.read(root, "memory/L2_diary.json")
         val d = if (raw.isBlank()) {
             JSONObject().put("entries", JSONArray())
