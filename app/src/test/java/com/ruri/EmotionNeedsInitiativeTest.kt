@@ -65,6 +65,29 @@ class PressureThresholdTest {
     }
 }
 
+class RecentConversationStopsSilenceGrowthTest {
+    @Test fun recentMessageOnlyAllowsGrowthForTimeAfterThatMessage() {
+        val root = needsTestRoot()
+        val now = System.currentTimeMillis()
+        setEmotionValues(root, boredom = 20.0, longing = 30.0,
+            updatedAt = now - EMOTION_TEST_HOUR_MS, lastTickAt = now - EMOTION_TEST_HOUR_MS)
+        EmotionEngine.tick(root, now, now - 10L * 60L * 1000L, now)
+        val values = EmotionEngine.readValues(root)
+        val expectedGrowth = (100.0 / 9.0) / 6.0
+        assertEquals(20.0 + expectedGrowth, values.optDouble("boredom"), 0.01)
+        assertEquals(30.0 + expectedGrowth, values.optDouble("longing"), 0.01)
+    }
+}
+
+class RecentConversationBlocksInitiativeTest {
+    @Test fun recentMessageBlocksInitiativeEvenWhenPressureIsMaxed() {
+        val root = needsTestRoot()
+        val now = System.currentTimeMillis()
+        setEmotionValues(root, boredom = 100.0, longing = 100.0, updatedAt = now, lastTickAt = now)
+        assertFalse(EmotionEngine.initiativeGate(root, now - 60_000L, now, false, 0L))
+    }
+}
+
 class GuaranteeAt100Test {
     @Test fun pressureAtOneHundredGuaranteesInitiative() {
         val root = needsTestRoot()
