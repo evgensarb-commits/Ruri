@@ -3882,4 +3882,159 @@ class JournalReadScopeTest {
         assertTrue(fn.contains("toolResults.takeLast(6)"))
     }
 }
+
+/**
+ * She proposes a change to how she looks; the Commander decides. Nothing touches her real
+ * appearance until he approves, and a rejected idea is not raised again.
+ */
+class AppearanceApprovalTest {
+    private fun root(): java.io.File = Files.createTempDirectory("ruri-look-approve").toFile().also {
+        FileManager.init(it)
+    }
+
+    private fun valueOf(dir: java.io.File, field: String): String =
+        JSONObject(FileManager.read(dir, "core/appearance.json")).optString(field)
+
+    @Test fun aProposalDoesNotChangeAnythingByItself() {
+        val dir = root()
+        try {
+            val before = valueOf(dir, "hair")
+            val message = AppearanceChange.propose(dir, "hair", "заплела косу", "Командир предложил")
+            assertTrue("she must be told it awaits a decision", message.contains("Ждёт") || message.contains("ждёт") || message.contains("Предложение отправлено"))
+            assertEquals("the appearance must be untouched", before, valueOf(dir, "hair"))
+            assertEquals("but it must be waiting", 1, AppearanceChange.pending(dir).length())
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun approvalAppliesItAndRecordsTheHistory() {
+        val dir = root()
+        try {
+            AppearanceChange.propose(dir, "hair", "короткая стрижка", "решила сама")
+            val id = AppearanceChange.pending(dir).getJSONObject(0).optString("id")
+            assertTrue(AppearanceChange.approve(dir, id))
+
+            assertEquals("короткая стрижка", valueOf(dir, "hair"))
+            val appearance = JSONObject(FileManager.read(dir, "core/appearance.json"))
+            val history = appearance.optJSONArray("history")
+            assertNotNull("the change must be traceable", history)
+            assertTrue("with at least one record", history!!.length() >= 1)
+            val record = history.getJSONObject(history.length() - 1)
+            assertEquals("hair", record.optString("field"))
+            assertEquals("короткая стрижка", record.optString("to"))
+            assertTrue("and why", record.optString("reason").isNotBlank())
+            assertEquals("nothing stays pending", 0, AppearanceChange.pending(dir).length())
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun rejectionKeepsItOnRecordAndStopsARepeat() {
+        val dir = root()
+        try {
+            AppearanceChange.propose(dir, "hair", "розовый ирокез", "настроение")
+            val id = AppearanceChange.pending(dir).getJSONObject(0).optString("id")
+            assertTrue(AppearanceChange.reject(dir, id, "слишком"))
+
+            assertEquals("the appearance must be untouched",
+                JSONObject(FileManager.read(dir, "core/appearance.json")).optString("hair"),
+                valueOf(dir, "hair"))
+            assertEquals(0, AppearanceChange.pending(dir).length())
+
+            // Asking again must be refused, exactly like a rejected claim.
+            val again = AppearanceChange.propose(dir, "hair", "розовый ирокез", "снова захотела")
+            assertTrue("a rejected idea must not be re-raised: $again",
+                again.contains("отклонил"))
+            assertEquals("and no new proposal appears", 0, AppearanceChange.pending(dir).length())
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun revertingPutsTheOldValueBack() {
+        val dir = root()
+        try {
+            val original = valueOf(dir, "hair")
+            AppearanceChange.propose(dir, "hair", "короткая стрижка", "решила")
+            val id = AppearanceChange.pending(dir).getJSONObject(0).optString("id")
+            AppearanceChange.approve(dir, id)
+            assertEquals("короткая стрижка", valueOf(dir, "hair"))
+
+            assertTrue(AppearanceChange.revert(dir, id))
+            assertEquals("the original must come back", original, valueOf(dir, "hair"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun onlyRealFieldsAreAccepted() {
+        val dir = root()
+        try {
+            val message = AppearanceChange.propose(dir, "несуществующее_поле", "что-то", "просто так")
+            assertTrue("must explain the vocabulary: $message", message.contains("нет"))
+            assertEquals(0, AppearanceChange.pending(dir).length())
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun pointlessProposalsAreRefused() {
+        val dir = root()
+        try {
+            // A value identical to what she already has is not a change.
+            val current = valueOf(dir, "hair")
+            if (current.isNotBlank()) {
+                val same = AppearanceChange.propose(dir, "hair", current, "просто так")
+                assertTrue("must refuse a no-op: $same", same.contains("уже так выглядишь"))
+            }
+            assertTrue(AppearanceChange.propose(dir, "hair", "", "пусто").contains("пустое"))
+            assertEquals(0, AppearanceChange.pending(dir).length())
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun sheCannotFloodHimWithProposals() {
+        val dir = root()
+        try {
+            val fields = ChatStyle.appearanceFields().map { it.first }
+            var filed = 0
+            for (field in fields) {
+                val message = AppearanceChange.propose(dir, field, "вариант для $field", "причина")
+                if (!message.contains("Слишком много")) filed++
+            }
+            assertEquals("the pending cap must hold", AppearanceChange.MAX_PENDING, filed)
+            assertEquals(AppearanceChange.MAX_PENDING, AppearanceChange.pending(dir).length())
+
+            val extra = AppearanceChange.propose(dir, "voice", "тихий голос", "причина")
+            assertTrue("a further one must be refused: $extra", extra.contains("Слишком много"))
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test fun theToolIsReachableAndThePromptDeclaresIt() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        assertTrue("the action must be allowed",
+            engine.contains("\"propose_appearance\" -> setOf("))
+        assertTrue("and executed", engine.contains("AppearanceChange.propose("))
+        val loop = RepoSources.text("app/src/main/java/com/ruri/ToolLoop.kt")
+        assertTrue("ToolLoop must pass it through", loop.contains("propose_appearance"))
+
+        val section = ChatStyle.appearanceChangeSection()
+        assertTrue("the prompt must say she proposes, not writes",
+            section.contains("ты предлагаешь, а Командир решает"))
+        assertTrue("and demand a reason", section.contains("reason"))
+        assertTrue("and forbid repeats", section.contains("повторно не предлагай"))
+    }
+
+    @Test fun theCommanderHasControlsForEveryVerdict() {
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        for (method in listOf("listAppearanceProposals", "approveAppearanceProposal",
+            "rejectAppearanceProposal", "revertAppearanceChange")) {
+            assertTrue("bridge needs $method", activity.contains("fun " + method + "("))
+        }
+        val html = RepoSources.text("app/src/main/assets/index.html")
+        assertTrue("the card must exist", html.contains("id=\"appearanceProposals\""))
+        assertTrue("with an approve control", html.contains("data-look=\"approve\""))
+        assertTrue("a reject control", html.contains("data-look=\"reject\""))
+        assertTrue("and a revert for applied changes", html.contains("data-look=\"revert\""))
+    }
+
+    @Test fun herOwnThoughtsCanProposeToo() {
+        val activity = RepoSources.text("app/src/main/java/com/ruri/MainActivity.kt")
+        // The proposal store records where the idea came from, so a self-decided change is not
+        // indistinguishable from one the Commander suggested.
+        assertTrue(activity.contains("AppearanceChange.pending(filesDir)"))
+        val change = RepoSources.text("app/src/main/java/com/ruri/AppearanceChange.kt")
+        assertTrue("the origin must be stored", change.contains("\"origin\""))
+    }
+}
 }

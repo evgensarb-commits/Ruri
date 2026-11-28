@@ -440,6 +440,41 @@ class MainActivity : AppCompatActivity() {
         fun roleplayMode(): Boolean = ChatStyle.roleplayEnabled(filesDir)
 
         /** Commander-set completion cap. 0 keeps the per-mode default. */
+        // ------------------------------------------------------------ appearance proposals
+
+        /** Undecided appearance changes, plus the recent decisions. */
+        @JavascriptInterface
+        fun listAppearanceProposals(): String = JSONObject()
+            .put("pending", AppearanceChange.pending(filesDir))
+            .put("all", AppearanceChange.all(filesDir))
+            .put("fields", JSONArray().also { array ->
+                ChatStyle.appearanceFields().forEach { (key, label) ->
+                    array.put(JSONObject().put("key", key).put("label", label))
+                }
+            })
+            .toString()
+
+        @JavascriptInterface
+        fun approveAppearanceProposal(id: String): String {
+            return try {
+                if (AppearanceChange.approve(filesDir, id)) "OK" else "ERROR: предложение не найдено"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "approve failed") }
+        }
+
+        @JavascriptInterface
+        fun rejectAppearanceProposal(id: String, reason: String): String {
+            return try {
+                if (AppearanceChange.reject(filesDir, id, reason)) "OK" else "ERROR: предложение не найдено"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "reject failed") }
+        }
+
+        @JavascriptInterface
+        fun revertAppearanceChange(id: String): String {
+            return try {
+                if (AppearanceChange.revert(filesDir, id)) "OK" else "ERROR: нечего откатывать"
+            } catch (e: Exception) { "ERROR: " + (e.message ?: "revert failed") }
+        }
+
         /**
          * Saves the Routeway key regardless of which provider is active.
          *
