@@ -358,8 +358,7 @@ object EmotionEngine {
         val d = drift(root)
         val p = pressure(root)
         val threshold = d.optDouble("thought_threshold", 18.0)
-        val minGap = d.optLong("thought_min_gap_sec", 90L) * 1000L
-        if (lastThoughtTurn > 0L && now - lastThoughtTurn < minGap) return false
+        if (!DiaryCadence.allows(root, now, lastThoughtTurn)) return false
         val span = (100.0 - threshold).coerceAtLeast(1.0)
         // Telemetry only: how strongly she was moved, not whether she may write.
         val intensity = Math.pow(((p - threshold) / span).coerceIn(0.0, 1.0),
