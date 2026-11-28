@@ -7,6 +7,26 @@ import org.junit.Test
 
 class CommanderPresenceRegressionTest {
     @Test
+    fun latestCommanderTimestampComesFromL0BeforeL4CatchesUp() {
+        val root = Files.createTempDirectory("ruri-commander-l0-time").toFile()
+        try {
+            FileManager.init(root)
+            FileManager.appendEvent(root, JSONObject()
+                .put("type", "message").put("who", "commander")
+                .put("text", "Первое").put("timestamp", 1_800_000_000_000L))
+            FileManager.appendEvent(root, JSONObject()
+                .put("type", "message").put("who", "ruri")
+                .put("text", "Ответ").put("timestamp", 1_800_000_000_500L))
+            FileManager.appendEvent(root, JSONObject()
+                .put("type", "message").put("who", "commander")
+                .put("text", "Я снова здесь").put("timestamp", 1_800_000_001_000L))
+            assertEquals(1_800_000_001_000L, ChatEngine.latestCommanderMessageTimestamp(root))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun incomingMessageUpdatesLastSeenBeforeReplyIsSaved() {
         val root = Files.createTempDirectory("ruri-commander-presence").toFile()
         try {
