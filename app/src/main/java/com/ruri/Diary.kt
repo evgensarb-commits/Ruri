@@ -31,13 +31,14 @@ object Diary {
         trigger: String,
         emotion: JSONObject?,
         kind: String = "thought",
-        sourceIds: Collection<String> = emptyList()
+        sourceIds: Collection<String> = emptyList(),
+        bypassCadence: Boolean = false
     ) {
         val mirrorSaid = runCatching { JSONObject(FileManager.read(root, "core/config.json")).optBoolean("diary_mirror_said", false) }.getOrElse { false }
         if (kind != "thought" && !(kind == "said" && mirrorSaid)) return
         val t = SecretRedactor.redactText(text.trim())
         if (t.isBlank() || isDuplicate(root, t, kind)) return
-        if (kind == "thought") {
+        if (kind == "thought" && !bypassCadence) {
             val lastThoughtTurn = runCatching {
                 JSONObject(FileManager.read(root, "memory/L4_state.json")).optLong("last_thought_turn", 0L)
             }.getOrDefault(0L)
