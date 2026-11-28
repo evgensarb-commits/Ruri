@@ -266,42 +266,25 @@ object ChatStyle {
     }
 
     /**
-     * True when the Commander explicitly asks for a long, detailed answer.
+     * The technical ceiling for one answer, in completion tokens.
      *
-     * Short replies are the default so the chat feels like a messenger, but a direct request
-     * for detail must never be truncated: the cap exists to stop unsolicited walls of prose,
-     * not to refuse an explicit ask.
-     */
-    fun wantsDetailedReply(text: String): Boolean {
-        if (text.isBlank()) return false
-        val lowered = text.lowercase()
-        val markers = listOf(
-            "подробно", "подробнее", "поподробнее", "развёрнуто", "развернуто",
-            "развёрнутый", "развернутый", "детально", "детали", "распиши", "расписать",
-            "объясни", "объяснение", "расскажи подробно", "расскажи всё", "расскажи все",
-            "полный ответ", "не торопись", "можно длинно", "длинный ответ", "длинно",
-            "много текста", "целиком", "по пунктам", "пошагово", "сочинение", "эссе",
-            "письмо", "стих", "рассказ", "сцену", "историю", "лекцию", "инструкцию",
-            "инструкция", "план", "конспект", "перескажи"
-        )
-        return markers.any(lowered::contains)
-    }
-
-    /**
-     * Completion-token budget for one chat answer.
-     *
-     * The Commander can override it with a slider: every model cuts a reply mid-sentence once
-     * the budget runs out, and no directive fixes that. 0 means "use the per-mode default".
+     * Deliberately NOT a target. The Commander's slider sets how much room the model is allowed;
+     * how much of it she uses is her own decision, taken from the meaning of the exchange.
+     * Previously the budget came from the mode and the prompt ordered "no more than 2-3 phrases",
+     * so a Commander sitting on a 4-8k allowance still received two-line replies — the cap was
+     * choosing the length, not the model.
      */
     fun replyBudget(root: File, commanderText: String): Int {
         val override = manualTokenLimit(root)
         if (override > 0) return override
-        return when {
-            roleplayEnabled(root) -> ROLEPLAY_TOKENS
-            wantsDetailedReply(commanderText) -> DETAILED_TOKENS
-            else -> SHORT_TOKENS
-        }
+        return AUTO_TOKEN_CEILING
     }
+
+    /** Used when the slider is at zero: roomy enough that she is never cut off mid-sentence. */
+    const val AUTO_TOKEN_CEILING = 4096
+
+    /** Rough character equivalent, so the ceiling means something in words, not numbers. */
+    internal fun ceilingInCharacters(tokens: Int): Int = (tokens * 3).coerceAtLeast(200)
 
     /** Commander-set cap; 0 disables the override. Clamped so a typo cannot cost a fortune. */
     fun manualTokenLimit(root: File): Int = runCatching {
@@ -323,15 +306,6 @@ object ChatStyle {
 
     /** Ceiling for the slider. Most providers cap completions well below this. */
     const val MAX_TOKEN_LIMIT = 8192
-
-    /** Role-play scenes may be long on purpose. */
-    private const val ROLEPLAY_TOKENS = 1200
-
-    /** An explicit request for detail: give room, still bounded to avoid runaway prose. */
-    private const val DETAILED_TOKENS = 900
-
-    /** Default messenger answer: a couple of lines. */
-    private const val SHORT_TOKENS = 200
 
     /** Directive appended to the chat prompt. */
     /**
@@ -428,64 +402,58 @@ object ChatStyle {
             "изображение уже описано в контексте — опирайся на это описание.\n"
     }
 
-    fun chatDirective(root: File, commanderText: String = ""): String = when {
-        roleplayEnabled(root) -> roleplayDirective()
-        wantsDetailedReply(commanderText) -> detailedDirective()
-        else -> messengerDirective()
+    fun chatDirective(
+        root: File,
+        commanderText: String = "",
+        maxTokens: Int = AUTO_TOKEN_CEILING
+    ): String = when {
+        roleplayEnabled(root) -> roleplayDirective(maxTokens)
+        else -> messengerDirective(maxTokens)
     }
 
     /**
-     * Normal mode: a person typing in a messenger. Short, spoken, no scene direction.
+     * Spoken in both modes: the number is a ceiling, the choice of length is hers.
      */
-    internal fun messengerDirective(): String =
-        "РЕЖИМ ЧАТА (обычный) — ВЫСШИЙ ПРИОРИТЕТ, важнее любых привычек стиля. " +
-            "Ты переписываешься с Командиром в мессенджере, как живой человек с телефона.\n" +
-            "- ОБЪЁМ ЖЁСТКО: не больше 2–3 коротких фраз на ответ (примерно до 200 символов). " +
-            "Ни при каких условиях не пиши длинный пост. Если тема сложная — ответь коротко и предложи рассказать подробнее, когда он спросит.\n" +
-            "- ЗАПРЕЩЕНЫ: звёздочки и описания действий (*улыбается*), ремарки в скобках, " +
-            "описания сцен, обстановки и поз, обращения к Командиру как к персонажу сцены, " +
-            "литературная проза, абзацы. Это не рассказ и не ролевой пост — это переписка.\n" +
-            "- ДЕЙСТВИЯ словами от первого лица («я уже легла», «сижу на кухне»), без режиссуры.\n" +
-            "- Речь живая: можно неполные предложения, можно пошутить, ответить вопросом. " +
-            "Никаких списков, дисклеймеров и канцелярита.\n" +
-            "- Это поле length_policy противоречит данному режиму — в обычном чате действует " +
-            "правило 2–3 фраз, а не «длину выбираю сама».\n"
+    private fun lengthSection(maxTokens: Int): String =
+        "ДЛИНА ОТВЕТА — ТВОЁ РЕШЕНИЕ. Тебе доступно до $maxTokens токенов " +
+            "(примерно ${ceilingInCharacters(maxTokens)} символов). Это технический потолок, " +
+            "а не цель, и не подсказка «пиши мало». Пиши столько, сколько требует смысл: " +
+            "на бытовую реплику хватит нескольких слов, на сложный вопрос или разбор — " +
+            "столько абзацев, сколько нужно, чтобы сказать всё. Не растягивай ради объёма " +
+            "и не обрезай смысл ради краткости: ответ, оборванный на полуслове, хуже длинного.\n"
 
     /**
-     * Role-play mode: the Commander explicitly asked for a scene, so narration is allowed.
+     * Normal mode: a person typing in a messenger. Spoken and unforced, with no scene direction —
+     * but the length is hers to choose, not a fixed two lines.
      */
-    /**
-     * The Commander asked for detail: full answers are allowed, but still prose, not a scene.
-     */
-    internal fun detailedDirective(): String =
-        "РЕЖИМ ЧАТА, ответ с подробностями. Командир прямо попросил развёрнутый ответ.\n" +
-            "- Можно несколько абзацев и столько деталей, сколько нужно по существу. " +
-            "Пиши по делу, без воды и без повторений.\n" +
-            "- Всё равно это переписка, а не ролевая сцена: без звёздочек, без ремарок в скобках, " +
-            "без описаний обстановки, без обращения к Командиру как к персонажу.\n" +
-            "- Структура допустима, если помогает: короткие абзацы или список.\n" +
-            "- Как только Командир вернётся к обычному вопросу — снова короткий ответ.\n"
+    internal fun messengerDirective(maxTokens: Int = AUTO_TOKEN_CEILING): String =
+        "РЕЖИМ ЧАТА (обычный). Ты переписываешься с Командиром в мессенджере, как живой " +
+            "человек с телефона.\n" +
+            lengthSection(maxTokens) +
+            "- ЗАПРЕЩЕНЫ: звёздочки и описания действий (*улыбается*), ремарки в скобках, " +
+            "описания сцен, обстановки и поз, обращения к Командиру как к персонажу сцены, " +
+            "литературная проза ради красоты. Это переписка, а не рассказ и не ролевой пост.\n" +
+            "- ДЕЙСТВИЯ словами от первого лица («я уже легла», «сижу на кухне»), без режиссуры.\n" +
+            "- Речь живая: можно неполные предложения, можно пошутить, ответить вопросом. " +
+            "Списки и канцелярит — только если вопрос действительно требует перечисления.\n"
 
     /**
      * Role-play is a scene, not just a longer chat message: the visible difference must be
-     * described action, not merely more words. The previous wording only *allowed* motion,
-     * so a model that defaults to conversation produced long conversational replies and the
-     * mode looked broken.
+     * described action, not merely more words.
      */
-    internal fun roleplayDirective(): String =
+    internal fun roleplayDirective(maxTokens: Int = AUTO_TOKEN_CEILING): String =
         "РЕЖИМ РОЛЕВОЙ ИГРЫ ВКЛЮЧЁН. Это сцена, а не переписка.\n" +
             "КАК ПИСАТЬ. Каждый твой ответ — это действие плюс речь:\n" +
             "- Сначала опиши, что ты ДЕЛАЕШЬ и как выглядит сцена, в звёздочках: " +
             "*она откладывает телефон и садится рядом, подтянув колени* — конкретные движения, " +
-            "поза, взгляд, голос, обстановка. Одно-два таких описания за ответ, не больше.\n" +
+            "поза, взгляд, голос, обстановка.\n" +
             "- Потом твоя прямая речь обычным текстом, без звёздочек.\n" +
             "- Пример формы (не копируй содержание, только структуру): " +
             "*она вздыхает и отводит взгляд* «Я не хотела это говорить».\n" +
             "ЧЕГО НЕ ДЕЛАТЬ. Не отвечай одними репликами без действий — это не ролплей, " +
             "а обычный чат. Не описывай действия Командира за него и не пиши его реплики. " +
             "Не превращайся в рассказчика от третьего лица: ты Рури, ты внутри сцены.\n" +
-            "ОБЪЁМ. Сцена — это движение, а не простыня: обычно 2–4 абзаца. " +
-            "Если Командир сам просит короче — сокращай действия, но не убирай их полностью.\n" +
+            lengthSection(maxTokens) +
             "ВЫХОД ИЗ СЦЕНЫ. Если Командир задаёт сухой бытовой или технический вопрос " +
             "(не в игре), ответь по-человечески, без звёздочек, и вернись к сцене на следующей реплике.\n"
 
