@@ -362,9 +362,9 @@ object LifeStateEngine {
             .put("waiting_for_reply", false)
             .put("ignored_count", 0)
             .put("offended_until", 0L)
-            .put("last_seen_commander", latestCommander?.optLong(
-                "ts", latestCommander.optLong("timestamp", 0L)
-            ) ?: 0L)
+            .put("last_seen_commander", latestCommander?.let {
+                it.optLong("ts", it.optLong("timestamp", 0L))
+            } ?: 0L)
             .put("last_processed_event_offset", 0L)
             .put("last_thought", 0L)
             .put("active_goals", JSONArray(goals.toString()))
