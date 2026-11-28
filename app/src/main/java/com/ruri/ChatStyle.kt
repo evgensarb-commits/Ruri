@@ -162,6 +162,36 @@ object ChatStyle {
     }
 
     /**
+     * How she may change how she looks: by asking, never by writing.
+     *
+     * She has no tool that edits `core/appearance.json`, because one bad answer would otherwise
+     * redefine her body permanently. She files a proposal with a reason, and the Commander decides.
+     */
+    fun appearanceChangeSection(): String =
+        "ИЗМЕНЕНИЕ СВОЕЙ ВНЕШНОСТИ. Сама ты её не меняешь — ты предлагаешь, а Командир решает.\n" +
+            "{\"action\":\"propose_appearance\",\"field\":\"hair\",\"value\":\"заплела косу\", " +
+            "\"reason\":\"Командир предложил заплести\",\"source_ids\":[\"<id события>\"]}\n" +
+            "Поля: " + APPEARANCE_PUBLIC.joinToString(", ") { it.first } + ", " +
+            APPEARANCE_EXPLICIT.joinToString(", ") { it.first } + ".\n" +
+            "КОГДА ПРЕДЛАГАТЬ: если из разговора или события следует, что твой облик изменился " +
+            "(Командир что-то с тобой сделал, подарил одежду, предложил сменить причёску), или " +
+            "если ты сама решила выглядеть иначе. Не выдумывай поводов и не предлагай изменений " +
+            "без причины.\n" +
+            "ОБЯЗАТЕЛЬНО указывай reason — почему. Если знаешь, из каких событий это следует, " +
+            "перечисли их в source_ids.\n" +
+            "Отклонённое повторно не предлагай: Командир уже сказал нет. Больше пяти нерешённых " +
+            "предложений одновременно накапливать нельзя. Одобрит — это станет твоей настоящей " +
+            "внешностью, и ты будешь знать об этом так же, как всё остальное о себе.\n"
+
+    /**
+     * Every appearance noun, with its human-readable label.
+     *
+     * The single source of truth: the proposal store and the prompt both read it, so a field can
+     * never exist in one place and be unknown in the other.
+     */
+    fun appearanceFields(): List<Pair<String, String>> = APPEARANCE_PUBLIC + APPEARANCE_EXPLICIT
+
+    /**
      * The whole appearance block for the current mode.
      *
      * The rule lives here rather than at each call site: silhouette always, explicit anatomy only
@@ -224,6 +254,7 @@ object ChatStyle {
             "Журнал только читается, изменить в нём ничего нельзя.\n" +
             "ДЛЯ ВОСПОМИНАНИЙ ИСПОЛЬЗУЙ recall, А НЕ read_raw: recall ищет по смыслу по всей " +
             "памяти, а журнал — сырая лента для разбора. Без нужды read_raw не вызывай.\n" +
+            appearanceChangeSection() +
             "Оспорить свой же вывод, если считаешь его неверным:\n" +
             "{\"action\":\"challenge_claim\",\"store\":\"L1\",\"claim_id\":\"<id>\",\"reason\":\"...\"}\n" +
             "store — L1 (факты) или L2 (дневник). Оспаривание ничего не удаляет: вывод остаётся " +

@@ -8,7 +8,7 @@ import java.io.File
 object ToolLoop {
     private val allowed = setOf(
         "recall", "remember_fact", "self_check", "read_url", "read_document", "look_at_image",
-        "read_raw", "challenge_claim"
+        "read_raw", "challenge_claim", "propose_appearance"
     )
 
     private fun extractJsonObjects(text: String): List<String> {
@@ -62,7 +62,7 @@ object ToolLoop {
             when (action.optString("action")) {
                 "write_diary", "diary" -> action.optString("text").trim().takeIf { it.isNotBlank() }?.let(diary::add)
                 "recall", "remember_fact", "self_check", "read_url", "read_document",
-                "look_at_image", "read_raw", "challenge_claim" -> tools.add(action)
+                "look_at_image", "read_raw", "challenge_claim", "propose_appearance" -> tools.add(action)
                 else -> Unit
             }
         }

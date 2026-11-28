@@ -934,6 +934,7 @@ object ChatEngine {
             "self_check" -> setOf("action")
             "read_raw" -> setOf("action", "after_offset", "limit", "types", "from_ts", "to_ts")
             "challenge_claim" -> setOf("action", "store", "claim_id", "reason")
+            "propose_appearance" -> setOf("action", "field", "value", "reason", "source_ids")
             "read_url" -> setOf("action", "url")
             "read_document" -> setOf("action", "name", "page")
             "look_at_image" -> setOf("action", "name")
@@ -961,6 +962,12 @@ object ChatEngine {
             "challenge_claim" -> {
                 if (action.optString("store").uppercase() !in setOf("L1", "L2")) return null
                 if (action.optString("claim_id").isBlank()) return null
+            }
+            "propose_appearance" -> {
+                val field = action.optString("field").trim().lowercase()
+                if (ChatStyle.appearanceFields().none { it.first == field }) return null
+                if (action.optString("value").trim().length !in 2..400) return null
+                if (action.optString("reason").length > 300) return null
             }
             "read_url" -> {
                 val url = action.optString("url").trim()
@@ -1057,6 +1064,23 @@ object ChatEngine {
                     } else {
                         "Утверждение $claimId не найдено в $store."
                     }
+                }
+                "propose_appearance" -> {
+                    val sources = ArrayList<String>()
+                    when (val raw = params.opt("source_ids")) {
+                        is JSONArray -> for (i in 0 until raw.length()) sources.add(raw.optString(i))
+                        is String -> raw.split(',').map { it.trim() }
+                            .filter { it.isNotEmpty() }.forEach { sources.add(it) }
+                    }
+                    val message = AppearanceChange.propose(
+                        root = root,
+                        field = params.optString("field"),
+                        value = params.optString("value"),
+                        reason = params.optString("reason"),
+                        origin = "chat",
+                        sourceIds = sources
+                    )
+                    true to message
                 }
                 "read_url" -> {
                     // The Commander supplied this address; UrlReader refuses local and

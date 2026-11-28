@@ -382,6 +382,16 @@ input:focus,select:focus,textarea:focus{border-color:rgba(167,139,250,.6);box-sh
       </div>
 
       <div class="card">
+        <span class="card-label">Внешность на одобрении</span>
+        <p class="hint">Рури не меняет свою внешность сама. Если из разговора или собственной мысли следует, что она выглядит иначе, она предлагает изменение — и оно ждёт здесь. Одобренное становится её настоящей внешностью и записывается в историю; отклонённое остаётся в памяти как отказ, и повторно она его не предложит.</p>
+        <div id="appearanceProposals"><div class="placeholder">Проверяю…</div></div>
+        <div class="row-actions">
+          <button class="btn ghost" id="appearanceProposalsRefresh" type="button">Обновить</button>
+        </div>
+        <div class="inline-status" id="appearanceProposalsStatus"></div>
+      </div>
+
+      <div class="card">
         <span class="card-label">Резервные копии</span>
         <p class="hint" id="backupState">Проверяю…</p>
         <div class="row-actions">
@@ -1713,6 +1723,80 @@ function loadCharacter(){
   }
 }
 
+/* Appearance changes she proposed. Nothing is applied until the Commander decides, so this is
+   the only place her body can change. */
+function loadAppearanceProposals(){
+  var box = $('appearanceProposals');
+  if(!box) return;
+  var data = parseJson(call('listAppearanceProposals', [], '{}'), {});
+  if(!data || typeof data !== 'object') data = {};
+  var pending = isArray(data.pending) ? data.pending : [];
+  var all = isArray(data.all) ? data.all : [];
+
+  var html = '';
+  if(!pending.length){
+    html += '<div class="placeholder">Предложений нет. Она выглядит так, как решено сейчас.</div>';
+  }
+  for(var i = 0; i < pending.length; i++){
+    var item = pending[i] || {};
+    var sources = isArray(item.source_event_ids) ? item.source_event_ids.length : 0;
+    html += '<div class="insight st-assumption">'
+      + '<div class="insight-head"><span class="insight-status">ЖДЁТ РЕШЕНИЯ</span>'
+      + '<span class="insight-meta">' + esc(dateOf(item.ts)) + '</span></div>'
+      + '<div class="entry-text"><b>' + esc(String(item.label || item.field || '')) + '</b>: '
+      + esc(String(item.value || '')) + '</div>'
+      + (item.previous ? '<div class="insight-meta">сейчас: ' + esc(String(item.previous)) + '</div>' : '')
+      + (item.reason ? '<div class="insight-note">почему: ' + esc(String(item.reason)) + '</div>' : '')
+      + '<div class="insight-meta">' + esc(String(item.origin || '')) + ' · оснований: ' + sources + '</div>'
+      + '<div class="row-actions">'
+      + '<button class="btn mini" type="button" data-look="approve" data-id="' + esc(item.id) + '">Одобрить</button>'
+      + '<button class="btn mini" type="button" data-look="reject" data-id="' + esc(item.id) + '">Отклонить</button>'
+      + '</div></div>';
+  }
+
+  var decided = [];
+  for(var j = 0; j < all.length; j++){
+    var done = all[j] || {};
+    if(done.status === 'pending') continue;
+    decided.push(done);
+    if(decided.length >= 5) break;
+  }
+  if(decided.length){
+    html += '<div class="insight-meta" style="margin-top:10px">Решённые:</div>';
+    for(var k = 0; k < decided.length; k++){
+      var entry = decided[k] || {};
+      var approved = entry.status === 'approved';
+      html += '<div class="insight st-' + esc(String(entry.status)) + '">'
+        + '<div class="insight-meta">' + esc(approved ? 'ОДОБРЕНО' : 'ОТКЛОНЕНО') + ' · '
+        + esc(String(entry.label || entry.field || '')) + ' · ' + esc(dateOf(entry.decided_at || entry.ts)) + '</div>'
+        + '<div class="entry-text">' + esc(String(entry.value || '')) + '</div>'
+        + (approved
+          ? '<div class="row-actions"><button class="btn mini" type="button" data-look="revert" data-id="'
+            + esc(entry.id) + '">Вернуть как было</button></div>'
+          : '')
+        + '</div>';
+    }
+  }
+  box.innerHTML = html;
+}
+
+function decideAppearance(action, id){
+  if(!action || !id) return;
+  var result;
+  if(action === 'approve') result = call('approveAppearanceProposal', [id], 'ERROR');
+  else if(action === 'revert') result = call('revertAppearanceChange', [id], 'ERROR');
+  else {
+    var reason = prompt('Почему отклоняется? Рури запомнит отказ и не предложит это снова.', '');
+    if(reason === null) return;
+    result = call('rejectAppearanceProposal', [id, String(reason || '')], 'ERROR');
+  }
+  if(isErr(result)){ setStatus('appearanceProposalsStatus', errText(result), 'bad'); return; }
+  var labels = { approve: 'Одобрено — это стало её внешностью.', reject: 'Отклонено.', revert: 'Возвращено как было.' };
+  setStatus('appearanceProposalsStatus', labels[action] || 'Готово.', 'good');
+  loadAppearanceProposals();
+  loadCharacter();
+}
+
 function saveCharacter(){
   var nameNode = $('charName');
   var styleNode = $('charStyle');
@@ -2152,6 +2236,7 @@ function allowBackground(){
 
 function refreshSettings(){
   loadConnection();
+  loadAppearanceProposals();
   loadModelVariant();
   loadRouterai();
   loadCloseRouter();
@@ -2310,6 +2395,17 @@ function bindEvents(){
   var styleBtn = $('styleToggle');
   if(styleBtn) styleBtn.addEventListener('click', toggleStyle);
   refreshStyleToggle();
+
+  var proposalsBox = $('appearanceProposals');
+  if(proposalsBox) proposalsBox.addEventListener('click', function(event){
+    var target = event.target;
+    if(!target || !target.getAttribute) return;
+    var action = target.getAttribute('data-look');
+    if(!action) return;
+    decideAppearance(action, target.getAttribute('data-id'));
+  });
+  var proposalsRefresh = $('appearanceProposalsRefresh');
+  if(proposalsRefresh) proposalsRefresh.addEventListener('click', loadAppearanceProposals);
 
   var limitInput = $('tokenLimit');
   if(limitInput){
