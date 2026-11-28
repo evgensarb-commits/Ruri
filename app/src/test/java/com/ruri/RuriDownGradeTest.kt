@@ -693,9 +693,11 @@ class ChatStyleModesTest {
             assertTrue(directive.contains("РЕЖИМ ЧАТА"))
             assertTrue(directive.contains("звёздочки"))
             assertTrue(directive.contains("ремарки"))
-            // The Commander wants a messenger, not essays: the cap must be stated in words.
-            assertTrue(directive.contains("2–3"))
-            assertTrue(directive.contains("ВЫСШИЙ ПРИОРИТЕТ"))
+            // A messenger, not essays — but the length is hers to choose, so the directive must
+            // hand her the ceiling instead of ordering two or three phrases.
+            assertTrue(directive.contains("ДЛИНА ОТВЕТА — ТВОЁ РЕШЕНИЕ"))
+            assertTrue(directive.contains("токенов"))
+            assertFalse("no word cap may remain", directive.contains("2–3"))
             assertFalse("normal mode must not invite narration",
                 directive.contains("РОЛЕВОЙ"))
         } finally { dir.deleteRecursively() }
@@ -927,80 +929,83 @@ class NoCannedPhrasesTest {
 /**
  * Length is adaptive: short by default, full when the Commander asks, scene-length in RP.
  */
-class AdaptiveLengthTest {
+class SelfChosenLengthTest {
     private fun root(): java.io.File = Files.createTempDirectory("ruri-length").toFile().also {
         FileManager.init(it)
     }
 
-    @Test fun anOrdinaryQuestionGetsAShortBudget() {
+    @Test fun theBudgetIsACeilingNotAPerModeCap() {
         val dir = root()
         try {
+            // Ordinary questions used to be capped at 200 tokens and ordered to stay short.
             for (text in listOf("привет", "как дела?", "что делаешь", "спасибо")) {
-                val budget = ChatStyle.replyBudget(dir, text)
-                assertEquals("ordinary chat must stay short", 200, budget)
-                val directive = ChatStyle.chatDirective(dir, text)
-                assertTrue("short mode must state the cap: " + directive, directive.contains("2–3"))
+                assertEquals("no per-mode cap may remain",
+                    ChatStyle.AUTO_TOKEN_CEILING, ChatStyle.replyBudget(dir, text))
             }
         } finally { dir.deleteRecursively() }
     }
 
-    @Test fun anExplicitRequestForDetailRaisesTheBudget() {
+    @Test fun theCommandersSliderIsTheCeiling() {
         val dir = root()
         try {
-            val requests = listOf(
-                "расскажи подробно про наш проект",
-                "объясни детально, как это работает",
-                "распиши по пунктам план",
-                "напиши длинный ответ про память",
-                "мне нужно подробнее"
-            )
-            for (text in requests) {
-                assertTrue("must detect: $text", ChatStyle.wantsDetailedReply(text))
-                assertEquals("detailed budget for: $text", 900, ChatStyle.replyBudget(dir, text))
-                val directive = ChatStyle.chatDirective(dir, text)
-                assertTrue(directive.contains("подробност"))
-                // Even then it stays a conversation, not a scene.
-                assertFalse(directive.contains("РОЛЕВОЙ"))
-            }
+            ChatStyle.setManualTokenLimit(dir, 6000)
+            assertEquals(6000, ChatStyle.replyBudget(dir, "привет"))
+            assertEquals(6000, ChatStyle.replyBudget(dir, "расскажи подробно"))
+            ChatStyle.setRoleplay(dir, true)
+            assertEquals("the slider wins in every mode", 6000, ChatStyle.replyBudget(dir, "сцена"))
         } finally { dir.deleteRecursively() }
     }
 
-    @Test fun roleplayModeAlwaysGetsSceneBudget() {
+    @Test fun theCeilingIsStatedToHerInWords() {
+        val directive = ChatStyle.messengerDirective(6000)
+        assertTrue("the number must be given", directive.contains("6000 токенов"))
+        assertTrue("and a readable equivalent", directive.contains("18000 символов"))
+    }
+
+    @Test fun lengthIsHerDecisionNotAnOrder() {
+        val directive = ChatStyle.messengerDirective(6000)
+        assertTrue("must say the choice is hers", directive.contains("ДЛИНА ОТВЕТА — ТВОЁ РЕШЕНИЕ"))
+        assertTrue("and that the number is a ceiling", directive.contains("технический потолок"))
+        // The old hard rules must be gone: they were what produced two-line replies on a 6k budget.
+        assertFalse("no forced brevity", directive.contains("2–3"))
+        assertFalse("no fixed character cap", directive.contains("до 200 символов"))
+        assertFalse("no order to ignore her own policy", directive.contains("противоречит"))
+        assertFalse("must not forbid writing more", directive.contains("Ни при каких условиях не пиши длинный"))
+    }
+
+    @Test fun roleplayGetsTheSameFreedom() {
         val dir = root()
         try {
             ChatStyle.setRoleplay(dir, true)
-            // A scene needs room for staged action, not just a longer chat line.
-            assertTrue("scene budget must allow described action",
-                ChatStyle.replyBudget(dir, "привет") >= 1200)
-            assertTrue(ChatStyle.chatDirective(dir, "привет").contains("РОЛЕВОЙ ИГРЫ"))
+            val directive = ChatStyle.chatDirective(dir, "привет", 6000)
+            assertTrue("the scene directive must still apply", directive.contains("РЕЖИМ РОЛЕВОЙ ИГРЫ"))
+            assertTrue("with her choice of length", directive.contains("ДЛИНА ОТВЕТА — ТВОЁ РЕШЕНИЕ"))
+            assertFalse("and no paragraph cap", directive.contains("обычно 2–4 абзаца"))
         } finally { dir.deleteRecursively() }
     }
 
-    @Test fun detailedRequestDoesNotLeakIntoRoleplayMode() {
-        val dir = root()
-        try {
-            ChatStyle.setRoleplay(dir, true)
-            // The switch wins: a detailed ask must not downgrade RP to plain chat.
-            assertTrue(ChatStyle.chatDirective(dir, "расскажи подробно")
-                .contains("РОЛЕВОЙ ИГРЫ"))
-        } finally { dir.deleteRecursively() }
-    }
-
-    @Test fun detectionIgnoresEmptyAndNeutralText() {
-        assertFalse(ChatStyle.wantsDetailedReply(""))
-        assertFalse(ChatStyle.wantsDetailedReply("ок"))
-        assertFalse(ChatStyle.wantsDetailedReply("как прошёл день?"))
-    }
-
-    @Test fun chatBudgetIsWiredToTheDetector() {
+    @Test fun theCharacterLengthPolicyIsOnlyAHint() {
         val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
-        // A hard-coded cap would ignore the Commander's explicit request.
-        assertTrue(engine.contains("ChatStyle.replyBudget(root, commanderText)"))
-        assertTrue(engine.contains("ChatStyle.chatDirective(root, commanderText)"))
-        assertFalse(engine.contains("Transport.chat(safeMessages, apiKey, 260,"))
-        // Unprompted initiatives stay short by construction.
+        // It used to be injected as a rule that the directive then had to override.
+        assertTrue(engine.contains("Ориентир по длине из характера (не предел)"))
+    }
+
+    @Test fun theCeilingReachesBothTheCallAndThePrompt() {
+        val engine = RepoSources.text("app/src/main/java/com/ruri/ChatEngine.kt")
+        assertTrue("the request budget", engine.contains("ChatStyle.replyBudget(root, commanderText)"))
+        assertTrue("and the directive", engine.contains("ChatStyle.replyBudget(root, commanderText)\n            ) +"))
         val thinker = RepoSources.text("app/src/main/java/com/ruri/Thinker.kt")
-        assertTrue(thinker.contains("ChatStyle.chatDirective(root, \"\")"))
+        assertTrue("initiative gets the same treatment",
+            thinker.contains("ChatStyle.chatDirective(root, \"\", ChatStyle.replyBudget(root, \"\"))"))
+    }
+
+    @Test fun theDeadDetectorIsGone() {
+        val style = RepoSources.text("app/src/main/java/com/ruri/ChatStyle.kt")
+        // It no longer drove anything once the mode stopped choosing the budget.
+        assertFalse(style.contains("fun wantsDetailedReply("))
+        assertFalse(style.contains("SHORT_TOKENS"))
+        assertFalse(style.contains("DETAILED_TOKENS"))
+        assertFalse(style.contains("ROLEPLAY_TOKENS"))
     }
 }
 

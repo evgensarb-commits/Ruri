@@ -533,7 +533,8 @@ object ChatEngine {
             "Личность: ${character.optString("persona")}. " +
             "Непрерывность: ${character.optString("continuity_rules")}. " +
             "Правила речи: ${character.optString("speech_rules")}. " +
-            "Длина ответа: ${character.optString("length_policy")}. " +
+            // Framed as a preference: the directive above gives her the real rule.
+            "Ориентир по длине из характера (не предел): ${character.optString("length_policy")}. " +
             "Эмоции: ${character.optString("emotions")}. " +
             "Регуляторы характера: ${character.optJSONArray("regulators") ?: JSONArray()}. " +
             "Вход в сообщение придумывай сама, без шаблонов и заготовок. " +
@@ -555,7 +556,11 @@ object ChatEngine {
             ChatStyle.appearanceForMode(root) +
             ChatStyle.memorySelfServiceSection() +
             ChatStyle.pendingInsightsSection(root) +
-            ChatStyle.chatDirective(root, commanderText) +
+            // The ceiling goes into the prompt so she knows her room and decides the length.
+            ChatStyle.chatDirective(
+                root, commanderText,
+                ChatStyle.replyBudget(root, commanderText)
+            ) +
             ChatStyle.webReadHint(commanderText) +
             // Only documents here: images are advertised separately, and mixing them meant a
             // markdown file could be listed as a document while an image was not.
