@@ -154,6 +154,63 @@ object RawLog {
         return out to nextCursor
     }
 
+    /**
+     * The newest matching entries.
+     *
+     * Reading from offset 0 handed her the OLDEST events in the journal, so "read your journal"
+     * produced a window from two weeks ago and she answered that instead of the current message.
+     * The window is grown backwards only until enough matches are found, so the cost stays
+     * proportional to what was asked for.
+     */
+    fun readRecent(
+        root: File,
+        limit: Int = 30,
+        types: Set<String> = emptySet(),
+        fromTs: Long = 0L,
+        toTs: Long = 0L
+    ): List<Entry> {
+        val bounded = limit.coerceIn(1, 200)
+        val target = File(root, "memory/L0_raw.jsonl")
+        if (!target.isFile) return emptyList()
+        val wanted = if (types.isEmpty()) CONVERSATIONAL_TYPES else types.intersect(READABLE_TYPES)
+        if (wanted.isEmpty()) return emptyList()
+
+        val length = target.length()
+        var budget = 2L * 1024L * 1024L
+        var result: List<Entry> = emptyList()
+        while (true) {
+            val start = (length - budget).coerceAtLeast(0L)
+            // Never begin mid-line: the window must start on a real line boundary.
+            val boundary = if (start <= 0L) 0L else lineStartAfter(target, start)
+            result = read(
+                root, afterOffset = boundary, limit = 4000,
+                types = types, fromTs = fromTs, toTs = toTs
+            ).first
+            if (result.size >= bounded || boundary == 0L || budget >= length) break
+            budget *= 4
+        }
+        return result.takeLast(bounded)
+    }
+
+    /** First line start at or after [from]. */
+    private fun lineStartAfter(target: File, from: Long): Long {
+        return try {
+            java.io.RandomAccessFile(target, "r").use { raf ->
+                val length = raf.length()
+                var position = from.coerceAtLeast(0L)
+                if (position >= length) return length
+                raf.seek(position)
+                while (position < length) {
+                    if (raf.read() == '\n'.code) return position + 1L
+                    position++
+                }
+                length
+            }
+        } catch (_: Exception) {
+            from
+        }
+    }
+
     /** Total journal size, so she can tell how much is left. */
     fun sizeBytes(root: File): Long = File(root, "memory/L0_raw.jsonl").let {
         if (it.isFile) it.length() else 0L
