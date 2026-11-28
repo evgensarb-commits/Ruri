@@ -36,10 +36,10 @@ class LifeStateRecoveryTest {
             .put("id", "commander-same-ms")
             .put("type", "message")
             .put("who", "commander")
-            .put("timestamp", 123456L)
+            .put("timestamp", 234567L)
 
         assertTrue(LifeStateEngine.applyCommanderActivity(state, listOf(message)))
-        assertEquals(123456L, state.optLong("last_seen_commander"))
+        assertEquals(234567L, state.optLong("last_seen_commander"))
         assertEquals("commander-same-ms", state.optString("last_commander_message_event_id"))
         assertFalse(state.optBoolean("waiting_for_reply"))
         assertEquals(0, state.optInt("ignored_count"))
@@ -144,7 +144,7 @@ class LifeStateRecoveryTest {
         FileManager.appendEvent(
             root,
             JSONObject().put("type", "message").put("who", "commander")
-                .put("text", "Нужно вернуться к нему позже").put("timestamp", firstTs)
+                .put("text", "Нужно вернуться к нему позже").put("timestamp", firstTs + 1000L)
         )
         FileManager.write(
             root,
@@ -156,7 +156,7 @@ class LifeStateRecoveryTest {
 
         val recovered = LifeStateEngine.recoverStateFromHistory(root, damaged)
 
-        assertEquals(0L, recovered.optLong("last_seen_commander"))
+        assertEquals(firstTs + 1000L, recovered.optLong("last_seen_commander"))
         assertEquals(0L, recovered.optLong("last_processed_event_offset"))
         assertEquals(1, recovered.optJSONArray("active_goals")?.length())
         assertTrue(recovered.optString("current_focus").contains("Восстановление"))
