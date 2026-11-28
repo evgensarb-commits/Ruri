@@ -70,7 +70,7 @@ class RecentConversationStopsSilenceGrowthTest {
         val root = needsTestRoot()
         val now = System.currentTimeMillis()
         setEmotionValues(root, boredom = 20.0, longing = 30.0,
-            updatedAt = now - EMOTION_TEST_HOUR_MS, lastTickAt = now - EMOTION_TEST_HOUR_MS)
+            updatedAt = now - 3_600_000L, lastTickAt = now - 3_600_000L)
         EmotionEngine.tick(root, now, now - 10L * 60L * 1000L, now)
         val values = EmotionEngine.readValues(root)
         val expectedGrowth = (100.0 / 9.0) / 6.0
