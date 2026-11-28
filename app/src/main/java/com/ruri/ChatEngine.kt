@@ -790,6 +790,14 @@ object ChatEngine {
         }
     }
 
+    /** Reads the latest durable Commander message even before the life worker updates L4. */
+    internal fun latestCommanderMessageTimestamp(root: File): Long =
+        FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 12000, maxBytes = 8 * 1024 * 1024)
+            .asReversed().asSequence()
+            .mapNotNull { line -> runCatching { JSONObject(line) }.getOrNull() }
+            .firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" }
+            ?.optLong("ts", 0L) ?: 0L
+
     /**
      * Is this id really a Commander message?
      *
