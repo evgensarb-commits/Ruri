@@ -15,8 +15,10 @@ internal object DiaryCadence {
         now: Long,
         lastThoughtAt: Long,
         fatigue: Double,
-        drift: JSONObject
+        drift: JSONObject,
+        bypass: Boolean = false
     ): Boolean {
+        if (bypass) return true
         val pauseAt = drift.optDouble("diary_pause_fatigue_at", 95.0).coerceIn(0.0, 100.0)
         if (fatigue >= pauseAt) return false
 
@@ -27,7 +29,8 @@ internal object DiaryCadence {
         return lastThoughtAt <= 0L || now - lastThoughtAt >= gapMs
     }
 
-    fun allows(root: File, now: Long, lastThoughtTurn: Long = 0L): Boolean {
+    fun allows(root: File, now: Long, lastThoughtTurn: Long = 0L, bypass: Boolean = false): Boolean {
+        if (bypass) return true
         val fatigue = EmotionEngine.readValues(root).optDouble("fatigue", 0.0)
         val entries = runCatching {
             JSONObject(FileManager.read(root, "memory/L2_diary.json")).optJSONArray("entries")
