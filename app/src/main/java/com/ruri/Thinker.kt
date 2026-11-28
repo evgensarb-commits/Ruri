@@ -95,6 +95,9 @@ object Thinker {
             state.optLong("last_seen_commander", 0L),
             ChatEngine.latestCommanderMessageTimestamp(root)
         )
+        if (lastSeen > state.optLong("last_seen_commander", 0L)) {
+            state.put("last_seen_commander", lastSeen)
+        }
         EmotionEngine.tick(root, now, lastSeen,
             state.optJSONObject("recent_activity")?.optLong("last_event_at", now) ?: now)
         EmotionEngine.onCycle(root)
