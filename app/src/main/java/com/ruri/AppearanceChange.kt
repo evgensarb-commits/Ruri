@@ -77,7 +77,7 @@ object AppearanceChange {
         field: String,
         value: String,
         reason: String,
-        origin: String,
+        origin: String = "chat",
         sourceIds: Collection<String> = emptyList(),
         now: Long = System.currentTimeMillis()
     ): String {
