@@ -130,6 +130,7 @@ object Thinker {
             originalReason.contains("commander_message") ||
             originalReason.contains("research_task") ||
             originalReason.contains("capability_gap")
+        val notificationWake = originalReason.contains("phone_notification")
         val routineWake = !hasRealEvent
         if (routineWake && !initiative) {
             val lastThoughtTurn = state.optLong("last_thought_turn", 0L)
@@ -295,7 +296,7 @@ object Thinker {
         }
         if (initiative && effective != "write") {
             val body = safeReply.ifBlank { cleanedReply }
-            Diary.append(root, body, reason, emotion, "thought")
+            Diary.append(root, body, reason, emotion, "thought", bypassCadence = notificationWake)
             if (effective == "veto") appendEvent(root, "initiative_vetoed",
                 JSONObject().put("reason", decision.ifBlank { "veto_without_reason" }))
             state.put("last_thought", now)
@@ -313,7 +314,7 @@ object Thinker {
             )
             runCatching {
                 if (!Diary.isDuplicate(root, safeReply, "thought")) {
-                    Diary.append(root, safeReply, reason, emotion, "thought", listOf(messageId))
+                    Diary.append(root, safeReply, reason, emotion, "thought", listOf(messageId), bypassCadence = notificationWake)
                 }
             }
             messageId
@@ -325,7 +326,7 @@ object Thinker {
                 persistStatePreservingTurnInFlight(root, state, baselineState)
                 return
             }
-            Diary.append(root, safeReply, reason, emotion, "thought")
+            Diary.append(root, safeReply, reason, emotion, "thought", bypassCadence = notificationWake)
             // A diary entry has no chat message id; an empty id is what Receipts expects here.
             ""
         }
