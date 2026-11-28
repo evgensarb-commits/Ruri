@@ -30,6 +30,13 @@ class DiaryCadenceTest {
     }
 
     @Test
+    fun realNotificationCanBypassCriticalFatiguePause() {
+        val now = 10_000_000L
+        assertFalse(DiaryCadence.allowsAt(now, now - 4 * 60 * 60_000L, 100.0, defaults))
+        assertTrue(DiaryCadence.allowsAt(now, now - 2 * 60_000L, 100.0, defaults, bypass = true))
+    }
+
+    @Test
     fun cadenceCanBeAdjustedThroughEmotionDriftConfig() {
         val now = 10_000_000L
         val config = JSONObject()
