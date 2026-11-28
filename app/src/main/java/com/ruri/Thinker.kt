@@ -90,10 +90,14 @@ object Thinker {
         val now = System.currentTimeMillis()
         // Aged out on purpose: a killed turn must not silence her forever.
         val inFlight = ChatEngine.turnInFlight(root, now)
-        EmotionEngine.tick(root, now, state.optLong("last_seen_commander", 0L),
+        // L0 is authoritative even if the life worker has not copied the latest message into L4 yet.
+        val lastSeen = maxOf(
+            state.optLong("last_seen_commander", 0L),
+            ChatEngine.latestCommanderMessageTimestamp(root)
+        )
+        EmotionEngine.tick(root, now, lastSeen,
             state.optJSONObject("recent_activity")?.optLong("last_event_at", now) ?: now)
         EmotionEngine.onCycle(root)
-        val lastSeen = state.optLong("last_seen_commander", 0L)
         val hoursQuiet = if (lastSeen == 0L) -1.0 else (now - lastSeen) / 3600000.0
 
         if (state.optBoolean("waiting_for_reply", false) &&
