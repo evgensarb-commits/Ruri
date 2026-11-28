@@ -24,6 +24,30 @@ object Thinker {
         return recent.joinToString("\n")
     }
 
+    /** Recent actual chat turns, oldest first, so autonomous thoughts can distinguish silence from contact. */
+    internal fun recentDialogueContext(root: File, limit: Int = 8): String {
+        if (limit <= 0) return ""
+        return FileManager.readLastLines(
+            root, "memory/L0_raw.jsonl", maxLines = 1200, maxBytes = 2 * 1024 * 1024
+        ).asReversed().mapNotNull { line ->
+            runCatching {
+                val event = JSONObject(line)
+                if (event.optString("type") != "message") return@mapNotNull null
+                val id = event.optString("id")
+                if (id.isNotBlank() && Tombstone.isDeleted(root, id)) return@mapNotNull null
+                val who = when (event.optString("who")) {
+                    "commander" -> "Командир"
+                    "ruri" -> "Рури"
+                    else -> return@mapNotNull null
+                }
+                val text = event.optString("text").trim()
+                if (text.isBlank()) return@mapNotNull null
+                val ts = event.optLong("ts", event.optLong("timestamp", 0L))
+                "[${ts}] $who: ${text.take(700)}"
+            }.getOrNull()
+        }.take(limit).asReversed().joinToString("\n")
+    }
+
     /**
      * Records a durable wake reason and hands execution to WorkManager.
      * Repeated reasons are coalesced in the queue; every underlying event stays in L0.
@@ -66,10 +90,17 @@ object Thinker {
         val now = System.currentTimeMillis()
         // Aged out on purpose: a killed turn must not silence her forever.
         val inFlight = ChatEngine.turnInFlight(root, now)
-        EmotionEngine.tick(root, now, state.optLong("last_seen_commander", 0L),
+        // L0 is authoritative even if the life worker has not copied the latest message into L4 yet.
+        val lastSeen = maxOf(
+            state.optLong("last_seen_commander", 0L),
+            ChatEngine.latestCommanderMessageTimestamp(root)
+        )
+        if (lastSeen > state.optLong("last_seen_commander", 0L)) {
+            state.put("last_seen_commander", lastSeen)
+        }
+        EmotionEngine.tick(root, now, lastSeen,
             state.optJSONObject("recent_activity")?.optLong("last_event_at", now) ?: now)
         EmotionEngine.onCycle(root)
-        val lastSeen = state.optLong("last_seen_commander", 0L)
         val hoursQuiet = if (lastSeen == 0L) -1.0 else (now - lastSeen) / 3600000.0
 
         if (state.optBoolean("waiting_for_reply", false) &&
@@ -99,6 +130,7 @@ object Thinker {
             originalReason.contains("commander_message") ||
             originalReason.contains("research_task") ||
             originalReason.contains("capability_gap")
+        val notificationWake = originalReason.contains("phone_notification")
         val routineWake = !hasRealEvent
         if (routineWake && !initiative) {
             val lastThoughtTurn = state.optLong("last_thought_turn", 0L)
@@ -264,7 +296,7 @@ object Thinker {
         }
         if (initiative && effective != "write") {
             val body = safeReply.ifBlank { cleanedReply }
-            Diary.append(root, body, reason, emotion, "thought")
+            Diary.append(root, body, reason, emotion, "thought", bypassCadence = notificationWake)
             if (effective == "veto") appendEvent(root, "initiative_vetoed",
                 JSONObject().put("reason", decision.ifBlank { "veto_without_reason" }))
             state.put("last_thought", now)
@@ -282,7 +314,7 @@ object Thinker {
             )
             runCatching {
                 if (!Diary.isDuplicate(root, safeReply, "thought")) {
-                    Diary.append(root, safeReply, reason, emotion, "thought", listOf(messageId))
+                    Diary.append(root, safeReply, reason, emotion, "thought", listOf(messageId), bypassCadence = notificationWake)
                 }
             }
             messageId
@@ -294,7 +326,7 @@ object Thinker {
                 persistStatePreservingTurnInFlight(root, state, baselineState)
                 return
             }
-            Diary.append(root, safeReply, reason, emotion, "thought")
+            Diary.append(root, safeReply, reason, emotion, "thought", bypassCadence = notificationWake)
             // A diary entry has no chat message id; an empty id is what Receipts expects here.
             ""
         }
@@ -346,6 +378,7 @@ object Thinker {
         }.take(3).joinToString(" ") { it.optString("text").take(220) }
         val recallQuery = (reason + " " + recentCommanderContext).take(900)
         val recalledMemories = if (initiative) MemoryRetriever.recall(root, recallQuery, limit = 5) else ""
+        val recentDialogue = recentDialogueContext(root, 8)
         // Commander explicitly enabled full notification context for Ruri's cognition.
         // Only authentication credentials are withheld; ordinary personal content remains visible.
         val notificationLines = FileManager.readLastLines(
@@ -393,6 +426,9 @@ object Thinker {
             ". Второй: " + priorities.optString("priority_2", "Любить Командира") + ".\n" +
             "Конституция: " + (constitution.optJSONArray("primary_needs")?.toString() ?: "[]") + ". Обе главные потребности равнозначны и неизменны.\n" +
             "Событие: " + reason + ". Заряд: " + BatteryLevel.get(ctx) + "%. " + DeviceSensors.timeContext() + " Тишина Командира: " + quiet + " ч. Игнорирований инициативы: " + state.optInt("ignored_count", 0) + ".\n" +
+            "ПОСЛЕДНИЙ РЕАЛЬНЫЙ ДИАЛОГ (L0, от старых реплик к новым; это факты общения, а не воспоминания):\n" +
+            (if (recentDialogue.isBlank()) "В доступном окне нет недавних реплик.\n" else recentDialogue + "\n") +
+            "Учитывай эти реплики прежде, чем писать о тоске или одиночестве. Если Командир недавно отвечал и вы общались, не описывай его как отсутствующего и не делай вывод «скучаю, потому что мы не общаемся». Тоска может относиться к желанию близости или встрече, но не должна подменять факт текущего общения.\n" +
             "Состояние: " + state.optString("mood", "собранная") + ", энергия " + state.optInt("energy", 5) + ", привязанность " + state.optDouble("bond", 0.5) + ".\n" +
             "Драйвы: " + (drives.optJSONArray("drives")?.toString() ?: "[]") + ". Текущий фокус: " + state.optString("current_focus", selfModel.optString("current_focus")) + ".\n" +
             "Активные цели: " + (goals.optJSONArray("active")?.toString() ?: "[]") + ".\n" +

@@ -100,6 +100,9 @@ object ChatEngine {
         val targetId = queueHead?.optString("message_id")?.takeIf { it.isNotBlank() }
             ?: requestedId ?: latestCommanderMessageId(root)
         if (!targetId.isNullOrBlank()) {
+            // Mark presence as soon as the incoming message is known, not after model success.
+            // The life worker and autonomous Thinker may run before this reply is persisted.
+            updateLastSeenCommander(root, targetId)
             findSavedReply(root, targetId)?.let { (id, text) ->
                 lastFinalMessageId = id
                 CommanderReplyQueue.markAnswered(root, targetId, id)
@@ -774,7 +777,7 @@ object ChatEngine {
                 it.optString("reply_to") == commanderMessageId }
             ?.let { it.optString("id") to it.optString("text") }
 
-    private fun updateLastSeenCommander(root: File, messageId: String) {
+    internal fun updateLastSeenCommander(root: File, messageId: String) {
         // Direct lookup by id: a silent miss here leaves the app believing the Commander has been
         // quiet, which drives longing and can fire an unprompted initiative.
         val commander = findEventById(root, messageId) ?: return
@@ -786,6 +789,14 @@ object ChatEngine {
             state.put("last_seen_commander", maxOf(state.optLong("last_seen_commander", 0L), commanderTs))
         }
     }
+
+    /** Reads the latest durable Commander message even before the life worker updates L4. */
+    internal fun latestCommanderMessageTimestamp(root: File): Long =
+        FileManager.readLastLines(root, "memory/L0_raw.jsonl", maxLines = 12000, maxBytes = 8 * 1024 * 1024)
+            .asReversed().asSequence()
+            .mapNotNull { line -> runCatching { JSONObject(line) }.getOrNull() }
+            .firstOrNull { it.optString("type") == "message" && it.optString("who") == "commander" }
+            ?.optLong("ts", 0L) ?: 0L
 
     /**
      * Is this id really a Commander message?

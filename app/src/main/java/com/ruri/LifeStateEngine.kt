@@ -165,6 +165,10 @@ object LifeStateEngine {
             it.optString("type") == "message" && it.optString("who") == "commander"
         } ?: return false
         state.put("last_commander_message_event_id", latest.optString("id"))
+        val commanderTs = latest.optLong("ts", latest.optLong("timestamp", 0L))
+        if (commanderTs > 0L) {
+            state.put("last_seen_commander", maxOf(state.optLong("last_seen_commander", 0L), commanderTs))
+        }
         state.put("waiting_for_reply", false)
         state.put("ignored_count", 0)
         state.put("offended_until", 0L)
@@ -358,7 +362,9 @@ object LifeStateEngine {
             .put("waiting_for_reply", false)
             .put("ignored_count", 0)
             .put("offended_until", 0L)
-            .put("last_seen_commander", 0L)
+            .put("last_seen_commander", latestCommander?.let {
+                it.optLong("ts", it.optLong("timestamp", 0L))
+            } ?: 0L)
             .put("last_processed_event_offset", 0L)
             .put("last_thought", 0L)
             .put("active_goals", JSONArray(goals.toString()))

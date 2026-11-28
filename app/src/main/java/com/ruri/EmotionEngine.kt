@@ -167,18 +167,22 @@ object EmotionEngine {
         val st = readState(root)
         val lastTick = st.optLong("last_tick_at", 0L).takeIf { it > 0L } ?: now
         val dtH = ((now - lastTick) / HOUR).coerceAtLeast(0.0)
+        // Silence pressure only accumulates after the latest real Commander message.
+        // Keep fatigue and time-of-day desire on wall-clock time; conversation relieves
+        // boredom/longing and must also stop their silence timer from running retroactively.
+        val silenceStart = if (lastSeen > 0L) maxOf(lastTick, lastSeen) else lastTick
+        val silenceDtH = ((now - silenceStart) / HOUR).coerceAtLeast(0.0)
         decay(root, now)
         val d = drift(root)
         val delta = JSONObject()
         if (dtH > 0) {
             val fatigue = readValues(root).optDouble("fatigue", 0.0)
             delta.put("fatigue", -minOf(fatigue, (100.0 / d.optDouble("fatigue_recovery_h", 7.0)) * dtH))
-            // Grow unconditionally. Requiring a known last_seen meant a fresh install (or an L4
-            // recovery that zeroes it) never accumulated pressure at all: boredom and longing
-            // are the only producers of the initiative pressure, so she could never speak first.
-            val growth = (100.0 / d.optDouble("silence_growth_h", 9.0)) * dtH
-            delta.put("boredom", growth)
-            delta.put("longing", growth)
+            if (silenceDtH > 0.0) {
+                val growth = (100.0 / d.optDouble("silence_growth_h", 9.0)) * silenceDtH
+                delta.put("boredom", growth)
+                delta.put("longing", growth)
+            }
             val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
             if (hour in 20..23 || hour in 0..4) delta.put("desire", d.optDouble("desire_evening_per_h", 1.5) * dtH)
             if (readValues(root).optDouble("affection", 0.0) > 70.0)
@@ -292,6 +296,10 @@ object EmotionEngine {
     fun initiativeGate(root: File, lastSeen: Long, now: Long, waiting: Boolean, lastInitiative: Long): Boolean {
         if (waiting) return false
         val d = drift(root)
+        // A high leftover pressure must not trigger an unsolicited message immediately after
+        // a conversation. Require a real quiet window independently of the emotional roll.
+        val minimumSilenceMs = d.optLong("initiative_min_silence_min", 15L).coerceAtLeast(0L) * 60_000L
+        if (lastSeen > 0L && (now - lastSeen).coerceAtLeast(0L) < minimumSilenceMs) return false
         val p = pressure(root)
         val threshold = d.optDouble("initiative_threshold", 30.0)
         if (p < threshold) return false
@@ -350,8 +358,7 @@ object EmotionEngine {
         val d = drift(root)
         val p = pressure(root)
         val threshold = d.optDouble("thought_threshold", 18.0)
-        val minGap = d.optLong("thought_min_gap_sec", 90L) * 1000L
-        if (lastThoughtTurn > 0L && now - lastThoughtTurn < minGap) return false
+        if (!DiaryCadence.allows(root, now, lastThoughtTurn)) return false
         val span = (100.0 - threshold).coerceAtLeast(1.0)
         // Telemetry only: how strongly she was moved, not whether she may write.
         val intensity = Math.pow(((p - threshold) / span).coerceIn(0.0, 1.0),

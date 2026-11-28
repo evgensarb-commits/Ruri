@@ -40,8 +40,8 @@ class ReplyMessageIdTest {
     }
 }
 
-class QuietHoursOnSuccessTest {
-    @Test fun commanderActivityDoesNotAdvanceQuietHoursBeforeReply() {
+class CommanderPresenceOnMessageTest {
+    @Test fun commanderActivityAdvancesQuietHoursImmediatelyBeforeReply() {
         val state = JSONObject()
             .put("last_seen_commander", 100L)
             .put("waiting_for_reply", true)
@@ -49,7 +49,7 @@ class QuietHoursOnSuccessTest {
         val event = JSONObject().put("id", "c-1")
             .put("type", "message").put("who", "commander").put("ts", 900L)
         assertTrue(LifeStateEngine.applyCommanderActivity(state, listOf(event)))
-        assertEquals(100L, state.optLong("last_seen_commander"))
+        assertEquals(900L, state.optLong("last_seen_commander"))
         assertFalse(state.optBoolean("waiting_for_reply"))
         assertEquals(0, state.optInt("ignored_count"))
     }
