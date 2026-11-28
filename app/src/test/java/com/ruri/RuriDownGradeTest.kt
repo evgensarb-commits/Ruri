@@ -3857,7 +3857,14 @@ class JournalReadScopeTest {
             fn.contains("if (role == \"user\" && isToolResult) toolResults.add(m)"))
         // The bracket prefix belongs to the shared flag exactly once; a second, separate test is
         // what dropped the chat path's result.
-        val bracketTests = Regex("content\\.startsWith\\(\\\"[ИНСТРУМЕНТ\\\"\\)").findAll(fn).count()
+        // Plain counting: the needle contains a bracket, which a regex would read as a class.
+        val needle = "content.startsWith(\"[ИНСТРУМЕНТ\")"
+        var bracketTests = 0
+        var probe = fn.indexOf(needle)
+        while (probe >= 0) {
+            bracketTests++
+            probe = fn.indexOf(needle, probe + 1)
+        }
         assertEquals("the prefix must be tested only inside the shared flag", 1, bracketTests)
     }
 
